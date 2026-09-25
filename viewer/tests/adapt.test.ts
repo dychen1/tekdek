@@ -6,9 +6,9 @@ import test from "node:test";
 import { deckFlow, deckGraph, displayName, fileTree, pickFlow, frozenFlows, withMembership } from "../src/data/adapt.ts";
 import { digestOf, LoadError, verifyGraph } from "../src/data/load.ts";
 
-import { artifact, DIGEST, graphDocument } from "./fixtures.mjs";
+import { artifact, DIGEST, graphDocument, must } from "./fixtures.ts";
 
-const bytesOf = (value) => new TextEncoder().encode(JSON.stringify(value)).buffer;
+const bytesOf = (value: unknown) => new TextEncoder().encode(JSON.stringify(value)).buffer;
 
 test("the graph check accepts bytes whose digest matches the index", async () => {
   const bytes = bytesOf(graphDocument());
@@ -34,7 +34,7 @@ test("method names keep their type and nested functions keep their parent", () =
 test("the file tree lists files before subdirectories, each in name order", () => {
   const tree = fileTree(["src/z.rs", "src/a/b.rs", "src/b.rs", "README.py"]);
   assert.deepEqual(Object.keys(tree), ["README.py", "src/"]);
-  assert.deepEqual(Object.keys(tree["src/"]), ["b.rs", "z.rs", "a/"]);
+  assert.deepEqual(Object.keys(must(tree["src/"])), ["b.rs", "z.rs", "a/"]);
 });
 
 test("the deck graph keeps distinct calls between two callables and drops self calls", () => {
@@ -43,7 +43,7 @@ test("the deck graph keeps distinct calls between two callables and drops self c
   assert.equal(new Set(keys).size, keys.length);
   assert.ok(graph.calls.every(call => call.source !== call.target));
   assert.ok(graph.files.includes("src/extra.rs"));
-  assert.equal(graph.functions.find(fn => fn.id.endsWith("callable:open")).name, "Store::open");
+  assert.equal(must(graph.functions.find(fn => fn.id.endsWith("callable:open"))).name, "Store::open");
 });
 
 test("a frozen flow gives its clusters in intent order with frozen colors and assigned members", () => {
@@ -58,10 +58,10 @@ test("a frozen flow gives its clusters in intent order with frozen colors and as
 });
 
 test("a step whose function left the graph is marked missing and leaves the members", () => {
-  const gone = artifact.intent.steps[0].nodeKey;
+  const gone = must(artifact.intent.steps[0], "first step").nodeKey;
   const graph = deckGraph(graphDocument({ drop: [gone] }), "tekdek");
   const flow = deckFlow(artifact, graph, "sha256:other");
-  assert.equal(flow.steps[0].missing, true);
+  assert.equal(must(flow.steps[0], "first step").missing, true);
   assert.ok(!flow.clusters.some(cluster => cluster.members.includes(gone)));
   assert.equal(flow.stale, true, "another graph digest makes the flow stale");
 });
@@ -75,7 +75,7 @@ test("membership marks each function with the cluster that holds it", () => {
   const graph = deckGraph(graphDocument(), "tekdek");
   const marked = withMembership(graph, deckFlow(artifact, graph, DIGEST));
   assert.equal(marked.functions.filter(fn => fn.cluster).length, 21);
-  assert.equal(marked.functions.find(fn => fn.id === "src/main.rs::callable:main").cluster, "route-command");
+  assert.equal(must(marked.functions.find(fn => fn.id === "src/main.rs::callable:main")).cluster, "route-command");
   assert.equal(graph.functions.filter(fn => fn.cluster).length, 0, "the source graph stays unmarked");
 });
 
@@ -83,8 +83,8 @@ test("only frozen schema 3 flows show, and the picker opens the requested flow, 
   const flows = frozenFlows([{ name: "legacy", file: "legacy.json" }, { name: "a", file: "a/generations/1-000000000000.json", schemaVersion: 3 },
     { name: "b", file: "b/generations/1-000000000000.json", schemaVersion: 3 }]);
   assert.deepEqual(flows.map(flow => flow.name), ["a", "b"]);
-  assert.equal(pickFlow(flows, "b").name, "b");
-  assert.equal(pickFlow(flows, "missing").name, "a");
+  assert.equal(must(pickFlow(flows, "b")).name, "b");
+  assert.equal(must(pickFlow(flows, "missing")).name, "a");
   assert.equal(pickFlow([], null), null);
   assert.deepEqual(frozenFlows(undefined), []);
 });

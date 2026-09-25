@@ -5,5 +5,5 @@
     "allowJs": true, "checkJs": false, "allowImportingTsExtensions": true,
     "noEmit": true, "skipLibCheck": true
   },
-  "include": ["viewer/src/**/*.ts"]
+  "include": ["viewer/src/**/*.ts", "viewer/tests/**/*.ts", "tools/**/*.ts"]
 }

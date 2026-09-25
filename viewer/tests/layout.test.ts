@@ -5,9 +5,11 @@ import test from "node:test";
 
 import { deckFlow, deckGraph, withMembership } from "../src/data/adapt.ts";
 import { buildPlan, dockOrder, effectiveCluster, nearestStep, rangesOf } from "../src/layout/flow-plan.ts";
+import type { FlowPlan } from "../src/layout/flow-plan.ts";
 import { buildRows, closeFlowPath, deckColumn, deckRect, layoutRows, NAME_CAP, openFlowPath, openPath, restOpenState, toggleOpen } from "../src/layout/tree.ts";
+import type { Row } from "../src/layout/tree.ts";
 
-import { artifact, graphDocument, smallGraph } from "./fixtures.mjs";
+import { artifact, graphDocument, must, smallGraph } from "./fixtures.ts";
 
 function setup() {
   const base = deckGraph(graphDocument(), "tekdek");
@@ -20,7 +22,7 @@ function setup() {
 }
 
 /** The flow layout at flow start, with the path to the flow rows open. */
-function flowLayout({ rows, plan }, layoutCluster = null) {
+function flowLayout({ rows, plan }: { rows: Row[]; plan: FlowPlan }, layoutCluster: string | null = null) {
   const open = restOpenState(rows);
   openFlowPath(open, plan);
   layoutRows(rows, { flow: true, layoutCluster, open, plan });
@@ -45,7 +47,7 @@ test("no row moves between flow steps, whichever cluster is lifted", () => {
   const { rows, plan, flow, clusters } = setup();
   const open = restOpenState(rows);
   openFlowPath(open, plan);
-  const baseline = new Map();
+  const baseline = new Map<string, number>();
   for (const step of flow.steps) {
     const cluster = effectiveCluster(flow, clusters, step.index);
     layoutRows(rows, { flow: true, layoutCluster: cluster, open, plan });
@@ -53,30 +55,31 @@ test("no row moves between flow steps, whichever cluster is lifted", () => {
       if (!baseline.has(row.id)) baseline.set(row.id, row.y);
       else assert.equal(row.y, baseline.get(row.id), `${row.id} moved at step ${step.index}`);
     }
-    for (const id of clusters.get(cluster).members) assert.equal(rows.find(row => row.id === id).mode, "ghost");
+    for (const id of must(clusters.get(must(cluster, "cluster")), "cluster").members) assert.equal(must(rows.find(row => row.id === id), id).mode, "ghost");
   }
 });
 
 test("every function a flow needs keeps a named row, and call neighbors keep plain names", () => {
   const context = setup();
   flowLayout(context);
-  for (const id of context.plan.flowFns) assert.equal(context.rows.find(row => row.id === id).mode, "named", id);
-  for (const id of context.plan.flowNear) assert.equal(context.rows.find(row => row.id === id).mode, "named", id);
+  for (const id of context.plan.flowFns) assert.equal(must(context.rows.find(row => row.id === id), id).mode, "named", id);
+  for (const id of context.plan.flowNear) assert.equal(must(context.rows.find(row => row.id === id), id).mode, "named", id);
 });
 
 test("flow rows stay shown in a file that the user closes during the flow", () => {
   const { rows, rowById, plan } = setup();
   const open = restOpenState(rows);
   openFlowPath(open, plan);
-  toggleOpen(open, rowById.get("src/main.rs::callable:main").parent);
+  const main = must(rowById.get("src/main.rs::callable:main"), "main row");
+  toggleOpen(open, must(main.parent, "main file"));
   layoutRows(rows, { flow: true, layoutCluster: null, open, plan });
-  assert.equal(rowById.get("src/main.rs::callable:main").mode, "named");
+  assert.equal(main.mode, "named");
 });
 
 test("clear closes what the flow opened and keeps what the user opened", () => {
   const { rows, rowById, plan } = setup();
   const open = restOpenState(rows);
-  const userFile = rowById.get("file:src/extra.rs");
+  const userFile = must(rowById.get("file:src/extra.rs"), "extra.rs row");
   openPath(open, userFile);
   openFlowPath(open, plan);
   assert.ok([...open.values()].includes("flow"));
@@ -89,7 +92,7 @@ test("step ranges, stack order, and the nearest visit follow the frozen runs", (
   const { plan, clusters } = setup();
   const command = "src/cli/flow.rs::callable:import";
   assert.equal(rangesOf(plan, "route-command"), "1–6, 21");
-  assert.equal(dockOrder(plan, clusters.get("route-command"), 2)[0], "src/main.rs::callable:main");
+  assert.equal(dockOrder(plan, must(clusters.get("route-command")), 2)[0], "src/main.rs::callable:main");
   assert.equal(nearestStep(plan, command, 6), 5, "the visit in the current pass wins");
   assert.equal(nearestStep(plan, command, 20), 21);
 });
@@ -97,7 +100,7 @@ test("step ranges, stack order, and the nearest visit follow the frozen runs", (
 test("the deck spans its member slots below a title band", () => {
   const context = setup();
   flowLayout(context, "check-output");
-  const members = context.clusters.get("check-output").members.map(id => context.rowById.get(id));
+  const members = must(context.clusters.get("check-output")).members.map(id => must(context.rowById.get(id), id));
   const rect = deckRect(members, deckColumn(context.rows));
   assert.ok(rect.y < Math.min(...members.map(row => row.y)));
   assert.ok(rect.y + rect.h > Math.max(...members.map(row => row.y)));
@@ -113,5 +116,5 @@ test("the deck column sits right of the shown rows only", () => {
 
 test("a long name outside every flow cluster is capped", () => {
   const { rows } = buildRows(deckGraph(smallGraph(["src/a.rs"], [["src/a.rs", "x".repeat(90)]]), "long"));
-  assert.equal(rows.find(row => row.kind === "fn").w, Math.round(20 + NAME_CAP * 0.6 * 10.5));
+  assert.equal(must(rows.find(row => row.kind === "fn")).w, Math.round(20 + NAME_CAP * 0.6 * 10.5));
 });

@@ -7,7 +7,7 @@
 use std::{env, path::PathBuf, process::Command};
 
 fn main() {
-    for input in ["viewer/src", "tools/build-viewer.mjs", "package-lock.json"] {
+    for input in ["viewer/src", "tools/build-viewer.ts", "package-lock.json"] {
         println!("cargo::rerun-if-changed={input}");
     }
     if let Err(message) = bundle() {
@@ -21,14 +21,16 @@ fn bundle() -> Result<(), String> {
     let root =
         PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").ok_or("CARGO_MANIFEST_DIR is not set")?);
     let output = PathBuf::from(env::var_os("OUT_DIR").ok_or("OUT_DIR is not set")?).join("viewer");
-    if !root.join("node_modules").join("esbuild").is_dir() {
+    let modules = root.join("node_modules");
+    if !modules.join("esbuild").is_dir() || !modules.join("tsx").is_dir() {
         return Err(format!(
             "the viewer bundle needs the npm dependencies: run `npm ci` in {}, then build again",
             root.display()
         ));
     }
     let status = Command::new("node")
-        .arg(root.join("tools").join("build-viewer.mjs"))
+        .args(["--import", "tsx"])
+        .arg(root.join("tools").join("build-viewer.ts"))
         .arg(&output)
         .current_dir(&root)
         .status()

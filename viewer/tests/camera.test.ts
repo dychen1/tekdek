@@ -5,7 +5,7 @@ import test from "node:test";
 
 import { clusterZoom, emptyCam, focusCam, project, READ_K, viewOf, zoomAt } from "../src/layout/camera.ts";
 
-const geometry = (deckX) => ({ deckX, deckIn: 26, deckZ: 170, focusDz: 30, boxH: 28, gh: 32 });
+const geometry = (deckX: number) => ({ deckX, deckIn: 26, deckZ: 170, focusDz: 30, boxH: 28, gh: 32 });
 
 test("the projection keeps verticals vertical at any pitch and height", () => {
   const view = viewOf(1440, 900, 262, 320, 760);

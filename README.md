@@ -286,7 +286,7 @@ tekdek index . \
 |   |-- catalog.rs             # index.json for the viewer
 |   |-- query.rs               # Graph search and node neighbors for agents
 |   `-- serve.rs               # Viewer server with the embedded viewer
-|-- tools/build-viewer.mjs     # esbuild script that build.rs runs
+|-- tools/build-viewer.ts      # esbuild script that build.rs runs
 |-- viewer/
 |   |-- index.html             # Lift Deck page
 |   |-- src/                   # Strict TypeScript: data, layout, deck

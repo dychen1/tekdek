@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "node --import tsx --test viewer/tests/*.test.mjs"
+    "test": "node --import tsx --test viewer/tests/*.test.ts"
   },
   "devDependencies": {
     "esbuild": "0.25.10",
