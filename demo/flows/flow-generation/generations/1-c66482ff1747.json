@@ -1,0 +1,1276 @@
+{
+  "kind": "tekdek.flow",
+  "schemaVersion": 3,
+  "flowId": "flow-generation",
+  "status": "frozen",
+  "generation": {
+    "ordinal": 1,
+    "purpose": "initial",
+    "parentDigest": null
+  },
+  "facts": {
+    "projection": "node-fact/1",
+    "binding": {
+      "graphArtifact": "tekdek.json",
+      "graphDigest": "sha256:20fc64edecc82d063406bd407e4bbda8cbb4808c5d16dd003c1381638379c7de"
+    },
+    "nodes": [
+      {
+        "key": "src/catalog.rs::callable:artifact_index",
+        "name": "artifact_index",
+        "kind": "callable",
+        "language": "rust",
+        "path": "src/catalog.rs",
+        "contentHash": "e5e9a82661861d01",
+        "signature": "fn artifact_index(\n    directory: &Path,\n    files: &[String],\n    default_artifact: &str,\n) -> io::Result<ArtifactIndex>",
+        "documentation": "Builds the index document. A flow is stale when its graph digest differs from the file.",
+        "factDigest": "sha256:559b303d0797c8bc68812d12926a3ab4257925aa48871770df97ae31c575004e"
+      },
+      {
+        "key": "src/catalog.rs::callable:refresh_artifact_index",
+        "name": "refresh_artifact_index",
+        "kind": "callable",
+        "language": "rust",
+        "path": "src/catalog.rs",
+        "contentHash": "5d7b115184084bb3",
+        "signature": "pub fn refresh_artifact_index(directory: &Path) -> io::Result<()>",
+        "documentation": "Rebuilds the index and keeps the current default artifact.\n\nA missing or unreadable index falls back to the first artifact file.\n\n# Errors\n\nReturns an error if the store has no artifact or writing fails.",
+        "factDigest": "sha256:e6525d3701bd00a9bb05e723bfa5f36993d33ffa833c77b4c988899a44249d34"
+      },
+      {
+        "key": "src/catalog.rs::callable:write_locked",
+        "name": "write_locked",
+        "kind": "callable",
+        "language": "rust",
+        "path": "src/catalog.rs",
+        "contentHash": "e817b74b51557451",
+        "signature": "fn write_locked(directory: &Path, default_artifact: &str) -> io::Result<()>",
+        "documentation": null,
+        "factDigest": "sha256:6b9055fbd88e32c6e8e1fa8de7dd1b5ffda80851cc4de6ff65c824467a5d2b00"
+      },
+      {
+        "key": "src/cli/flow.rs::callable:execute",
+        "name": "execute",
+        "kind": "callable",
+        "language": "rust",
+        "path": "src/cli/flow.rs",
+        "contentHash": "e37e6d55f1645778",
+        "signature": "fn execute(command: Command, input: &mut impl Read) -> Result<(u8, String), Box<dyn Error>>",
+        "documentation": "Executes one validated command through the flow backend.",
+        "factDigest": "sha256:103fd5fe59121643fb1c950f6be44b8fef752082458c1d9fe3b1dbdd9309494d"
+      },
+      {
+        "key": "src/cli/flow.rs::callable:import",
+        "name": "import",
+        "kind": "callable",
+        "language": "rust",
+        "path": "src/cli/flow.rs",
+        "contentHash": "62eccf6066390653",
+        "signature": "fn import(\n    directory: &Path,\n    json: bool,\n    name: &str,\n    graph: &str,\n    path: &Path,\n    author: AuthorOptions,\n    input: &mut impl Read,\n) -> Result<(u8, String), Box<dyn Error>>",
+        "documentation": "Freezes one agent output. A rejection prints every issue and exits with 2.",
+        "factDigest": "sha256:3b8af6b5655ec13c0e139828572306a4683f7ff5db6c5787059e2ee0a4c14e63"
+      },
+      {
+        "key": "src/cli/flow.rs::callable:run",
+        "name": "run",
+        "kind": "callable",
+        "language": "rust",
+        "path": "src/cli/flow.rs",
+        "contentHash": "17eace19ce499547",
+        "signature": "pub(super) fn run(arguments: Vec<String>, input: &mut impl Read) -> (u8, String)",
+        "documentation": "Returns the exit code and one output document for a flow command.",
+        "factDigest": "sha256:cd26558b705616306ce14bc969dabc57077d497aeae916818112b02499fc3fc5"
+      },
+      {
+        "key": "src/cli/mod.rs::callable:run",
+        "name": "run",
+        "kind": "callable",
+        "language": "rust",
+        "path": "src/cli/mod.rs",
+        "contentHash": "c5e38b4d714fb477",
+        "signature": "pub fn run(arguments: Vec<String>, input: &mut impl Read) -> ExitCode",
+        "documentation": "Runs one command line and returns its exit code.",
+        "factDigest": "sha256:5fe5dc11346ecc2c2b63e1d85a2b57d8d173537d8a67a39676b8b80ef6c904f0"
+      },
+      {
+        "key": "src/flow/assign.rs::callable:assign",
+        "name": "assign",
+        "kind": "callable",
+        "language": "rust",
+        "path": "src/flow/assign.rs",
+        "contentHash": "8e7caa7b2b63614b",
+        "signature": "pub fn assign(intent: &IntentLayer) -> Result<AssignmentLayer, AssignError>",
+        "documentation": "Resolves step decisions and function membership for one intent layer.\n\n# Errors\nReturns an error for a step with an unknown cluster, or for a node whose steps\ncarry different clusters.",
+        "factDigest": "sha256:5846a77d1484c448865eb836f14bf0327751818d9d7c6a71a6e16226fb2d1f86"
+      },
+      {
+        "key": "src/flow/derive/digests.rs::callable:digests",
+        "name": "digests",
+        "kind": "callable",
+        "language": "rust",
+        "path": "src/flow/derive/digests.rs",
+        "contentHash": "f3cb777bf1e14185",
+        "signature": "pub fn digests(artifact: &FlowArtifact) -> Result<Digests, CanonicalError>",
+        "documentation": "Computes every digest of one artifact from its layers.\n\n# Errors\nReturns an error when a layer cannot have a canonical form.",
+        "factDigest": "sha256:df777989a17c64b3c1626379b315520c1f9e09826607b8bdcccd40ce5f7adfe3"
+      },
+      {
+        "key": "src/flow/derive/facts.rs::callable:fact_layer",
+        "name": "fact_layer",
+        "kind": "callable",
+        "language": "rust",
+        "path": "src/flow/derive/facts.rs",
+        "contentHash": "148d37d64486f93b",
+        "signature": "pub fn fact_layer(\n    graph: &ArtifactGraph,\n    binding: FactBinding,\n    keys: &BTreeSet<&str>,\n) -> Result<FactLayer, DeriveError>",
+        "documentation": "Projects the graph nodes with the given keys and the edges between them.\n\nNodes sort by key. Edges sort by source, target, and relation name, without duplicates.\n\n# Errors\nReturns an error for a graph value that the fact schema cannot hold.",
+        "factDigest": "sha256:002fc89568f6c3edc0b2d79752130c15f2c070b0b262aefbf30a1b4606a72a98"
+      },
+      {
+        "key": "src/flow/derive/view.rs::callable:view",
+        "name": "view",
+        "kind": "callable",
+        "language": "rust",
+        "path": "src/flow/derive/view.rs",
+        "contentHash": "e4f517224ad84b7d",
+        "signature": "pub fn view(\n    facts: &FactLayer,\n    intent: &IntentLayer,\n    assignment: &AssignmentLayer,\n    parent: Option<&ViewLayer>,\n) -> ViewLayer",
+        "documentation": "Derives the view layer.\n\nA retained cluster keeps its parent color. A new cluster takes the lowest\npalette slot that no retained cluster uses and that no cluster removed in this\ngeneration used. When those slots run out, it takes the lowest slot that no\nretained cluster uses.",
+        "factDigest": "sha256:006e1726352ec8274399191da3fe82808c3e10cb0f409ea6adb13d2e726038bc"
+      },
+      {
+        "key": "src/flow/import.rs::callable:build_intent",
+        "name": "build_intent",
+        "kind": "callable",
+        "language": "rust",
+        "path": "src/flow/import.rs",
+        "contentHash": "49aea62bdf9774c2",
+        "signature": "fn build_intent(\n    flow_id: &FlowId,\n    checked: CheckedFlow,\n    graph: &ArtifactGraph,\n    binding: FactBinding,\n    prior_ids: &[String],\n) -> Result<(FactLayer, IntentLayer), FlowError>",
+        "documentation": "Builds the fact layer and the intent layer, with step IDs and attestations.",
+        "factDigest": "sha256:7303f1f681b458f17b7a94bf897c7a68033601265b5ff8832fbcbcf10d96bb1f"
+      },
+      {
+        "key": "src/flow/import.rs::callable:freeze",
+        "name": "freeze",
+        "kind": "callable",
+        "language": "rust",
+        "path": "src/flow/import.rs",
+        "contentHash": "135a1587658f1ca0",
+        "signature": "fn freeze(\n    flow_id: FlowId,\n    purpose: GenerationPurpose,\n    parent: Option<&FlowArtifact>,\n    facts: FactLayer,\n    intent: IntentLayer,\n    author: Author,\n) -> Result<FlowArtifact, FlowError>",
+        "documentation": "Derives the code-owned layers and digests, then verifies the new generation.",
+        "factDigest": "sha256:b5faf1723a264501e5fd472cd1643befef24065ded61d68a407e7f30edfcb822"
+      },
+      {
+        "key": "src/flow/import.rs::callable:import_flow",
+        "name": "import_flow",
+        "kind": "callable",
+        "language": "rust",
+        "path": "src/flow/import.rs",
+        "contentHash": "f2a73919ae33f22a",
+        "signature": "pub fn import_flow(\n    directory: &Path,\n    request: ImportRequest<'_>,\n) -> Result<ImportOutcome, FlowError>",
+        "documentation": "Freezes one agent output as the next generation of one flow.\n\n# Errors\nReturns `Rejected` with every issue when the output is invalid; nothing is\nwritten then. Returns other errors for store or graph failures.",
+        "factDigest": "sha256:c582bded285375a34b5857f67b826ad1a4f7e26a886b3523a5959b70489e5a5c"
+      },
+      {
+        "key": "src/flow/import.rs::callable:parse_output",
+        "name": "parse_output",
+        "kind": "callable",
+        "language": "rust",
+        "path": "src/flow/import.rs",
+        "contentHash": "87a8e82bac02b3e9",
+        "signature": "fn parse_output(input: &[u8]) -> Result<Result<AgentFlow, ImportOutcome>, FlowError>",
+        "documentation": "Parses the agent output. A `no_flow` answer comes back as a finished outcome.",
+        "factDigest": "sha256:287eaf20a62079b3fc837ba5aefb9f3baf6a6b048fc27d70f25ce69ba536c78f"
+      },
+      {
+        "key": "src/flow/lineage.rs::callable:read_current",
+        "name": "read_current",
+        "kind": "callable",
+        "language": "rust",
+        "path": "src/flow/lineage.rs",
+        "contentHash": "8be78b94906ae6d6",
+        "signature": "pub fn read_current(\n    directory: &Path,\n    flow_id: &FlowId,\n) -> Result<Option<StoredGeneration>, LineageError>",
+        "documentation": "Reads the current generation of one flow, or `None` when the flow has no lineage.\n\n# Errors\nReturns an error for a link, an unreadable file, an invalid document, or a\npointer that names another generation.",
+        "factDigest": "sha256:0e71aa582a06afcfe134b067ecb70bb240d469e118bc5bbb370c52e633291dcc"
+      },
+      {
+        "key": "src/flow/lineage.rs::callable:write_current",
+        "name": "write_current",
+        "kind": "callable",
+        "language": "rust",
+        "path": "src/flow/lineage.rs",
+        "contentHash": "074c1532e867b555",
+        "signature": "pub fn write_current(directory: &Path, artifact: &FlowArtifact) -> Result<String, LineageError>",
+        "documentation": "Writes one generation and moves the current pointer to it.\n\nThe generation file is written first, so a reader never sees a pointer to a\nmissing file. An identical existing generation file is kept.\n\n# Errors\nReturns an error for a link, a file failure, or a different file at the same path.",
+        "factDigest": "sha256:db8fe28f07f9271dee031c70b1e1a7cf10eb51d756f79d1fca97e2e65343a020"
+      },
+      {
+        "key": "src/flow/validate/agent.rs::callable:check_agent_flow",
+        "name": "check_agent_flow",
+        "kind": "callable",
+        "language": "rust",
+        "path": "src/flow/validate/agent.rs",
+        "contentHash": "6d2e89ab861065e4",
+        "signature": "pub fn check_agent_flow(\n    flow: &AgentFlow,\n    context: &PriorContext<'_>,\n    graph_keys: &BTreeSet<&str>,\n) -> (Option<CheckedFlow>, Vec<FlowIssue>)",
+        "documentation": "Canonicalizes and checks one agent flow against the graph and the prior version.\n\nReturns the checked flow only when no error issue exists. Warnings (for\nexample `text_trimmed`) come back in both cases.",
+        "factDigest": "sha256:b10354b1ad2263b9d777898dd646058a17d5faa7525d738618749ab4042ec64a"
+      },
+      {
+        "key": "src/main.rs::callable:main",
+        "name": "main",
+        "kind": "callable",
+        "language": "rust",
+        "path": "src/main.rs",
+        "contentHash": "fd3d09e352af48a9",
+        "signature": "fn main() -> ExitCode",
+        "documentation": null,
+        "factDigest": "sha256:c6ccececf2da352f29f65a4bafc8e5d29cf864b83f55f4ddb376a04088717e78"
+      },
+      {
+        "key": "src/store/graph.rs::callable:read_graph",
+        "name": "read_graph",
+        "kind": "callable",
+        "language": "rust",
+        "path": "src/store/graph.rs",
+        "contentHash": "e669ff4d5379623b",
+        "signature": "pub fn read_graph(directory: &Path, file: &str) -> io::Result<(ArtifactGraph, String)>",
+        "documentation": "Reads one graph artifact of the store and returns its graph and byte digest.\n\n# Errors\nReturns an error for an invalid name, a link, an unreadable file, or an invalid artifact.",
+        "factDigest": "sha256:a1ae1f48a47f2ff97cc4a0f91df78b3ed47024d7280b84aec3dae31acef1f4ca"
+      },
+      {
+        "key": "src/store/mod.rs::callable:write_bytes",
+        "name": "write_bytes",
+        "kind": "callable",
+        "language": "rust",
+        "path": "src/store/mod.rs",
+        "contentHash": "799f52a764bb9d69",
+        "signature": "pub(crate) fn write_bytes(path: &Path, document: &[u8]) -> io::Result<()>",
+        "documentation": "Replaces one file atomically through a synced temporary file in the same directory.",
+        "factDigest": "sha256:aeaa5ef129128f52d58262e87f9d4c64e7bf6b6267cd8ed318639c54824b18e4"
+      }
+    ],
+    "edges": [
+      {
+        "source": "src/catalog.rs::callable:refresh_artifact_index",
+        "target": "src/catalog.rs::callable:write_locked",
+        "kind": "calls"
+      },
+      {
+        "source": "src/catalog.rs::callable:write_locked",
+        "target": "src/catalog.rs::callable:artifact_index",
+        "kind": "calls"
+      },
+      {
+        "source": "src/cli/flow.rs::callable:execute",
+        "target": "src/cli/flow.rs::callable:import",
+        "kind": "calls"
+      },
+      {
+        "source": "src/cli/flow.rs::callable:import",
+        "target": "src/catalog.rs::callable:refresh_artifact_index",
+        "kind": "calls"
+      },
+      {
+        "source": "src/cli/flow.rs::callable:import",
+        "target": "src/flow/import.rs::callable:import_flow",
+        "kind": "calls"
+      },
+      {
+        "source": "src/cli/flow.rs::callable:run",
+        "target": "src/cli/flow.rs::callable:execute",
+        "kind": "calls"
+      },
+      {
+        "source": "src/cli/mod.rs::callable:run",
+        "target": "src/cli/flow.rs::callable:run",
+        "kind": "calls"
+      },
+      {
+        "source": "src/flow/import.rs::callable:build_intent",
+        "target": "src/flow/derive/facts.rs::callable:fact_layer",
+        "kind": "calls"
+      },
+      {
+        "source": "src/flow/import.rs::callable:freeze",
+        "target": "src/flow/assign.rs::callable:assign",
+        "kind": "calls"
+      },
+      {
+        "source": "src/flow/import.rs::callable:freeze",
+        "target": "src/flow/derive/digests.rs::callable:digests",
+        "kind": "calls"
+      },
+      {
+        "source": "src/flow/import.rs::callable:freeze",
+        "target": "src/flow/derive/view.rs::callable:view",
+        "kind": "calls"
+      },
+      {
+        "source": "src/flow/import.rs::callable:import_flow",
+        "target": "src/flow/import.rs::callable:build_intent",
+        "kind": "calls"
+      },
+      {
+        "source": "src/flow/import.rs::callable:import_flow",
+        "target": "src/flow/import.rs::callable:freeze",
+        "kind": "calls"
+      },
+      {
+        "source": "src/flow/import.rs::callable:import_flow",
+        "target": "src/flow/import.rs::callable:parse_output",
+        "kind": "calls"
+      },
+      {
+        "source": "src/flow/import.rs::callable:import_flow",
+        "target": "src/flow/lineage.rs::callable:read_current",
+        "kind": "calls"
+      },
+      {
+        "source": "src/flow/import.rs::callable:import_flow",
+        "target": "src/flow/lineage.rs::callable:write_current",
+        "kind": "calls"
+      },
+      {
+        "source": "src/flow/import.rs::callable:import_flow",
+        "target": "src/flow/validate/agent.rs::callable:check_agent_flow",
+        "kind": "calls"
+      },
+      {
+        "source": "src/flow/import.rs::callable:import_flow",
+        "target": "src/store/graph.rs::callable:read_graph",
+        "kind": "calls"
+      },
+      {
+        "source": "src/flow/lineage.rs::callable:write_current",
+        "target": "src/store/mod.rs::callable:write_bytes",
+        "kind": "calls"
+      },
+      {
+        "source": "src/main.rs::callable:main",
+        "target": "src/cli/mod.rs::callable:run",
+        "kind": "calls"
+      }
+    ]
+  },
+  "intent": {
+    "behavior": "How Tekdek turns a coding agent's flow output into a frozen, clustered flow: the `tekdek flow import` command parses the output and checks it against the graph, assigns clusters and derives the facts, view, and digests, writes the generation and the current pointer, and refreshes the catalog that the viewer reads.",
+    "boundaries": "Starts at the binary entry for `tekdek flow import` with a new flow name and follows the success path of an initial generation to the catalog write. The returns to import_flow between its calls are not shown. Annotations name the no_flow answer, rejected outputs, the unchanged (`kept`) result, and the revision rules; the diff overlay runs only for a revision and is left out.",
+    "evidenceBasis": "source_walkthrough",
+    "revisionSummary": null,
+    "clusters": [
+      {
+        "key": "route-command",
+        "label": "Route the import command",
+        "description": "Turns the command line into one import request and hands it to the freeze orchestrator. It also starts the catalog refresh after a new generation.",
+        "phase": "entry",
+        "phaseNote": null
+      },
+      {
+        "key": "check-output",
+        "label": "Check the output against the graph",
+        "description": "Parses the agent output, binds it to the exact graph bytes and the flow lineage, and canonicalizes and checks every text and reference. Any error rejects the whole output before a write.",
+        "phase": "input_validation",
+        "phaseNote": null
+      },
+      {
+        "key": "derive-layers",
+        "label": "Assign clusters and derive layers",
+        "description": "Builds the code-owned parts of the generation: the fact projection, step IDs, cluster membership, the view layer, and the digests. A self-check recomputes them before any write.",
+        "phase": "transform",
+        "phaseNote": null
+      },
+      {
+        "key": "write-generation",
+        "label": "Write the generation and pointer",
+        "description": "Stores the frozen generation atomically and then moves the current pointer to it, so a reader never sees a pointer to a missing file.",
+        "phase": "persist",
+        "phaseNote": null
+      },
+      {
+        "key": "refresh-catalog",
+        "label": "Refresh the viewer catalog",
+        "description": "Rebuilds index.json so that the viewer lists the new flow under the graph that it binds, with a stale flag that compares graph digests.",
+        "phase": "persist",
+        "phaseNote": null
+      }
+    ],
+    "steps": [
+      {
+        "id": "st-67244b2b65163f51",
+        "nodeKey": "src/main.rs::callable:main",
+        "clusterKey": "route-command",
+        "title": "Start the tekdek binary",
+        "annotation": "The binary collects the arguments after the program name, locks standard input, and passes both to cli::run. The returned code becomes the process exit code. In this demo the command is `tekdek flow import flow-generation --graph tekdek.json --input <path> --author agent --author-name claude-code --model-id claude-opus-5-5 --store demo`.",
+        "attestedFactDigest": "sha256:c6ccececf2da352f29f65a4bafc8e5d29cf864b83f55f4ddb376a04088717e78"
+      },
+      {
+        "id": "st-ec5f59a62a7bb9d6",
+        "nodeKey": "src/cli/mod.rs::callable:run",
+        "clusterKey": "route-command",
+        "title": "Route the flow command",
+        "annotation": "The first argument is `flow`, so run drops it, calls the flow command runner, and prints the one output document that comes back. `help` prints the usage. Every other command line indexes a codebase instead.",
+        "attestedFactDigest": "sha256:5fe5dc11346ecc2c2b63e1d85a2b57d8d173537d8a67a39676b8b80ef6c904f0"
+      },
+      {
+        "id": "st-0491787073516bda",
+        "nodeKey": "src/cli/flow.rs::callable:run",
+        "clusterKey": "route-command",
+        "title": "Parse the import arguments",
+        "annotation": "run detects `--json` before it parses, so an invalid command can also answer in JSON. Command::parse builds Action::Import from the name, `--graph`, `--input`, the author options, and `--store` (default `artifacts`). A missing or unknown option fails with exit code 2 and the usage.",
+        "attestedFactDigest": "sha256:cd26558b705616306ce14bc969dabc57077d497aeae916818112b02499fc3fc5"
+      },
+      {
+        "id": "st-eccef8c5911dba42",
+        "nodeKey": "src/cli/flow.rs::callable:execute",
+        "clusterKey": "route-command",
+        "title": "Dispatch to the import command",
+        "annotation": "execute matches the parsed action. Action::Import calls import with the store directory, the JSON flag, the flow name, the graph file name, the input path, the author options, and standard input.",
+        "attestedFactDigest": "sha256:103fd5fe59121643fb1c950f6be44b8fef752082458c1d9fe3b1dbdd9309494d"
+      },
+      {
+        "id": "st-0e1815faf8d67a4a",
+        "nodeKey": "src/cli/flow.rs::callable:import",
+        "clusterKey": "route-command",
+        "title": "Resolve the author and read input",
+        "annotation": "AuthorOptions::resolve turns the author flags into Author::Agent with the name `claude-code` and the model ID `claude-opus-5-5`; without author flags the author is `system`. import reads the output bytes from the `--input` file, or from standard input for `-`, and passes an ImportRequest to import_flow. The author comes from the invocation, never from the agent output.",
+        "attestedFactDigest": "sha256:3b8af6b5655ec13c0e139828572306a4683f7ff5db6c5787059e2ee0a4c14e63"
+      },
+      {
+        "id": "st-ade7a98f9c80e44a",
+        "nodeKey": "src/flow/import.rs::callable:import_flow",
+        "clusterKey": "route-command",
+        "title": "Orchestrate the freeze",
+        "annotation": "import_flow checks the flow name (a lowercase slug), the graph file name, and the author before it reads the store. Then it calls, in order: parse_output, lock_store, read_graph, read_current, prior_rules, check_agent_flow, build_intent, freeze, and write_current. The next steps follow these calls as siblings; the flow does not show each return to import_flow. The store lock stays held until import_flow returns.",
+        "attestedFactDigest": "sha256:c582bded285375a34b5857f67b826ad1a4f7e26a886b3523a5959b70489e5a5c"
+      },
+      {
+        "id": "st-28817a4b09cb954b",
+        "nodeKey": "src/flow/import.rs::callable:parse_output",
+        "clusterKey": "check-output",
+        "title": "Parse the agent output document",
+        "annotation": "serde_json reads the bytes as AgentFlowOutput, tagged by `outcome`, with unknown fields denied. A syntax or shape error becomes one invalid_output issue, and `contractVersion` must be 1. A `no_flow` answer returns a finished outcome that exits with code 1 and writes nothing. A `flow` answer goes back to import_flow, which then takes the exclusive `<store>/.store.lock` lock with lock_store.",
+        "attestedFactDigest": "sha256:287eaf20a62079b3fc837ba5aefb9f3baf6a6b048fc27d70f25ce69ba536c78f"
+      },
+      {
+        "id": "st-0a6049d4ef35a976",
+        "nodeKey": "src/store/graph.rs::callable:read_graph",
+        "clusterKey": "check-output",
+        "title": "Read and digest the graph",
+        "annotation": "read_graph rejects an invalid name and symbolic links, reads `<store>/tekdek.json`, requires graph schema 1, and validates node identities and edge endpoints. It returns the graph and the `sha256:` digest of the exact file bytes. import_flow binds the flow to this file name and digest; the binding later decides whether the flow is fresh or stale.",
+        "attestedFactDigest": "sha256:a1ae1f48a47f2ff97cc4a0f91df78b3ed47024d7280b84aec3dae31acef1f4ca"
+      },
+      {
+        "id": "st-f341eb13f9405113",
+        "nodeKey": "src/flow/lineage.rs::callable:read_current",
+        "clusterKey": "check-output",
+        "title": "Look for a current generation",
+        "annotation": "read_current reads `flows/flow-generation/current.json`. The pointer is missing for a new name, so it returns None, and prior_rules then gives the `initial` purpose with no prior step IDs. With a parent the purpose is `revision`, and a changed graph file or graph digest is a stale_graph error.",
+        "attestedFactDigest": "sha256:0e71aa582a06afcfe134b067ecb70bb240d469e118bc5bbb370c52e633291dcc"
+      },
+      {
+        "id": "st-4ad9729a94dd06b2",
+        "nodeKey": "src/flow/validate/agent.rs::callable:check_agent_flow",
+        "clusterKey": "check-output",
+        "title": "Canonicalize and check every reference",
+        "annotation": "check_agent_flow collects every issue. agent_text normalizes each text to Unicode NFC without outer whitespace (a change is a text_trimmed warning) and checks its length. check_clusters requires 1 to 8 unique clusters that steps use. check_step requires each nodeKey in the graph (else unknown_node) and each clusterKey in this output. label_conflicts rejects a function whose steps carry different clusters. With any error, import_flow returns Rejected: the CLI prints every issue, exits with code 2, and writes nothing.",
+        "attestedFactDigest": "sha256:b10354b1ad2263b9d777898dd646058a17d5faa7525d738618749ab4042ec64a"
+      },
+      {
+        "id": "st-63eb46c534a6a970",
+        "nodeKey": "src/flow/import.rs::callable:build_intent",
+        "clusterKey": "derive-layers",
+        "title": "Collect the referenced functions",
+        "annotation": "The checked flow has no error, so import_flow calls build_intent with the checked flow, the graph, the binding, and the prior step IDs. build_intent collects the distinct node keys of the steps and asks fact_layer for their facts.",
+        "attestedFactDigest": "sha256:7303f1f681b458f17b7a94bf897c7a68033601265b5ff8832fbcbcf10d96bb1f"
+      },
+      {
+        "id": "st-50044604b22c455f",
+        "nodeKey": "src/flow/derive/facts.rs::callable:fact_layer",
+        "clusterKey": "derive-layers",
+        "title": "Project the fact layer",
+        "annotation": "fact_layer projects only the referenced graph nodes: key, name, kind, language, path, content hash, signature, and documentation. It hashes each `node-fact/1` projection into a fact digest and keeps only the edges between referenced nodes, sorted and without duplicates. The flow carries these facts, not the whole graph.",
+        "attestedFactDigest": "sha256:002fc89568f6c3edc0b2d79752130c15f2c070b0b262aefbf30a1b4606a72a98"
+      },
+      {
+        "id": "st-ca583f4d55db391d",
+        "nodeKey": "src/flow/import.rs::callable:build_intent",
+        "clusterKey": "derive-layers",
+        "title": "Derive step IDs and attestations",
+        "annotation": "Control returns to build_intent with the fact layer; this is the same call, not repeated work. step_id gives each new step `st-` plus 16 hex characters of a canonical digest of the flow ID, the node key, and the smallest unused counter, so a revisited function gets a new ID. Each step records the fact digest of its node. Back in import_flow, a parent with equal intent and facts digests would return `kept` without a write; a new name has no parent.",
+        "attestedFactDigest": "sha256:7303f1f681b458f17b7a94bf897c7a68033601265b5ff8832fbcbcf10d96bb1f"
+      },
+      {
+        "id": "st-2736e1052e93bd3c",
+        "nodeKey": "src/flow/import.rs::callable:freeze",
+        "clusterKey": "derive-layers",
+        "title": "Start the frozen artifact",
+        "annotation": "freeze derives the code-owned layers in a fixed order: assignment, view, diff (for a revision only), generation, digests, and then a self-check. It starts with assign.",
+        "attestedFactDigest": "sha256:b5faf1723a264501e5fd472cd1643befef24065ded61d68a407e7f30edfcb822"
+      },
+      {
+        "id": "st-e786d2a8c6770e01",
+        "nodeKey": "src/flow/assign.rs::callable:assign",
+        "clusterKey": "derive-layers",
+        "title": "Resolve clusters and membership",
+        "annotation": "assign runs the `step-labels` 1.0.0 rules assigner with the agent_labels policy and the unanimous membership rule. Each step label becomes a step decision, and each function becomes one member of its cluster with its visit count. input_digest hashes exactly the labels that the assigner reads.",
+        "attestedFactDigest": "sha256:5846a77d1484c448865eb836f14bf0327751818d9d7c6a71a6e16226fb2d1f86"
+      },
+      {
+        "id": "st-6e1d620e1733f3be",
+        "nodeKey": "src/flow/derive/view.rs::callable:view",
+        "clusterKey": "derive-layers",
+        "title": "Derive colors, runs, and transitions",
+        "annotation": "view classifies each step against the previous step with the `calls` edges of the fact layer, in this check order: flow_start, same_function, calls, returns_to_caller, sibling_call, calls_indirectly, returns_to_ancestor, no_static_edge. A transition is a static relation, not a runtime observation. cluster_colors gives each cluster a `flow-bright/1` palette color, and visit_runs records the step ranges of each cluster.",
+        "attestedFactDigest": "sha256:006e1726352ec8274399191da3fe82808c3e10cb0f409ea6adb13d2e726038bc"
+      },
+      {
+        "id": "st-c055ed8035d6cd94",
+        "nodeKey": "src/flow/derive/digests.rs::callable:digests",
+        "clusterKey": "derive-layers",
+        "title": "Hash every layer",
+        "annotation": "Before this call, freeze sets ordinal 1, the purpose, and the parent digest, and records provenance: the UTC freeze time, the CLI version, and the author. digests hashes the RFC 8785 canonical JSON of the facts (without the graph binding), intent, assignment, and view layers. The generation digest excludes the digests and the provenance, so the same output on the same graph always gives the same digests.",
+        "attestedFactDigest": "sha256:df777989a17c64b3c1626379b315520c1f9e09826607b8bdcccd40ce5f7adfe3"
+      },
+      {
+        "id": "st-b6954d5506606971",
+        "nodeKey": "src/flow/import.rs::callable:freeze",
+        "clusterKey": "derive-layers",
+        "title": "Self-check the new generation",
+        "annotation": "Control returns to freeze with the digests. verify_artifact recomputes every derived layer and digest, the same check that `flow verify` runs later. Any error fails the import before a write. freeze returns the artifact to import_flow, which calls write_current.",
+        "attestedFactDigest": "sha256:b5faf1723a264501e5fd472cd1643befef24065ded61d68a407e7f30edfcb822"
+      },
+      {
+        "id": "st-ce6e31d1c948e042",
+        "nodeKey": "src/flow/lineage.rs::callable:write_current",
+        "clusterKey": "write-generation",
+        "title": "Write generation, then move pointer",
+        "annotation": "write_current names the file `flow-generation/generations/<ordinal>-<first 12 hex of the generation digest>.json` under `flows/`. It writes the generation first: an identical existing file is kept, and a different one is a conflict. Then it writes `current.json` with the generation digest and the ordinal, so a reader never sees a pointer to a missing file.",
+        "attestedFactDigest": "sha256:db8fe28f07f9271dee031c70b1e1a7cf10eb51d756f79d1fca97e2e65343a020"
+      },
+      {
+        "id": "st-b399d0a420d1faa6",
+        "nodeKey": "src/store/mod.rs::callable:write_bytes",
+        "clusterKey": "write-generation",
+        "title": "Replace each file atomically",
+        "annotation": "write_bytes rejects symbolic links, writes a new temporary file in the same folder, syncs it, and renames it over the target. A failure removes the temporary file. write_current uses it for the generation file and again for the pointer.",
+        "attestedFactDigest": "sha256:aeaa5ef129128f52d58262e87f9d4c64e7bf6b6267cd8ed318639c54824b18e4"
+      },
+      {
+        "id": "st-91dce300efff24ac",
+        "nodeKey": "src/cli/flow.rs::callable:import",
+        "clusterKey": "route-command",
+        "title": "Trigger the catalog refresh",
+        "annotation": "import_flow returns Frozen with `unchanged: false` and releases the store lock, so control returns to the import command. A changed generation calls catalog::refresh_artifact_index; a `kept` result skips it. After the refresh, import prints `flow flow-generation: froze generation 1 (initial)` with the digest and the file, and exits with code 0.",
+        "attestedFactDigest": "sha256:3b8af6b5655ec13c0e139828572306a4683f7ff5db6c5787059e2ee0a4c14e63"
+      },
+      {
+        "id": "st-9afa6c7f6ef4c6cb",
+        "nodeKey": "src/catalog.rs::callable:refresh_artifact_index",
+        "clusterKey": "refresh-catalog",
+        "title": "Keep the default catalog graph",
+        "annotation": "refresh_artifact_index takes the store lock again, in a scope separate from the import. It lists every `*.json` graph file of the store except `index.json`, keeps the existing `defaultArtifact` when that file still exists, and otherwise uses the first graph file.",
+        "attestedFactDigest": "sha256:e6525d3701bd00a9bb05e723bfa5f36993d33ffa833c77b4c988899a44249d34"
+      },
+      {
+        "id": "st-e63dfec7f4e85cd0",
+        "nodeKey": "src/catalog.rs::callable:write_locked",
+        "clusterKey": "refresh-catalog",
+        "title": "Scan graphs and flow pointers",
+        "annotation": "write_locked records the graph file list and the bytes of every `current.json` pointer, then builds the index document with artifact_index.",
+        "attestedFactDigest": "sha256:6b9055fbd88e32c6e8e1fa8de7dd1b5ffda80851cc4de6ff65c824467a5d2b00"
+      },
+      {
+        "id": "st-48e9fdc003234ec2",
+        "nodeKey": "src/catalog.rs::callable:artifact_index",
+        "clusterKey": "refresh-catalog",
+        "title": "List the flow under its graph",
+        "annotation": "artifact_index reads the current generation of each lineage and groups the listings by bound graph file. For each graph it digests the file bytes and marks a flow stale when its bound digest differs. The flow-generation listing appears under `tekdek.json` with its file, behavior, step count, and cluster count.",
+        "attestedFactDigest": "sha256:559b303d0797c8bc68812d12926a3ab4257925aa48871770df97ae31c575004e"
+      },
+      {
+        "id": "st-baa0a97dfcc5b974",
+        "nodeKey": "src/catalog.rs::callable:write_locked",
+        "clusterKey": "refresh-catalog",
+        "title": "Write the viewer catalog",
+        "annotation": "Control returns to write_locked with the index document (schema version 3). It requires that the default graph is listed, writes `index.json` atomically as compact JSON, and scans again; if a graph file or a flow pointer changed meanwhile, it writes the index again. The viewer reads this `index.json` to offer the codebase and its flows.",
+        "attestedFactDigest": "sha256:6b9055fbd88e32c6e8e1fa8de7dd1b5ffda80851cc4de6ff65c824467a5d2b00"
+      }
+    ]
+  },
+  "assignment": {
+    "policy": {
+      "labelPolicy": "agent_labels",
+      "membershipRule": "unanimous"
+    },
+    "assigner": {
+      "kind": "rules",
+      "assignerId": "step-labels",
+      "version": "1.0.0",
+      "inputScope": "labels_only"
+    },
+    "inputDigest": "sha256:468a0a332ed414a8da60af5814bad7dc5a37baed224c0312ef304ca7029d77a8",
+    "steps": [
+      {
+        "outcome": "assigned",
+        "stepId": "st-67244b2b65163f51",
+        "clusterKey": "route-command",
+        "basis": {
+          "kind": "agent_label"
+        }
+      },
+      {
+        "outcome": "assigned",
+        "stepId": "st-ec5f59a62a7bb9d6",
+        "clusterKey": "route-command",
+        "basis": {
+          "kind": "agent_label"
+        }
+      },
+      {
+        "outcome": "assigned",
+        "stepId": "st-0491787073516bda",
+        "clusterKey": "route-command",
+        "basis": {
+          "kind": "agent_label"
+        }
+      },
+      {
+        "outcome": "assigned",
+        "stepId": "st-eccef8c5911dba42",
+        "clusterKey": "route-command",
+        "basis": {
+          "kind": "agent_label"
+        }
+      },
+      {
+        "outcome": "assigned",
+        "stepId": "st-0e1815faf8d67a4a",
+        "clusterKey": "route-command",
+        "basis": {
+          "kind": "agent_label"
+        }
+      },
+      {
+        "outcome": "assigned",
+        "stepId": "st-ade7a98f9c80e44a",
+        "clusterKey": "route-command",
+        "basis": {
+          "kind": "agent_label"
+        }
+      },
+      {
+        "outcome": "assigned",
+        "stepId": "st-28817a4b09cb954b",
+        "clusterKey": "check-output",
+        "basis": {
+          "kind": "agent_label"
+        }
+      },
+      {
+        "outcome": "assigned",
+        "stepId": "st-0a6049d4ef35a976",
+        "clusterKey": "check-output",
+        "basis": {
+          "kind": "agent_label"
+        }
+      },
+      {
+        "outcome": "assigned",
+        "stepId": "st-f341eb13f9405113",
+        "clusterKey": "check-output",
+        "basis": {
+          "kind": "agent_label"
+        }
+      },
+      {
+        "outcome": "assigned",
+        "stepId": "st-4ad9729a94dd06b2",
+        "clusterKey": "check-output",
+        "basis": {
+          "kind": "agent_label"
+        }
+      },
+      {
+        "outcome": "assigned",
+        "stepId": "st-63eb46c534a6a970",
+        "clusterKey": "derive-layers",
+        "basis": {
+          "kind": "agent_label"
+        }
+      },
+      {
+        "outcome": "assigned",
+        "stepId": "st-50044604b22c455f",
+        "clusterKey": "derive-layers",
+        "basis": {
+          "kind": "agent_label"
+        }
+      },
+      {
+        "outcome": "assigned",
+        "stepId": "st-ca583f4d55db391d",
+        "clusterKey": "derive-layers",
+        "basis": {
+          "kind": "agent_label"
+        }
+      },
+      {
+        "outcome": "assigned",
+        "stepId": "st-2736e1052e93bd3c",
+        "clusterKey": "derive-layers",
+        "basis": {
+          "kind": "agent_label"
+        }
+      },
+      {
+        "outcome": "assigned",
+        "stepId": "st-e786d2a8c6770e01",
+        "clusterKey": "derive-layers",
+        "basis": {
+          "kind": "agent_label"
+        }
+      },
+      {
+        "outcome": "assigned",
+        "stepId": "st-6e1d620e1733f3be",
+        "clusterKey": "derive-layers",
+        "basis": {
+          "kind": "agent_label"
+        }
+      },
+      {
+        "outcome": "assigned",
+        "stepId": "st-c055ed8035d6cd94",
+        "clusterKey": "derive-layers",
+        "basis": {
+          "kind": "agent_label"
+        }
+      },
+      {
+        "outcome": "assigned",
+        "stepId": "st-b6954d5506606971",
+        "clusterKey": "derive-layers",
+        "basis": {
+          "kind": "agent_label"
+        }
+      },
+      {
+        "outcome": "assigned",
+        "stepId": "st-ce6e31d1c948e042",
+        "clusterKey": "write-generation",
+        "basis": {
+          "kind": "agent_label"
+        }
+      },
+      {
+        "outcome": "assigned",
+        "stepId": "st-b399d0a420d1faa6",
+        "clusterKey": "write-generation",
+        "basis": {
+          "kind": "agent_label"
+        }
+      },
+      {
+        "outcome": "assigned",
+        "stepId": "st-91dce300efff24ac",
+        "clusterKey": "route-command",
+        "basis": {
+          "kind": "agent_label"
+        }
+      },
+      {
+        "outcome": "assigned",
+        "stepId": "st-9afa6c7f6ef4c6cb",
+        "clusterKey": "refresh-catalog",
+        "basis": {
+          "kind": "agent_label"
+        }
+      },
+      {
+        "outcome": "assigned",
+        "stepId": "st-e63dfec7f4e85cd0",
+        "clusterKey": "refresh-catalog",
+        "basis": {
+          "kind": "agent_label"
+        }
+      },
+      {
+        "outcome": "assigned",
+        "stepId": "st-48e9fdc003234ec2",
+        "clusterKey": "refresh-catalog",
+        "basis": {
+          "kind": "agent_label"
+        }
+      },
+      {
+        "outcome": "assigned",
+        "stepId": "st-baa0a97dfcc5b974",
+        "clusterKey": "refresh-catalog",
+        "basis": {
+          "kind": "agent_label"
+        }
+      }
+    ],
+    "members": [
+      {
+        "outcome": "assigned",
+        "nodeKey": "src/catalog.rs::callable:artifact_index",
+        "clusterKey": "refresh-catalog",
+        "basis": "unanimous",
+        "visits": [
+          {
+            "clusterKey": "refresh-catalog",
+            "steps": 1
+          }
+        ]
+      },
+      {
+        "outcome": "assigned",
+        "nodeKey": "src/catalog.rs::callable:refresh_artifact_index",
+        "clusterKey": "refresh-catalog",
+        "basis": "unanimous",
+        "visits": [
+          {
+            "clusterKey": "refresh-catalog",
+            "steps": 1
+          }
+        ]
+      },
+      {
+        "outcome": "assigned",
+        "nodeKey": "src/catalog.rs::callable:write_locked",
+        "clusterKey": "refresh-catalog",
+        "basis": "unanimous",
+        "visits": [
+          {
+            "clusterKey": "refresh-catalog",
+            "steps": 2
+          }
+        ]
+      },
+      {
+        "outcome": "assigned",
+        "nodeKey": "src/cli/flow.rs::callable:execute",
+        "clusterKey": "route-command",
+        "basis": "unanimous",
+        "visits": [
+          {
+            "clusterKey": "route-command",
+            "steps": 1
+          }
+        ]
+      },
+      {
+        "outcome": "assigned",
+        "nodeKey": "src/cli/flow.rs::callable:import",
+        "clusterKey": "route-command",
+        "basis": "unanimous",
+        "visits": [
+          {
+            "clusterKey": "route-command",
+            "steps": 2
+          }
+        ]
+      },
+      {
+        "outcome": "assigned",
+        "nodeKey": "src/cli/flow.rs::callable:run",
+        "clusterKey": "route-command",
+        "basis": "unanimous",
+        "visits": [
+          {
+            "clusterKey": "route-command",
+            "steps": 1
+          }
+        ]
+      },
+      {
+        "outcome": "assigned",
+        "nodeKey": "src/cli/mod.rs::callable:run",
+        "clusterKey": "route-command",
+        "basis": "unanimous",
+        "visits": [
+          {
+            "clusterKey": "route-command",
+            "steps": 1
+          }
+        ]
+      },
+      {
+        "outcome": "assigned",
+        "nodeKey": "src/flow/assign.rs::callable:assign",
+        "clusterKey": "derive-layers",
+        "basis": "unanimous",
+        "visits": [
+          {
+            "clusterKey": "derive-layers",
+            "steps": 1
+          }
+        ]
+      },
+      {
+        "outcome": "assigned",
+        "nodeKey": "src/flow/derive/digests.rs::callable:digests",
+        "clusterKey": "derive-layers",
+        "basis": "unanimous",
+        "visits": [
+          {
+            "clusterKey": "derive-layers",
+            "steps": 1
+          }
+        ]
+      },
+      {
+        "outcome": "assigned",
+        "nodeKey": "src/flow/derive/facts.rs::callable:fact_layer",
+        "clusterKey": "derive-layers",
+        "basis": "unanimous",
+        "visits": [
+          {
+            "clusterKey": "derive-layers",
+            "steps": 1
+          }
+        ]
+      },
+      {
+        "outcome": "assigned",
+        "nodeKey": "src/flow/derive/view.rs::callable:view",
+        "clusterKey": "derive-layers",
+        "basis": "unanimous",
+        "visits": [
+          {
+            "clusterKey": "derive-layers",
+            "steps": 1
+          }
+        ]
+      },
+      {
+        "outcome": "assigned",
+        "nodeKey": "src/flow/import.rs::callable:build_intent",
+        "clusterKey": "derive-layers",
+        "basis": "unanimous",
+        "visits": [
+          {
+            "clusterKey": "derive-layers",
+            "steps": 2
+          }
+        ]
+      },
+      {
+        "outcome": "assigned",
+        "nodeKey": "src/flow/import.rs::callable:freeze",
+        "clusterKey": "derive-layers",
+        "basis": "unanimous",
+        "visits": [
+          {
+            "clusterKey": "derive-layers",
+            "steps": 2
+          }
+        ]
+      },
+      {
+        "outcome": "assigned",
+        "nodeKey": "src/flow/import.rs::callable:import_flow",
+        "clusterKey": "route-command",
+        "basis": "unanimous",
+        "visits": [
+          {
+            "clusterKey": "route-command",
+            "steps": 1
+          }
+        ]
+      },
+      {
+        "outcome": "assigned",
+        "nodeKey": "src/flow/import.rs::callable:parse_output",
+        "clusterKey": "check-output",
+        "basis": "unanimous",
+        "visits": [
+          {
+            "clusterKey": "check-output",
+            "steps": 1
+          }
+        ]
+      },
+      {
+        "outcome": "assigned",
+        "nodeKey": "src/flow/lineage.rs::callable:read_current",
+        "clusterKey": "check-output",
+        "basis": "unanimous",
+        "visits": [
+          {
+            "clusterKey": "check-output",
+            "steps": 1
+          }
+        ]
+      },
+      {
+        "outcome": "assigned",
+        "nodeKey": "src/flow/lineage.rs::callable:write_current",
+        "clusterKey": "write-generation",
+        "basis": "unanimous",
+        "visits": [
+          {
+            "clusterKey": "write-generation",
+            "steps": 1
+          }
+        ]
+      },
+      {
+        "outcome": "assigned",
+        "nodeKey": "src/flow/validate/agent.rs::callable:check_agent_flow",
+        "clusterKey": "check-output",
+        "basis": "unanimous",
+        "visits": [
+          {
+            "clusterKey": "check-output",
+            "steps": 1
+          }
+        ]
+      },
+      {
+        "outcome": "assigned",
+        "nodeKey": "src/main.rs::callable:main",
+        "clusterKey": "route-command",
+        "basis": "unanimous",
+        "visits": [
+          {
+            "clusterKey": "route-command",
+            "steps": 1
+          }
+        ]
+      },
+      {
+        "outcome": "assigned",
+        "nodeKey": "src/store/graph.rs::callable:read_graph",
+        "clusterKey": "check-output",
+        "basis": "unanimous",
+        "visits": [
+          {
+            "clusterKey": "check-output",
+            "steps": 1
+          }
+        ]
+      },
+      {
+        "outcome": "assigned",
+        "nodeKey": "src/store/mod.rs::callable:write_bytes",
+        "clusterKey": "write-generation",
+        "basis": "unanimous",
+        "visits": [
+          {
+            "clusterKey": "write-generation",
+            "steps": 1
+          }
+        ]
+      }
+    ]
+  },
+  "view": {
+    "palette": "flow-bright/1",
+    "clusters": [
+      {
+        "clusterKey": "route-command",
+        "color": "cyan",
+        "memberCount": 6,
+        "visits": [
+          {
+            "firstStep": 1,
+            "lastStep": 6
+          },
+          {
+            "firstStep": 21,
+            "lastStep": 21
+          }
+        ]
+      },
+      {
+        "clusterKey": "check-output",
+        "color": "red",
+        "memberCount": 4,
+        "visits": [
+          {
+            "firstStep": 7,
+            "lastStep": 10
+          }
+        ]
+      },
+      {
+        "clusterKey": "derive-layers",
+        "color": "yellow",
+        "memberCount": 6,
+        "visits": [
+          {
+            "firstStep": 11,
+            "lastStep": 18
+          }
+        ]
+      },
+      {
+        "clusterKey": "write-generation",
+        "color": "magenta",
+        "memberCount": 2,
+        "visits": [
+          {
+            "firstStep": 19,
+            "lastStep": 20
+          }
+        ]
+      },
+      {
+        "clusterKey": "refresh-catalog",
+        "color": "lime",
+        "memberCount": 3,
+        "visits": [
+          {
+            "firstStep": 22,
+            "lastStep": 25
+          }
+        ]
+      }
+    ],
+    "steps": [
+      {
+        "stepId": "st-67244b2b65163f51",
+        "clusterKey": "route-command",
+        "transition": "flow_start"
+      },
+      {
+        "stepId": "st-ec5f59a62a7bb9d6",
+        "clusterKey": "route-command",
+        "transition": "calls"
+      },
+      {
+        "stepId": "st-0491787073516bda",
+        "clusterKey": "route-command",
+        "transition": "calls"
+      },
+      {
+        "stepId": "st-eccef8c5911dba42",
+        "clusterKey": "route-command",
+        "transition": "calls"
+      },
+      {
+        "stepId": "st-0e1815faf8d67a4a",
+        "clusterKey": "route-command",
+        "transition": "calls"
+      },
+      {
+        "stepId": "st-ade7a98f9c80e44a",
+        "clusterKey": "route-command",
+        "transition": "calls"
+      },
+      {
+        "stepId": "st-28817a4b09cb954b",
+        "clusterKey": "check-output",
+        "transition": "calls"
+      },
+      {
+        "stepId": "st-0a6049d4ef35a976",
+        "clusterKey": "check-output",
+        "transition": "sibling_call"
+      },
+      {
+        "stepId": "st-f341eb13f9405113",
+        "clusterKey": "check-output",
+        "transition": "sibling_call"
+      },
+      {
+        "stepId": "st-4ad9729a94dd06b2",
+        "clusterKey": "check-output",
+        "transition": "sibling_call"
+      },
+      {
+        "stepId": "st-63eb46c534a6a970",
+        "clusterKey": "derive-layers",
+        "transition": "sibling_call"
+      },
+      {
+        "stepId": "st-50044604b22c455f",
+        "clusterKey": "derive-layers",
+        "transition": "calls"
+      },
+      {
+        "stepId": "st-ca583f4d55db391d",
+        "clusterKey": "derive-layers",
+        "transition": "returns_to_caller"
+      },
+      {
+        "stepId": "st-2736e1052e93bd3c",
+        "clusterKey": "derive-layers",
+        "transition": "sibling_call"
+      },
+      {
+        "stepId": "st-e786d2a8c6770e01",
+        "clusterKey": "derive-layers",
+        "transition": "calls"
+      },
+      {
+        "stepId": "st-6e1d620e1733f3be",
+        "clusterKey": "derive-layers",
+        "transition": "sibling_call"
+      },
+      {
+        "stepId": "st-c055ed8035d6cd94",
+        "clusterKey": "derive-layers",
+        "transition": "sibling_call"
+      },
+      {
+        "stepId": "st-b6954d5506606971",
+        "clusterKey": "derive-layers",
+        "transition": "returns_to_caller"
+      },
+      {
+        "stepId": "st-ce6e31d1c948e042",
+        "clusterKey": "write-generation",
+        "transition": "sibling_call"
+      },
+      {
+        "stepId": "st-b399d0a420d1faa6",
+        "clusterKey": "write-generation",
+        "transition": "calls"
+      },
+      {
+        "stepId": "st-91dce300efff24ac",
+        "clusterKey": "route-command",
+        "transition": "returns_to_ancestor"
+      },
+      {
+        "stepId": "st-9afa6c7f6ef4c6cb",
+        "clusterKey": "refresh-catalog",
+        "transition": "calls"
+      },
+      {
+        "stepId": "st-e63dfec7f4e85cd0",
+        "clusterKey": "refresh-catalog",
+        "transition": "calls"
+      },
+      {
+        "stepId": "st-48e9fdc003234ec2",
+        "clusterKey": "refresh-catalog",
+        "transition": "calls"
+      },
+      {
+        "stepId": "st-baa0a97dfcc5b974",
+        "clusterKey": "refresh-catalog",
+        "transition": "returns_to_caller"
+      }
+    ]
+  },
+  "diff": null,
+  "digests": {
+    "facts": "sha256:40a3740d4095c5a9f81da2a5106a35c7e1caf2b4419bb5c72c35529898dfb298",
+    "intent": "sha256:8cdf22b03ca35226d191f35ef299d8cf4bcc25ce05b6550794187ca26c222e15",
+    "assignment": "sha256:b64654a48f5918f0d3246220e2ca22b4147ad967771db79dc1cfa851f40ec0d0",
+    "view": "sha256:3b0b9735ad5ab9d076c2e564c36cf17e296cb090934efdfff87456e332a26600",
+    "diff": null,
+    "generation": "sha256:c66482ff1747d0374757053224adcdd0107527d397cce723080c6bf644af7ae4"
+  },
+  "provenance": {
+    "frozenAt": "2026-09-25T00:53:31Z",
+    "cliVersion": "0.1.0",
+    "author": {
+      "kind": "agent",
+      "name": "claude-code",
+      "modelId": "claude-opus-5-5"
+    }
+  }
+}

@@ -1,0 +1,346 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tekdek.local/schemas/agent-flow-output/1.json",
+  "title": "AgentFlowOutput",
+  "description": "The only data that a coding agent authors for one flow generation. Return a flow, or return no_flow with a reason. Use only node keys from the bound graph, prior step IDs from the current generation of this flow (flow show --json), and cluster keys that this output defines. Do not write step IDs for new steps, digests, colors, positions, function memberships, timestamps, or model names: code writes them. Code validates every reference after schema validation and rejects the whole output on any error.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/FlowOutcome"
+    },
+    {
+      "$ref": "#/$defs/NoFlowOutcome"
+    }
+  ],
+  "$defs": {
+    "FlowOutcome": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contractVersion",
+        "outcome",
+        "flow"
+      ],
+      "properties": {
+        "contractVersion": {
+          "const": 1
+        },
+        "outcome": {
+          "const": "flow"
+        },
+        "flow": {
+          "$ref": "#/$defs/AgentFlow"
+        }
+      }
+    },
+    "NoFlowOutcome": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contractVersion",
+        "outcome",
+        "reason",
+        "explanation"
+      ],
+      "properties": {
+        "contractVersion": {
+          "const": 1
+        },
+        "outcome": {
+          "const": "no_flow"
+        },
+        "reason": {
+          "$ref": "#/$defs/NoFlowReason"
+        },
+        "explanation": {
+          "description": "State what you searched and why no flow follows. Name the nearest behavior that the index does contain, if one exists.",
+          "allOf": [
+            {
+              "$ref": "#/$defs/BlockText"
+            }
+          ],
+          "minLength": 20,
+          "maxLength": 1000,
+          "type": "string"
+        }
+      }
+    },
+    "NoFlowReason": {
+      "description": "behavior_not_found: the index has no code that implements the requested behavior. behavior_ambiguous: the request names more than one behavior; ask for one. insufficient_evidence: the facts do not let you order the steps. outside_indexed_scope: the behavior lives in code or languages that the index does not cover.",
+      "type": "string",
+      "enum": [
+        "behavior_not_found",
+        "behavior_ambiguous",
+        "insufficient_evidence",
+        "outside_indexed_scope"
+      ]
+    },
+    "AgentFlow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "behavior",
+        "boundaries",
+        "evidenceBasis",
+        "revisionSummary",
+        "clusters",
+        "steps"
+      ],
+      "properties": {
+        "behavior": {
+          "description": "State the behavior that the flow explains, as one or two sentences. Start with 'How'. Do not describe your method or evidence here.",
+          "allOf": [
+            {
+              "$ref": "#/$defs/BlockText"
+            }
+          ],
+          "minLength": 20,
+          "maxLength": 600,
+          "type": "string"
+        },
+        "boundaries": {
+          "description": "State the scope limits: the entry point, the path you follow (for example, the success path), and the important branches you leave out. Use null only when the behavior has no meaningful exclusions.",
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/BlockText"
+                }
+              ],
+              "minLength": 10,
+              "maxLength": 600,
+              "type": "string"
+            }
+          ]
+        },
+        "evidenceBasis": {
+          "$ref": "#/$defs/EvidenceBasis"
+        },
+        "revisionSummary": {
+          "description": "Required for a revision, when the flow name already has a frozen generation. Summarize what you changed and why, for a reviewer. Null for a new flow.",
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/BlockText"
+                }
+              ],
+              "minLength": 20,
+              "maxLength": 1200,
+              "type": "string"
+            }
+          ]
+        },
+        "clusters": {
+          "description": "The cluster vocabulary: semantic groups that follow the phases of this flow. List them in the order in which the flow first needs them. Each cluster must label at least one step. Members come from the steps and can live in any file.",
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "items": {
+            "$ref": "#/$defs/AgentCluster"
+          }
+        },
+        "steps": {
+          "description": "The ordered walkthrough. One step is one visit to one function. Revisit a function as a new step when control returns to it. Do not skip a call that a reader needs to follow the path. Give every step one cluster. Give all visits to one function the same cluster; the import rejects a function whose steps carry different clusters.",
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 400,
+          "items": {
+            "$ref": "#/$defs/AgentStep"
+          }
+        }
+      }
+    },
+    "EvidenceBasis": {
+      "description": "State what you read to order and explain the steps. source_walkthrough: you read function bodies. indexed_facts_only: you read only signatures, documentation, and call facts. runtime_trace: you followed a recorded execution. mixed: more than one of these.",
+      "type": "string",
+      "enum": [
+        "source_walkthrough",
+        "indexed_facts_only",
+        "runtime_trace",
+        "mixed"
+      ]
+    },
+    "FlowPhase": {
+      "description": "Choose the functional stage that fits most members. entry: receive or route a request or command. input_validation: parse or check input. guard: protect a resource (lock, permission, path safety). load: read stored state or source data and verify it. transform: compute or build in-memory state. external_call: call a service, model, or tool outside the process. persist: write durable state or publish it. respond: build and return the result. error_handling: detect or recover from failure. other: none of these; then write phaseNote.",
+      "type": "string",
+      "enum": [
+        "entry",
+        "input_validation",
+        "guard",
+        "load",
+        "transform",
+        "external_call",
+        "persist",
+        "respond",
+        "error_handling",
+        "other"
+      ]
+    },
+    "AgentCluster": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "key",
+        "label",
+        "description",
+        "phase",
+        "phaseNote"
+      ],
+      "properties": {
+        "key": {
+          "description": "Short kebab-case handle, for example 'load-verify'. Reuse the exact key of a prior cluster that keeps the same purpose. Use a new key only for a new purpose.",
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 48,
+          "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+        },
+        "label": {
+          "description": "Verb phrase in sentence case, 3 to 6 words, for example 'Load and verify source facts'. Name the work, not the files.",
+          "allOf": [
+            {
+              "$ref": "#/$defs/LineText"
+            }
+          ],
+          "minLength": 3,
+          "maxLength": 60,
+          "type": "string"
+        },
+        "description": {
+          "description": "One or two sentences. State what this group does for this flow and what it protects or produces. Do not list function names.",
+          "allOf": [
+            {
+              "$ref": "#/$defs/BlockText"
+            }
+          ],
+          "minLength": 20,
+          "maxLength": 400,
+          "type": "string"
+        },
+        "phase": {
+          "$ref": "#/$defs/FlowPhase"
+        },
+        "phaseNote": {
+          "description": "Required when phase is other: name the stage in a few words. Null for every other phase.",
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/LineText"
+                }
+              ],
+              "minLength": 3,
+              "maxLength": 200,
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "if": {
+        "properties": {
+          "phase": {
+            "const": "other"
+          }
+        },
+        "type": "object"
+      },
+      "then": {
+        "properties": {
+          "phaseNote": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "else": {
+        "properties": {
+          "phaseNote": {
+            "type": "null"
+          }
+        },
+        "type": "object"
+      }
+    },
+    "AgentStep": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "priorStepId",
+        "nodeKey",
+        "clusterKey",
+        "title",
+        "annotation"
+      ],
+      "properties": {
+        "priorStepId": {
+          "description": "When this step continues a step of the current generation, copy its step ID exactly. Use each prior ID at most once. Null for a new step.",
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string",
+              "maxLength": 64,
+              "pattern": "^st-[0-9a-f]{16}$"
+            }
+          ]
+        },
+        "nodeKey": {
+          "description": "The function that this step visits. Copy the key exactly from the graph.",
+          "$ref": "#/$defs/NodeKey"
+        },
+        "clusterKey": {
+          "description": "The cluster that this step belongs to. Use a key from clusters in this output. Choose by the work at this visit, not by the file.",
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 48,
+          "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+        },
+        "title": {
+          "description": "Imperative phrase, 2 to 8 words, for example 'Validate the destination path'. State what happens at this visit, not the function name.",
+          "allOf": [
+            {
+              "$ref": "#/$defs/LineText"
+            }
+          ],
+          "minLength": 3,
+          "maxLength": 96,
+          "type": "string"
+        },
+        "annotation": {
+          "description": "One to four short sentences for a reader who follows the flow. State inputs, outputs, decisions, or invariants that matter at this visit. Mark returns to a caller. Do not claim runtime behavior that your evidence basis does not support.",
+          "allOf": [
+            {
+              "$ref": "#/$defs/BlockText"
+            }
+          ],
+          "minLength": 1,
+          "maxLength": 1500,
+          "type": "string"
+        }
+      }
+    },
+    "NodeKey": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024,
+      "pattern": "^[^\\s\\u0000-\\u001F\\u007F](?:[^\\u0000-\\u001F\\u007F]*[^\\s\\u0000-\\u001F\\u007F])?$"
+    },
+    "LineText": {
+      "type": "string",
+      "pattern": "^[^\\s\\u0000-\\u001F\\u007F](?:[^\\u0000-\\u001F\\u007F]*[^\\s\\u0000-\\u001F\\u007F])?$"
+    },
+    "BlockText": {
+      "type": "string",
+      "pattern": "^[^\\s\\u0000-\\u001F\\u007F](?:[^\\u0000-\\u0008\\u000B-\\u001F\\u007F]*[^\\s\\u0000-\\u001F\\u007F])?$"
+    }
+  }
+}

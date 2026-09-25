@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="icon" href="data:,">
+<title>Code map</title>
+<!--
+  The viewer page shell: icon symbols, the map stage, the sidebar, the right column, and the controls.
+  `src/main.ts` owns the behavior and `styles/deck.css` owns the style. Nothing here reads a data field.
+  Start the viewer server (`make serve`) and open `http://127.0.0.1:8000/viewer/`.
+-->
+<script>
+// Apply the saved Tokyo Night variant before first paint.
+try { const v = localStorage.getItem('tekdek.deck.variant'); if (v === 'storm' || v === 'moon') document.documentElement.dataset.variant = v; } catch (err) { /* storage is blocked: keep Night */ }
+</script>
+<link rel="stylesheet" href="./dist/app.css">
+<script type="module" src="./dist/app.js"></script>
+</head>
+<body class="booting">
+<!-- DIRECTION CONTRACT
+THESIS: The whole repository is one vertical file staircase in a Tokyo Night terminal world. A cluster lifts its functions as boxes onto one raised colored deck, seen straight on, while the tree stays below.
+OWN-WORLD: Terminals and editors themed Tokyo Night. Blue-black ground, periwinkle text, blue for focus and the cursor, orange for the step number, magenta for keys. One monospace family.
+STORY: Press the right arrow. The camera pitches a little, straight on. The deck rises on a soft shadow, boxes follow in step order and leave dashed slots and tethers, the stack at right fills, and an arrow ties the deck to it.
+FIRST VIEWPORT: The flat staircase in a dashed frame, the guided file tree at left, the flow callout and an empty stack at right, the prompt-like controls with a blinking cursor above a help line.
+FORM: user-selected prototype; handoff design-explorations/unified-view/round-4/design-handoff.md; selection option-20 Lift Deck Tokyo
+FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, and DESIGN.md
+-->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <symbol id="i-chev" viewBox="0 0 16 16"><path d="M4 6l4 4 4-4"/></symbol>
+  <symbol id="i-minus" viewBox="0 0 16 16"><path d="M4 8h8"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 16 16"><path d="M4 8h8M8 4v8"/></symbol>
+  <symbol id="i-prev" viewBox="0 0 16 16"><path d="M4 3.5v9M12 3.5v9L6 8z"/></symbol>
+  <symbol id="i-next" viewBox="0 0 16 16"><path d="M12 3.5v9M4 3.5v9L10 8z"/></symbol>
+  <symbol id="i-x" viewBox="0 0 16 16"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 16 16"><path d="M2.5 4.5a1 1 0 0 1 1-1h3l1.5 1.5h4.5a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1z"/></symbol>
+  <symbol id="i-left" viewBox="0 0 16 16"><path d="M12.5 8h-9M7 4.5L3.5 8 7 11.5"/></symbol>
+  <symbol id="i-right" viewBox="0 0 16 16"><path d="M3.5 8h9M9 4.5l3.5 3.5L9 11.5"/></symbol>
+  <symbol id="i-ptr" viewBox="0 0 16 16"><path d="M6 3.5l4.5 4.5L6 12.5"/></symbol>
+</svg>
+
+
+<svg class="arrow-layer" id="arrowLayer" aria-hidden="true">
+  <path class="arr" id="arrPath" pathLength="1" d="M0 0"/>
+  <path class="head" id="arrHead" d="M0 0"/>
+  <circle class="dot" id="arrDot" r="3.5" cx="0" cy="0"/>
+</svg>
+
+<aside class="sidebar" aria-label="Code explorer">
+  <div class="sb-head" id="sbHead"></div>
+  <nav class="sb-tree" id="sbTree" aria-label="Directories and files"><i class="vp" id="vpBar" aria-hidden="true"></i></nav>
+</aside>
+
+<div class="maptools" id="maptools">
+  <button class="tbtn" id="fitBtn" type="button">fit</button>
+  <button class="tbtn icon" id="zoomOut" type="button" aria-label="Zoom out"><svg class="ic" aria-hidden="true"><use href="#i-minus"/></svg></button>
+  <span class="zl" id="zoomLbl" aria-live="off">100%</span>
+  <button class="tbtn icon" id="zoomIn" type="button" aria-label="Zoom in"><svg class="ic" aria-hidden="true"><use href="#i-plus"/></svg></button>
+  <button class="tbtn" id="keyBtn" type="button" aria-expanded="false" aria-controls="keyPop">key</button>
+  <div class="pop keypop" id="keyPop" role="group" aria-label="Map key">
+    <div class="kp-hd" aria-hidden="true"><span>cluster</span><span>steps</span></div>
+    <ul class="kp-cl" id="kpClusters" aria-label="Flow clusters and their steps"></ul>
+    <ul class="kp-list">
+      <li><svg class="kp-edge" width="28" height="10" viewBox="0 0 28 10" aria-hidden="true"><path d="M1 5H21"/><path class="ah-edge" d="M21 1.5 27 5 21 8.5z"/></svg><span>Static call relationship in the source, caller to callee. Not a runtime execution count.</span></li>
+      <li><i class="kp-slot" aria-hidden="true"></i><span>Dashed slot: where a lifted function lives in the tree. A tether joins it to its box.</span></li>
+      <li><i class="kp-lift" aria-hidden="true"></i><span>A lifted box. The current step floats highest and casts a shadow on the deck.</span></li>
+    </ul>
+    <dl class="kp-keys">
+      <dt><kbd aria-label="Left or right arrow"><svg class="ic" aria-hidden="true"><use href="#i-left"/></svg>/<svg class="ic" aria-hidden="true"><use href="#i-right"/></svg></kbd></dt><dd>previous or next step</dd>
+      <dt><kbd>esc</kbd></dt><dd>close this key, then clear the flow</dd>
+      <dt><kbd>f</kbd></dt><dd>fit the map</dd>
+      <dt><kbd>?</kbd></dt><dd>show or hide this key</dd>
+    </dl>
+    <div class="kp-theme" role="group" aria-labelledby="kpThemeLbl">
+      <span id="kpThemeLbl">theme</span>
+      <div class="seg">
+        <button class="seg-b" type="button" data-variant="night" aria-pressed="true">night</button>
+        <button class="seg-b" type="button" data-variant="storm" aria-pressed="false">storm</button>
+        <button class="seg-b" type="button" data-variant="moon" aria-pressed="false">moon</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="rcol">
+  <section class="pane callout" id="callout" aria-label="Cluster"></section>
+  <section class="pane dock" id="dock" aria-label="Extracted stack"></section>
+</div>
+
+<section class="controls" id="controls" aria-label="Flow controls">
+  <div class="c1">
+    <button class="cbtn" id="prevBtn" type="button" aria-label="Previous step"><svg class="ic" aria-hidden="true"><use href="#i-prev"/></svg></button>
+    <button class="cbtn" id="nextBtn" type="button" aria-label="Next step"><svg class="ic" aria-hidden="true"><use href="#i-next"/></svg></button>
+    <div class="counter" id="counter">Step 0 / 0</div>
+    <div class="chip none" id="chip"><span id="chipText"></span></div>
+    <button class="cbtn quiet" id="clearBtn" type="button" aria-label="Clear the flow"><svg class="ic" aria-hidden="true"><use href="#i-x"/></svg></button>
+  </div>
+  <div class="c-title"><span class="ctt" id="cTitle" aria-live="polite"></span><i class="cursor" id="cursor" aria-hidden="true"></i></div>
+  <div class="c-ann-row">
+    <div class="c-ann-box" id="annBox"><div class="c-node" id="cNode"></div><p class="c-ann" id="cAnn"></p></div>
+    <button class="cbtn quiet" id="annBtn" type="button" aria-expanded="false" aria-controls="annBox" aria-label="Show the full annotation"><svg class="ic" aria-hidden="true"><use href="#i-chev"/></svg></button>
+  </div>
+  <div class="ticks" id="ticks" role="group" aria-label="Steps"></div>
+</section>
+<p class="help" id="help" aria-label="Shortcuts"><span class="hk"><svg class="ic" aria-hidden="true"><use href="#i-left"/></svg>/<svg class="ic" aria-hidden="true"><use href="#i-right"/></svg><span class="vh">Left or right arrow</span></span>step<i class="hsep" aria-hidden="true"></i><span class="hk">f</span>fit<i class="hsep" aria-hidden="true"></i><span class="hk">esc</span>clear<i class="hsep" aria-hidden="true"></i><span class="hk">?</span>key</p>
+
+<!-- The map follows the controls in DOM order, so Tab reaches the tree, the tools, the panes, and the controls first. -->
+<main class="stage" id="stage" aria-label="Map"><div class="camera" id="camera"><div class="world boot" id="world"></div></div>
+  <svg class="links" id="links" aria-hidden="true">
+    <defs>
+      <marker id="ah-air" viewBox="0 0 8 8" refX="8" refY="4" markerWidth="6" markerHeight="6" orient="auto"><path class="ah-air" d="M0,.5 L8,4 L0,7.5 z"/></marker>
+      <marker id="ah-edge" viewBox="0 0 8 8" refX="8" refY="4" markerWidth="6" markerHeight="6" orient="auto"><path class="ah-edge" d="M0,.5 L8,4 L0,7.5 z"/></marker>
+    </defs>
+    <g id="tetherG"></g>
+    <g class="base" id="baseG"></g>
+    <g class="int" id="intG"></g>
+  </svg>
+</main>
+
+<div class="pop fn-pop" id="fnPop" role="tooltip"></div>
+<div class="pop tip" id="tip" role="tooltip"></div>
+<div class="status" id="status" role="status" aria-live="polite" hidden></div>
+<div class="pop pickpop" id="pickPop" role="dialog" aria-modal="false"></div>
+</body>
+</html>

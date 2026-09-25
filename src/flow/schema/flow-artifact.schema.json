@@ -1,0 +1,1432 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tekdek.local/schemas/flow-artifact/3.json",
+  "title": "FlowArtifact",
+  "description": "One frozen generation of a flow, schema version 3. Layers: facts (indexer), intent (agent), assignment (deterministic code), view (derived hints), and diff (derived overlay against the parent generation). Code writes every field except the agent-authored intent text, cluster vocabulary, step labels, and node references. Runtime validation also checks references, digests, derived layers, and the cross-field rules that JSON Schema cannot express.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "kind",
+    "schemaVersion",
+    "flowId",
+    "status",
+    "generation",
+    "facts",
+    "intent",
+    "assignment",
+    "view",
+    "diff",
+    "digests",
+    "provenance"
+  ],
+  "properties": {
+    "kind": {
+      "const": "tekdek.flow"
+    },
+    "schemaVersion": {
+      "const": 3
+    },
+    "flowId": {
+      "$ref": "#/$defs/FlowId"
+    },
+    "status": {
+      "const": "frozen",
+      "description": "A frozen artifact never changes. Each change makes a new generation."
+    },
+    "generation": {
+      "$ref": "#/$defs/Generation"
+    },
+    "facts": {
+      "$ref": "#/$defs/FactLayer"
+    },
+    "intent": {
+      "$ref": "#/$defs/IntentLayer"
+    },
+    "assignment": {
+      "$ref": "#/$defs/AssignmentLayer"
+    },
+    "view": {
+      "$ref": "#/$defs/ViewLayer"
+    },
+    "diff": {
+      "description": "Null for an initial generation. Required for a revision.",
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/DiffOverlay"
+        }
+      ]
+    },
+    "digests": {
+      "$ref": "#/$defs/Digests"
+    },
+    "provenance": {
+      "$ref": "#/$defs/Provenance"
+    }
+  },
+  "allOf": [
+    {
+      "description": "An initial generation has no diff. A revision has a diff.",
+      "if": {
+        "properties": {
+          "generation": {
+            "properties": {
+              "purpose": {
+                "const": "initial"
+              }
+            },
+            "type": "object"
+          }
+        },
+        "type": "object"
+      },
+      "then": {
+        "properties": {
+          "diff": {
+            "type": "null"
+          }
+        },
+        "type": "object"
+      },
+      "else": {
+        "properties": {
+          "diff": {
+            "type": "object"
+          }
+        },
+        "type": "object"
+      }
+    }
+  ],
+  "$defs": {
+    "FlowId": {
+      "description": "Flow slug. The agent chooses it at create. It never changes. It is also the file name.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$"
+    },
+    "ClusterKey": {
+      "description": "Cluster slug inside one flow. The agent proposes it. It is immutable after the first freeze.",
+      "type": "string",
+      "minLength": 2,
+      "maxLength": 48,
+      "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+    },
+    "StepId": {
+      "description": "Code-assigned step identity, derived from the flow, the node, and a counter.",
+      "type": "string",
+      "maxLength": 64,
+      "pattern": "^st-[0-9a-f]{16}$"
+    },
+    "NodeKey": {
+      "description": "Indexer entity key, for example 'src/flow.rs::callable:read_graph'.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024,
+      "pattern": "^[^\\s\\u0000-\\u001F\\u007F](?:[^\\u0000-\\u001F\\u007F]*[^\\s\\u0000-\\u001F\\u007F])?$"
+    },
+    "Sha256Digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "ContentHash": {
+      "description": "Indexer content hash (FNV-1a 64, hex). Change detection only, not a trust anchor.",
+      "type": "string",
+      "pattern": "^[0-9a-f]{16}$"
+    },
+    "SemVer": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"
+    },
+    "Timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "Z$"
+    },
+    "LineText": {
+      "description": "One line of trimmed text without control characters.",
+      "type": "string",
+      "pattern": "^[^\\s\\u0000-\\u001F\\u007F](?:[^\\u0000-\\u001F\\u007F]*[^\\s\\u0000-\\u001F\\u007F])?$"
+    },
+    "BlockText": {
+      "description": "Trimmed text. Line breaks and tabs are allowed. Other control characters are not.",
+      "type": "string",
+      "pattern": "^[^\\s\\u0000-\\u001F\\u007F](?:[^\\u0000-\\u0008\\u000B-\\u001F\\u007F]*[^\\s\\u0000-\\u001F\\u007F])?$"
+    },
+    "GenerationPurpose": {
+      "description": "initial starts a lineage. revision changes the intent on the graph of the parent.",
+      "type": "string",
+      "enum": [
+        "initial",
+        "revision"
+      ]
+    },
+    "Generation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ordinal",
+        "purpose",
+        "parentDigest"
+      ],
+      "properties": {
+        "ordinal": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100000
+        },
+        "purpose": {
+          "$ref": "#/$defs/GenerationPurpose"
+        },
+        "parentDigest": {
+          "description": "Generation digest of the parent. Null only for ordinal 1.",
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/Sha256Digest"
+            }
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "purpose": {
+                "const": "initial"
+              }
+            },
+            "type": "object"
+          },
+          "then": {
+            "properties": {
+              "ordinal": {
+                "const": 1
+              },
+              "parentDigest": {
+                "type": "null"
+              }
+            },
+            "type": "object"
+          },
+          "else": {
+            "properties": {
+              "ordinal": {
+                "minimum": 2,
+                "type": "integer"
+              },
+              "parentDigest": {
+                "$ref": "#/$defs/Sha256Digest"
+              }
+            },
+            "type": "object"
+          }
+        }
+      ]
+    },
+    "FactLayer": {
+      "description": "Indexed source facts that this flow references. Code copies them from the bound graph. Agents never write them.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "projection",
+        "binding",
+        "nodes",
+        "edges"
+      ],
+      "properties": {
+        "projection": {
+          "const": "node-fact/1",
+          "description": "Version of the node fields that code copies and digests."
+        },
+        "binding": {
+          "$ref": "#/$defs/FactBinding"
+        },
+        "nodes": {
+          "description": "Exactly the distinct step nodes of the bound graph, sorted by key.",
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 400,
+          "items": {
+            "$ref": "#/$defs/FactNode"
+          }
+        },
+        "edges": {
+          "description": "Every graph edge whose ends are both in nodes, sorted by source, target, kind.",
+          "type": "array",
+          "maxItems": 20000,
+          "items": {
+            "$ref": "#/$defs/FactEdge"
+          }
+        }
+      }
+    },
+    "FactBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "graphArtifact",
+        "graphDigest"
+      ],
+      "properties": {
+        "graphArtifact": {
+          "description": "Graph file name in the artifact store.",
+          "type": "string",
+          "minLength": 6,
+          "maxLength": 255,
+          "pattern": "^[^/\\\\:\\u0000-\\u001F]+\\.json$"
+        },
+        "graphDigest": {
+          "description": "SHA-256 of the exact graph file bytes. Recorded for freshness checks. Excluded from the facts digest.",
+          "$ref": "#/$defs/Sha256Digest"
+        }
+      }
+    },
+    "NodeKind": {
+      "type": "string",
+      "enum": [
+        "module",
+        "type",
+        "callable",
+        "field"
+      ]
+    },
+    "RelationKind": {
+      "type": "string",
+      "enum": [
+        "contains",
+        "calls",
+        "imports",
+        "input_type",
+        "output_type",
+        "uses_type",
+        "uses_value"
+      ]
+    },
+    "FactNode": {
+      "description": "Digest projection node-fact/1 of one graph node. Source spans stay in the graph because unrelated edits move them.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "key",
+        "name",
+        "kind",
+        "language",
+        "path",
+        "contentHash",
+        "signature",
+        "documentation",
+        "factDigest"
+      ],
+      "properties": {
+        "key": {
+          "$ref": "#/$defs/NodeKey"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "kind": {
+          "$ref": "#/$defs/NodeKind"
+        },
+        "language": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_+-]{0,31}$"
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "contentHash": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/ContentHash"
+            }
+          ]
+        },
+        "signature": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string",
+              "maxLength": 4000
+            }
+          ]
+        },
+        "documentation": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string",
+              "maxLength": 20000
+            }
+          ]
+        },
+        "factDigest": {
+          "description": "SHA-256 of the canonical node-fact/1 projection of the other fields.",
+          "$ref": "#/$defs/Sha256Digest"
+        }
+      }
+    },
+    "FactEdge": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source",
+        "target",
+        "kind"
+      ],
+      "properties": {
+        "source": {
+          "$ref": "#/$defs/NodeKey"
+        },
+        "target": {
+          "$ref": "#/$defs/NodeKey"
+        },
+        "kind": {
+          "$ref": "#/$defs/RelationKind"
+        }
+      }
+    },
+    "EvidenceBasis": {
+      "description": "What the author read to order and explain the steps. source_walkthrough: function bodies. indexed_facts_only: signatures, documentation, and call facts. runtime_trace: a recorded execution. mixed: more than one of these.",
+      "type": "string",
+      "enum": [
+        "source_walkthrough",
+        "indexed_facts_only",
+        "runtime_trace",
+        "mixed"
+      ]
+    },
+    "FlowPhase": {
+      "description": "Functional stage of a cluster in the flow.",
+      "type": "string",
+      "enum": [
+        "entry",
+        "input_validation",
+        "guard",
+        "load",
+        "transform",
+        "external_call",
+        "persist",
+        "respond",
+        "error_handling",
+        "other"
+      ]
+    },
+    "IntentLayer": {
+      "description": "Agent interpretation. Agents write it only through validated CLI operations or one validated agent output. Code writes step IDs and attestations.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "behavior",
+        "boundaries",
+        "evidenceBasis",
+        "revisionSummary",
+        "clusters",
+        "steps"
+      ],
+      "properties": {
+        "behavior": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/BlockText"
+            }
+          ],
+          "minLength": 20,
+          "maxLength": 600,
+          "type": "string"
+        },
+        "boundaries": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/BlockText"
+                }
+              ],
+              "minLength": 10,
+              "maxLength": 600,
+              "type": "string"
+            }
+          ]
+        },
+        "evidenceBasis": {
+          "$ref": "#/$defs/EvidenceBasis"
+        },
+        "revisionSummary": {
+          "description": "Agent summary of intent changes against the parent. Null for an initial generation.",
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/BlockText"
+                }
+              ],
+              "minLength": 20,
+              "maxLength": 1200,
+              "type": "string"
+            }
+          ]
+        },
+        "clusters": {
+          "description": "Cluster vocabulary in narrative order: the order in which the flow first needs each cluster.",
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "items": {
+            "$ref": "#/$defs/ClusterIntent"
+          }
+        },
+        "steps": {
+          "description": "Ordered walkthrough. A node can appear in many steps.",
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 400,
+          "items": {
+            "$ref": "#/$defs/FlowStep"
+          }
+        }
+      }
+    },
+    "ClusterIntent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "key",
+        "label",
+        "description",
+        "phase",
+        "phaseNote"
+      ],
+      "properties": {
+        "key": {
+          "$ref": "#/$defs/ClusterKey"
+        },
+        "label": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/LineText"
+            }
+          ],
+          "minLength": 3,
+          "maxLength": 60,
+          "type": "string"
+        },
+        "description": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/BlockText"
+            }
+          ],
+          "minLength": 20,
+          "maxLength": 400,
+          "type": "string"
+        },
+        "phase": {
+          "$ref": "#/$defs/FlowPhase"
+        },
+        "phaseNote": {
+          "description": "Required when phase is other. Null otherwise.",
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/LineText"
+                }
+              ],
+              "minLength": 3,
+              "maxLength": 200,
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "if": {
+        "properties": {
+          "phase": {
+            "const": "other"
+          }
+        },
+        "type": "object"
+      },
+      "then": {
+        "properties": {
+          "phaseNote": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "else": {
+        "properties": {
+          "phaseNote": {
+            "type": "null"
+          }
+        },
+        "type": "object"
+      }
+    },
+    "FlowStep": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "nodeKey",
+        "clusterKey",
+        "title",
+        "annotation",
+        "attestedFactDigest"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/StepId"
+        },
+        "nodeKey": {
+          "$ref": "#/$defs/NodeKey"
+        },
+        "clusterKey": {
+          "description": "Agent label: the cluster that this step extracts.",
+          "$ref": "#/$defs/ClusterKey"
+        },
+        "title": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/LineText"
+            }
+          ],
+          "minLength": 3,
+          "maxLength": 96,
+          "type": "string"
+        },
+        "annotation": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/BlockText"
+            }
+          ],
+          "minLength": 1,
+          "maxLength": 1500,
+          "type": "string"
+        },
+        "attestedFactDigest": {
+          "description": "Code-written. The node fact digest when the agent last wrote this step.",
+          "$ref": "#/$defs/Sha256Digest"
+        }
+      }
+    },
+    "AssignmentLayer": {
+      "description": "Deterministic cluster decisions. Code resolves one cluster for each step, then derives function membership with a fixed rule. Agents cannot write this layer. Equal assignment digests mean the same clustering.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "policy",
+        "assigner",
+        "inputDigest",
+        "steps",
+        "members"
+      ],
+      "properties": {
+        "policy": {
+          "$ref": "#/$defs/AssignmentPolicy"
+        },
+        "assigner": {
+          "$ref": "#/$defs/AssignerProvenance"
+        },
+        "inputDigest": {
+          "description": "Cache key of the whole assignment. It covers the policy, the assigner configuration, and exactly the inputs that the assigner reads.",
+          "$ref": "#/$defs/Sha256Digest"
+        },
+        "steps": {
+          "description": "One decision for each step, in step order.",
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 400,
+          "items": {
+            "$ref": "#/$defs/StepDecision"
+          }
+        },
+        "members": {
+          "description": "One decision for each distinct step node, sorted by node key.",
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 400,
+          "items": {
+            "$ref": "#/$defs/MemberDecision"
+          }
+        }
+      }
+    },
+    "InputScope": {
+      "description": "Inputs that one assigner or provider decision reads. The cache key covers exactly these inputs. labels_only: agent labels and cluster keys. labels_and_call_edges: also the call edges between step nodes. node_facts: node facts and cluster intents. node_facts_and_step_text: also step titles and annotations. node_facts_step_text_and_call_neighbors: also the facts of direct callers and callees.",
+      "type": "string",
+      "enum": [
+        "labels_only"
+      ]
+    },
+    "AssignerProvenance": {
+      "title": "RulesAssigner",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "assignerId",
+        "version",
+        "inputScope"
+      ],
+      "properties": {
+        "kind": {
+          "const": "rules"
+        },
+        "assignerId": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{1,63}$"
+        },
+        "version": {
+          "$ref": "#/$defs/SemVer"
+        },
+        "inputScope": {
+          "description": "labels_only: the assigner reads the step labels and nothing else.",
+          "$ref": "#/$defs/InputScope"
+        }
+      }
+    },
+    "ClusterColor": {
+      "type": "string",
+      "enum": [
+        "cyan",
+        "red",
+        "yellow",
+        "magenta",
+        "lime",
+        "orange",
+        "blue",
+        "violet"
+      ]
+    },
+    "Transition": {
+      "description": "Static call relation from the previous step node to this step node, over the flow's fact edges. Not a runtime observation. Code checks in this order: same_function, calls, returns_to_caller, sibling_call, calls_indirectly, returns_to_ancestor, no_static_edge.",
+      "type": "string",
+      "enum": [
+        "flow_start",
+        "same_function",
+        "calls",
+        "returns_to_caller",
+        "sibling_call",
+        "calls_indirectly",
+        "returns_to_ancestor",
+        "no_static_edge"
+      ]
+    },
+    "ViewLayer": {
+      "description": "Derived presentation hints. Code recomputes them on read and rejects a mismatch.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "palette",
+        "clusters",
+        "steps"
+      ],
+      "properties": {
+        "palette": {
+          "const": "flow-bright/1"
+        },
+        "clusters": {
+          "description": "One entry for each cluster intent, in intent order.",
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "items": {
+            "$ref": "#/$defs/ClusterView"
+          }
+        },
+        "steps": {
+          "description": "One entry for each step, in step order.",
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 400,
+          "items": {
+            "$ref": "#/$defs/StepView"
+          }
+        }
+      }
+    },
+    "ClusterView": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "clusterKey",
+        "color",
+        "memberCount",
+        "visits"
+      ],
+      "properties": {
+        "clusterKey": {
+          "$ref": "#/$defs/ClusterKey"
+        },
+        "color": {
+          "$ref": "#/$defs/ClusterColor"
+        },
+        "memberCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 400
+        },
+        "visits": {
+          "description": "Runs of consecutive steps that extract this cluster.",
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 400,
+          "items": {
+            "$ref": "#/$defs/VisitRun"
+          }
+        }
+      }
+    },
+    "VisitRun": {
+      "description": "One-based, inclusive step positions.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "firstStep",
+        "lastStep"
+      ],
+      "properties": {
+        "firstStep": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 400
+        },
+        "lastStep": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 400
+        }
+      }
+    },
+    "StepView": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "stepId",
+        "clusterKey",
+        "transition"
+      ],
+      "properties": {
+        "stepId": {
+          "$ref": "#/$defs/StepId"
+        },
+        "clusterKey": {
+          "description": "Cluster that this step extracts.",
+          "$ref": "#/$defs/ClusterKey"
+        },
+        "transition": {
+          "$ref": "#/$defs/Transition"
+        }
+      }
+    },
+    "Presence": {
+      "type": "string",
+      "enum": [
+        "added",
+        "removed",
+        "retained"
+      ]
+    },
+    "InputCategory": {
+      "description": "Assignment input categories.",
+      "type": "string",
+      "enum": [
+        "intent"
+      ]
+    },
+    "DiffOverlay": {
+      "description": "Derived comparison with the parent generation. Code writes it for a revision, which keeps the graph of its parent.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "base",
+        "changedInputs",
+        "summary",
+        "steps",
+        "clusters",
+        "members"
+      ],
+      "properties": {
+        "base": {
+          "$ref": "#/$defs/DiffBase"
+        },
+        "changedInputs": {
+          "description": "Assignment input categories whose read inputs differ from the base, in enum order.",
+          "type": "array",
+          "maxItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/InputCategory"
+          }
+        },
+        "summary": {
+          "$ref": "#/$defs/DiffSummary"
+        },
+        "steps": {
+          "description": "Every step of both sides: current steps in order, then removed base steps in base order.",
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 800,
+          "items": {
+            "$ref": "#/$defs/StepDiff"
+          }
+        },
+        "clusters": {
+          "description": "Every cluster of both sides: current clusters in order, then removed base clusters.",
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "items": {
+            "$ref": "#/$defs/ClusterDiff"
+          }
+        },
+        "members": {
+          "description": "Every node in the union of both sides' step nodes, sorted by current key.",
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 2048,
+          "items": {
+            "$ref": "#/$defs/MemberDiff"
+          }
+        }
+      }
+    },
+    "DiffBase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "generationDigest",
+        "ordinal"
+      ],
+      "properties": {
+        "generationDigest": {
+          "$ref": "#/$defs/Sha256Digest"
+        },
+        "ordinal": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "DiffSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "stepsAdded",
+        "stepsRemoved",
+        "stepsChanged",
+        "clustersAdded",
+        "clustersRemoved",
+        "clustersChanged",
+        "membersChanged"
+      ],
+      "properties": {
+        "stepsAdded": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "stepsRemoved": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "stepsChanged": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "clustersAdded": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "clustersRemoved": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "clustersChanged": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "membersChanged": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "StepField": {
+      "type": "string",
+      "enum": [
+        "node",
+        "cluster",
+        "title",
+        "annotation",
+        "position"
+      ]
+    },
+    "StepDiff": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "stepId",
+        "presence",
+        "changedFields"
+      ],
+      "properties": {
+        "stepId": {
+          "$ref": "#/$defs/StepId"
+        },
+        "presence": {
+          "$ref": "#/$defs/Presence"
+        },
+        "changedFields": {
+          "description": "Intent fields that differ, in enum order. Empty for added and removed steps.",
+          "type": "array",
+          "maxItems": 5,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/StepField"
+          }
+        }
+      },
+      "if": {
+        "properties": {
+          "presence": {
+            "const": "retained"
+          }
+        },
+        "type": "object"
+      },
+      "else": {
+        "properties": {
+          "changedFields": {
+            "maxItems": 0,
+            "type": "array"
+          }
+        },
+        "type": "object"
+      }
+    },
+    "ClusterField": {
+      "type": "string",
+      "enum": [
+        "label",
+        "description",
+        "phase",
+        "members",
+        "position"
+      ]
+    },
+    "ClusterDiff": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "clusterKey",
+        "presence",
+        "changedFields"
+      ],
+      "properties": {
+        "clusterKey": {
+          "$ref": "#/$defs/ClusterKey"
+        },
+        "presence": {
+          "$ref": "#/$defs/Presence"
+        },
+        "changedFields": {
+          "description": "Fields that differ, in enum order. members compares final assignments. Empty for added and removed clusters.",
+          "type": "array",
+          "maxItems": 5,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/ClusterField"
+          }
+        }
+      },
+      "if": {
+        "properties": {
+          "presence": {
+            "const": "retained"
+          }
+        },
+        "type": "object"
+      },
+      "else": {
+        "properties": {
+          "changedFields": {
+            "maxItems": 0,
+            "type": "array"
+          }
+        },
+        "type": "object"
+      }
+    },
+    "MembershipChange": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "clusterKey"
+          ],
+          "properties": {
+            "kind": {
+              "const": "unchanged"
+            },
+            "clusterKey": {
+              "$ref": "#/$defs/ClusterKey"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "toCluster"
+          ],
+          "properties": {
+            "kind": {
+              "const": "joined"
+            },
+            "toCluster": {
+              "$ref": "#/$defs/ClusterKey"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "fromCluster"
+          ],
+          "properties": {
+            "kind": {
+              "const": "left"
+            },
+            "fromCluster": {
+              "$ref": "#/$defs/ClusterKey"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "fromCluster",
+            "toCluster"
+          ],
+          "properties": {
+            "kind": {
+              "const": "moved"
+            },
+            "fromCluster": {
+              "$ref": "#/$defs/ClusterKey"
+            },
+            "toCluster": {
+              "$ref": "#/$defs/ClusterKey"
+            }
+          }
+        }
+      ]
+    },
+    "MemberDiff": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "nodeKey",
+        "membership",
+        "causes"
+      ],
+      "properties": {
+        "nodeKey": {
+          "$ref": "#/$defs/NodeKey"
+        },
+        "membership": {
+          "$ref": "#/$defs/MembershipChange"
+        },
+        "causes": {
+          "description": "Input categories that differ among the inputs that this node's decisions read, in enum order. Empty when nothing differs.",
+          "type": "array",
+          "maxItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/InputCategory"
+          }
+        }
+      }
+    },
+    "Digests": {
+      "description": "Section digests: SHA-256 of canonical JSON (RFC 8785). generation covers the whole artifact except digests and provenance.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "facts",
+        "intent",
+        "assignment",
+        "view",
+        "diff",
+        "generation"
+      ],
+      "properties": {
+        "facts": {
+          "$ref": "#/$defs/Sha256Digest"
+        },
+        "intent": {
+          "$ref": "#/$defs/Sha256Digest"
+        },
+        "assignment": {
+          "$ref": "#/$defs/Sha256Digest"
+        },
+        "view": {
+          "$ref": "#/$defs/Sha256Digest"
+        },
+        "diff": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/Sha256Digest"
+            }
+          ]
+        },
+        "generation": {
+          "$ref": "#/$defs/Sha256Digest"
+        }
+      }
+    },
+    "Provenance": {
+      "description": "Audit data. Excluded from every digest.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "frozenAt",
+        "cliVersion",
+        "author"
+      ],
+      "properties": {
+        "frozenAt": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "cliVersion": {
+          "$ref": "#/$defs/SemVer"
+        },
+        "author": {
+          "$ref": "#/$defs/Author"
+        }
+      }
+    },
+    "Author": {
+      "description": "Actor that wrote the intent of this generation. The CLI records it. The agent does not self-report it in the output contract.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "name",
+            "modelId"
+          ],
+          "properties": {
+            "kind": {
+              "const": "agent"
+            },
+            "name": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9-]{1,63}$"
+            },
+            "modelId": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,199}$"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "name"
+          ],
+          "properties": {
+            "kind": {
+              "const": "human"
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 120
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind"
+          ],
+          "properties": {
+            "kind": {
+              "const": "system",
+              "description": "An automated run with no named author."
+            }
+          }
+        }
+      ]
+    },
+    "AssignmentPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "labelPolicy",
+        "membershipRule"
+      ],
+      "properties": {
+        "labelPolicy": {
+          "description": "Who labels steps. agent_labels: the agent labels every step.",
+          "type": "string",
+          "enum": [
+            "agent_labels"
+          ]
+        },
+        "membershipRule": {
+          "description": "How code derives the cluster of a function from its step decisions. unanimous: every step of one function has the same cluster, or validation fails.",
+          "type": "string",
+          "enum": [
+            "unanimous"
+          ]
+        }
+      }
+    },
+    "AgentLabelBasis": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "const": "agent_label"
+        }
+      }
+    },
+    "StepDecision": {
+      "title": "AssignedStep",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "outcome",
+        "stepId",
+        "clusterKey",
+        "basis"
+      ],
+      "properties": {
+        "outcome": {
+          "const": "assigned"
+        },
+        "stepId": {
+          "$ref": "#/$defs/StepId"
+        },
+        "clusterKey": {
+          "$ref": "#/$defs/ClusterKey"
+        },
+        "basis": {
+          "$ref": "#/$defs/AgentLabelBasis"
+        }
+      }
+    },
+    "ClusterVisitCount": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "clusterKey",
+        "steps"
+      ],
+      "properties": {
+        "clusterKey": {
+          "$ref": "#/$defs/ClusterKey"
+        },
+        "steps": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 400
+        }
+      }
+    },
+    "MemberDecision": {
+      "title": "AssignedMember",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "outcome",
+        "nodeKey",
+        "clusterKey",
+        "basis",
+        "visits"
+      ],
+      "properties": {
+        "outcome": {
+          "const": "assigned"
+        },
+        "nodeKey": {
+          "$ref": "#/$defs/NodeKey"
+        },
+        "clusterKey": {
+          "$ref": "#/$defs/ClusterKey"
+        },
+        "basis": {
+          "description": "unanimous: all steps of the node carry the same cluster.",
+          "type": "string",
+          "enum": [
+            "unanimous"
+          ]
+        },
+        "visits": {
+          "description": "Assigned steps of this node for each cluster, sorted by cluster key.",
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1,
+          "items": {
+            "$ref": "#/$defs/ClusterVisitCount"
+          }
+        }
+      }
+    }
+  }
+}

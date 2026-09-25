@@ -1,0 +1,42 @@
+[package]
+name = "tekdek"
+version = "0.1.0"
+edition = "2024"
+description = "Index a codebase, freeze agent-authored flows with clusters, and walk them in the Lift Deck."
+license = "Apache-2.0"
+repository = "https://github.com/dychen1/tekdek"
+
+[[bin]]
+name = "tekdek"
+path = "src/main.rs"
+
+[features]
+default = ["python", "rust"]
+python = ["dep:rustpython-parser"]
+rust = ["dep:syn", "dep:proc-macro2"]
+
+[dependencies]
+dirs = "6.0.0"
+icu_normalizer = { version = "2.3.0", default-features = false, features = ["compiled_data"] }
+jiff = "0.2.35"
+lsp-types = "0.97"
+proc-macro2 = { version = "1.0.107", features = ["span-locations"], optional = true }
+rustpython-parser = { version = "0.4", features = ["all-nodes-with-ranges"], optional = true }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.11.0"
+syn = { version = "3.0.3", features = ["full", "visit"], optional = true }
+toml = "1.1.4"
+url = "2"
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints.rust]
+unsafe_code = "forbid"
+warnings = "deny"
+
+[lints.clippy]
+all = { level = "deny", priority = -1 }
+pedantic = "warn"
+unwrap_used = "warn"

@@ -1,0 +1,16 @@
+{
+  "name": "tekdek-viewer",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node tools/build-viewer.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "npm run build && node --import tsx --test viewer/tests/*.test.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.10",
+    "typescript": "5.9.3",
+    "tsx": "4.20.6",
+    "@types/node": "22.18.6"
+  }
+}
