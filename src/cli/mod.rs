@@ -1,8 +1,8 @@
 //! Command-line interface.
 //!
 //! This module routes one command line: `flow ...` goes to the flow commands,
-//! `graph ...` goes to the graph queries, `help` prints the usage, and every
-//! other command line indexes a codebase. Command arguments and standard input
+//! `graph ...` goes to the graph queries, `serve` starts the viewer, `help`
+//! prints the usage, and every other command line indexes a codebase. Command arguments and standard input
 //! are the input. The exit code is the output.
 //!
 //! # Sections
@@ -13,6 +13,7 @@
 mod flow;
 mod graph;
 mod index;
+mod serve;
 
 use std::{collections::BTreeMap, io::Read, process::ExitCode};
 
@@ -40,9 +41,20 @@ pub fn run(arguments: Vec<String>, input: &mut impl Read) -> ExitCode {
             println!("{output}");
             ExitCode::from(code)
         }
+        // Serve the viewer until the process ends.
+        Some("serve") => {
+            arguments.next();
+            serve::run(arguments)
+        }
         // Print every usage.
         Some("help" | "--help" | "-h") => {
-            println!("{}\n\n{}\n\n{}", index::USAGE, flow::USAGE, graph::USAGE);
+            println!(
+                "{}\n\n{}\n\n{}\n\n{}",
+                index::USAGE,
+                flow::USAGE,
+                graph::USAGE,
+                serve::USAGE
+            );
             ExitCode::SUCCESS
         }
         // Index one codebase.
@@ -55,7 +67,7 @@ pub fn run(arguments: Vec<String>, input: &mut impl Read) -> ExitCode {
 // -----------------------------------------------------------------------------
 
 /// The options that take no value. Each command removes the flags it accepts.
-const FLAGS: [&str; 2] = ["--json", "--check"];
+const FLAGS: [&str; 3] = ["--json", "--check", "--open"];
 
 /// Separates options from command operands.
 ///

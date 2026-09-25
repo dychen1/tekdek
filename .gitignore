@@ -40,6 +40,5 @@ rustc-ice-*.txt
 /tmp/
 .store.lock
 
-# Compiled viewer assets and local frontend dependencies
+# Local frontend dependencies
 /node_modules/
-/viewer/dist/

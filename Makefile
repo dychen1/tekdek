@@ -5,17 +5,17 @@ SOURCE ?=
 NAME ?= $(notdir $(abspath $(SOURCE)))
 
 .PHONY: serve
-serve: build
-	node viewer/server.mjs --store "$(ARTIFACT_STORE)" --port "$(PORT)"
+serve:
+	cargo run --release --locked -- serve --store "$(ARTIFACT_STORE)" --port "$(PORT)"
 
 .PHONY: demo
-demo: build
-	node viewer/server.mjs --store "$(DEMO_STORE)" --port "$(PORT)"
+demo:
+	cargo run --release --locked -- serve --store "$(DEMO_STORE)" --port "$(PORT)"
 
 .PHONY: build
 build:
 	npm run typecheck
-	npm run build
+	cargo build --release --locked
 
 .PHONY: index
 index:

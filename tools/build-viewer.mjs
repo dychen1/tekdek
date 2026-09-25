@@ -1,7 +1,11 @@
-// Viewer build. Bundles the viewer page script and copies its stylesheet into viewer/dist.
+// Viewer build. Bundles the viewer page script into <output directory>/app.js.
+// The Cargo build script runs it so the binary embeds a bundle that matches the viewer sources.
 import { build } from "esbuild";
-import { copyFile, mkdir } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 
-await mkdir("viewer/dist", { recursive: true });
-await build({ entryPoints: ["viewer/src/main.ts"], bundle: true, format: "esm", target: "es2022", outfile: "viewer/dist/app.js" });
-await copyFile("viewer/styles/deck.css", "viewer/dist/app.css");
+const output = process.argv[2];
+if (!output) throw new Error("Use node tools/build-viewer.mjs <output directory>.");
+await build({
+  entryPoints: [fileURLToPath(new URL("../viewer/src/main.ts", import.meta.url))],
+  bundle: true, format: "esm", target: "es2022", outfile: `${output}/app.js`, logLevel: "warning",
+});

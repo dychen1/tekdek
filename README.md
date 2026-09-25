@@ -78,7 +78,7 @@ Each flow cluster lifts its functions out of the tree as boxes onto a raised col
 
 The URL keeps the codebase, the flow, and the step: `?artifact=<file>&flow=<name>&step=<n>`. A flow whose graph changed after the freeze plays with a stale warning.
 
-The viewer server binds to the loopback address. It serves the viewer and the files that `index.json` lists.
+`tekdek serve` binds to the loopback address. The viewer page, script, stylesheet, and fonts are embedded in the binary. The server reads only the store files that `index.json` lists.
 
 ## Frozen Flows
 
@@ -231,14 +231,15 @@ tekdek . \
 |   |-- store/                 # Store folder, atomic writes, graph artifact
 |   |-- flow/                  # Frozen flows: models, import, verify, lineage, rules
 |   |   `-- schema/            # Agent output and flow artifact JSON Schemas
-|   `-- catalog.rs             # index.json for the viewer
+|   |-- catalog.rs             # index.json for the viewer
+|   |-- query.rs               # Graph search and node neighbors for agents
+|   `-- serve.rs               # Viewer server with the embedded viewer
+|-- build.rs                   # Bundles the viewer script for the binary
 |-- viewer/
 |   |-- index.html             # Lift Deck page
 |   |-- src/                   # Strict TypeScript: data, layout, deck
 |   |-- styles/deck.css        # Tokens and styles
-|   |-- fonts/                 # JetBrains Mono latin subset (SIL OFL 1.1)
-|   |-- server.mjs             # Local viewer server
-|   `-- dist/                  # Generated browser bundle (ignored)
+|   `-- fonts/                 # JetBrains Mono latin subset (SIL OFL 1.1)
 |-- demo/                      # Demo store: this repository's graph and one flow
 `-- .skills/flow/SKILL.md      # Flow authoring skill for coding agents
 ```
