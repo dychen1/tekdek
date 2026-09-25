@@ -29,7 +29,7 @@ use tekdek::{
     },
 };
 
-use super::{failure, render, required, split_arguments};
+use super::{failure, render, required, split_arguments, store_directory};
 
 // -----------------------------------------------------------------------------
 // Commands
@@ -44,7 +44,7 @@ pub(super) const USAGE: &str = "usage: tekdek flow <command> [--store <directory
   agent-contract
 import freezes one agent output as a new generation; --check runs the complete
 import and writes nothing. verify recomputes the current generation. agent-contract prints the agent output JSON Schema.
-The default store is artifacts. Common options can appear anywhere after flow.
+The default store is the nearest .tekdek folder. Common options can appear anywhere after flow.
 Use --option=value for values that start with a hyphen.";
 
 const VALUE_OPTIONS: &[&str] = &[
@@ -57,7 +57,7 @@ const VALUE_OPTIONS: &[&str] = &[
 ];
 
 struct Command {
-    store: PathBuf,
+    store: Option<PathBuf>,
     json: bool,
     action: Action,
 }
@@ -93,9 +93,7 @@ impl Command {
     fn parse(arguments: impl Iterator<Item = String>) -> Result<Self, String> {
         let (operands, mut options) = split_arguments(arguments, VALUE_OPTIONS)?;
         let json = options.remove("--json").is_some();
-        let store = options
-            .remove("--store")
-            .map_or_else(|| PathBuf::from("artifacts"), PathBuf::from);
+        let store = options.remove("--store").map(PathBuf::from);
         let words: Vec<_> = operands.iter().map(String::as_str).collect();
         let action = match words.as_slice() {
             // List flows with an optional graph filter.
@@ -181,7 +179,8 @@ pub(super) fn run(arguments: Vec<String>, input: &mut impl Read) -> (u8, String)
 
 /// Executes one validated command through the flow backend.
 fn execute(command: Command, input: &mut impl Read) -> Result<(u8, String), Box<dyn Error>> {
-    let directory = command.store.as_path();
+    let store = store_directory(command.store)?;
+    let directory = store.as_path();
     let json = command.json;
     match command.action {
         // Return the flow listings without changing storage.

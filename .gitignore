@@ -30,6 +30,7 @@ rustc-ice-*.txt
 /target/
 # Generated codebase data and local design work.
 /artifacts/
+/.tekdek/
 /PRODUCT.md
 /DESIGN.md
 /.impeccable/

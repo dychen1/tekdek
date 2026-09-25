@@ -18,7 +18,7 @@ use tekdek::{
     store::graph::{ArtifactGraph, read_graph},
 };
 
-use super::{failure, render, split_arguments};
+use super::{failure, render, split_arguments, store_directory};
 
 // -----------------------------------------------------------------------------
 // Commands
@@ -30,13 +30,14 @@ pub(super) const USAGE: &str =
   show <key>
 search lists the node keys that contain every word of the text, best match
 first. show prints one node with its signature, container, members, callers,
-and callees. The default graph is the default of the store index.";
+and callees. The default store is the nearest .tekdek folder, and the default
+graph is the default of its index.";
 
 const VALUE_OPTIONS: &[&str] = &["--store", "--graph", "--kind", "--limit"];
 const DEFAULT_LIMIT: usize = 20;
 
 struct Command {
-    store: PathBuf,
+    store: Option<PathBuf>,
     graph: Option<String>,
     json: bool,
     action: Action,
@@ -58,9 +59,7 @@ impl Command {
     fn parse(arguments: impl Iterator<Item = String>) -> Result<Self, String> {
         let (operands, mut options) = split_arguments(arguments, VALUE_OPTIONS)?;
         let json = options.remove("--json").is_some();
-        let store = options
-            .remove("--store")
-            .map_or_else(|| PathBuf::from("artifacts"), PathBuf::from);
+        let store = options.remove("--store").map(PathBuf::from);
         let graph = options.remove("--graph");
         let words: Vec<_> = operands.iter().map(String::as_str).collect();
         let action = match words.as_slice() {
@@ -127,16 +126,13 @@ pub(super) fn run(arguments: Vec<String>) -> (u8, String) {
 
 /// Reads the selected graph and answers one query.
 fn execute(command: Command) -> Result<(u8, String), Box<dyn Error>> {
+    let store = store_directory(command.store)?;
     let file = match command.graph {
         Some(file) => file,
-        None => catalog::default_artifact(&command.store).map_err(|error| {
-            format!(
-                "cannot select a graph in {}: {error}",
-                command.store.display()
-            )
-        })?,
+        None => catalog::default_artifact(&store)
+            .map_err(|error| format!("cannot select a graph in {}: {error}", store.display()))?,
     };
-    let (graph, _) = read_graph(&command.store, &file)?;
+    let (graph, _) = read_graph(&store, &file)?;
     match command.action {
         // Rank the matching keys.
         Action::Search { text, kind, limit } => {

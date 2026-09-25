@@ -1,12 +1,15 @@
-ARTIFACT_STORE ?= artifacts
+STORE ?=
 DEMO_STORE ?= demo
 PORT ?= 8000
-SOURCE ?=
-NAME ?= $(notdir $(abspath $(SOURCE)))
+SOURCE ?= .
+NAME ?=
+
+store_option = $(if $(STORE),--store "$(STORE)")
+name_option = $(if $(NAME),--name "$(NAME)")
 
 .PHONY: serve
 serve:
-	cargo run --release --locked -- serve --store "$(ARTIFACT_STORE)" --port "$(PORT)"
+	cargo run --release --locked -- serve $(store_option) --port "$(PORT)"
 
 .PHONY: demo
 demo:
@@ -19,8 +22,7 @@ build:
 
 .PHONY: index
 index:
-	@test -n "$(SOURCE)" || (echo 'Set SOURCE to the codebase directory.' >&2; exit 1)
-	cargo run --release --locked -- "$(SOURCE)" --name "$(NAME)" --store "$(ARTIFACT_STORE)"
+	cargo run --release --locked -- index "$(SOURCE)" $(name_option) $(store_option)
 
 .PHONY: test
 test:

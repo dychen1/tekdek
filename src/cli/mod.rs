@@ -1,64 +1,82 @@
 //! Command-line interface.
 //!
-//! This module routes one command line: `flow ...` goes to the flow commands,
-//! `graph ...` goes to the graph queries, `serve` starts the viewer, `help`
-//! prints the usage, and every other command line indexes a codebase. Command arguments and standard input
-//! are the input. The exit code is the output.
+//! This module routes one command line to `index`, `graph`, `flow`, or
+//! `serve`, and prints the usage for `help`. Command arguments and standard
+//! input are the input. The exit code is the output.
 //!
 //! # Sections
 //!
 //! `Routing` selects the command.
-//! `Arguments` holds the option parser that the document commands share.
+//! `Arguments` holds the option parser and the store rule that the commands share.
 
 mod flow;
 mod graph;
 mod index;
 mod serve;
 
-use std::{collections::BTreeMap, io::Read, process::ExitCode};
+use std::{collections::BTreeMap, env, io::Read, path::PathBuf, process::ExitCode};
 
 use serde::Serialize;
+use tekdek::store::{PROJECT_STORE, find_project_store};
 
 // -----------------------------------------------------------------------------
 // Routing
 // -----------------------------------------------------------------------------
 
+const SUMMARY: &str = "usage: tekdek <command>
+  index    Index a codebase into its .tekdek store.
+  graph    Search the nodes of a graph and show one node.
+  flow     Import, check, verify, show, and list frozen flows.
+  serve    Serve the Lift Deck for a store.
+  help     Print the usage of every command.
+  version  Print the version.";
+
 /// Runs one command line and returns its exit code.
 pub fn run(arguments: Vec<String>, input: &mut impl Read) -> ExitCode {
-    let mut arguments = arguments.into_iter().peekable();
-    match arguments.peek().map(String::as_str) {
-        // Run one flow command; its output is one document on standard output.
-        Some("flow") => {
-            arguments.next();
-            let (code, output) = flow::run(arguments.collect(), input);
-            println!("{output}");
-            ExitCode::from(code)
-        }
+    let mut arguments = arguments.into_iter();
+    match arguments.next().as_deref() {
+        // Index one codebase.
+        Some("index") => index::run(arguments),
         // Run one graph query; its output is one document on standard output.
         Some("graph") => {
-            arguments.next();
             let (code, output) = graph::run(arguments.collect());
             println!("{output}");
             ExitCode::from(code)
         }
-        // Serve the viewer until the process ends.
-        Some("serve") => {
-            arguments.next();
-            serve::run(arguments)
+        // Run one flow command; its output is one document on standard output.
+        Some("flow") => {
+            let (code, output) = flow::run(arguments.collect(), input);
+            println!("{output}");
+            ExitCode::from(code)
         }
+        // Serve the viewer until the process ends.
+        Some("serve") => serve::run(arguments),
         // Print every usage.
         Some("help" | "--help" | "-h") => {
             println!(
-                "{}\n\n{}\n\n{}\n\n{}",
+                "{SUMMARY}\n\n{}\n\n{}\n\n{}\n\n{}",
                 index::USAGE,
-                flow::USAGE,
                 graph::USAGE,
+                flow::USAGE,
                 serve::USAGE
             );
             ExitCode::SUCCESS
         }
-        // Index one codebase.
-        _ => index::run(arguments),
+        // Print the version.
+        Some("version" | "--version" | "-V") => {
+            println!("tekdek {}", env!("CARGO_PKG_VERSION"));
+            ExitCode::SUCCESS
+        }
+        // Reject an unknown command.
+        Some(command) => {
+            eprintln!("error: unknown command: {command}\n{SUMMARY}");
+            ExitCode::FAILURE
+        }
+        // Print the command list.
+        None => {
+            eprintln!("{SUMMARY}");
+            ExitCode::FAILURE
+        }
     }
 }
 
@@ -123,6 +141,23 @@ fn split_arguments(
         options.insert(argument.to_owned(), value);
     }
     Ok((operands, options))
+}
+
+/// Returns the store of a command: the `--store` value, or the nearest project store.
+///
+/// The search starts in the working directory and moves up through its parents.
+fn store_directory(explicit: Option<PathBuf>) -> Result<PathBuf, String> {
+    if let Some(store) = explicit {
+        return Ok(store);
+    }
+    let start = env::current_dir()
+        .map_err(|error| format!("cannot read the working directory: {error}"))?;
+    find_project_store(&start).ok_or_else(|| {
+        format!(
+            "no {PROJECT_STORE} store in {} or its parents: run `tekdek index` in the project root, or pass --store <directory>",
+            start.display()
+        )
+    })
 }
 
 /// Removes one required option value.

@@ -11,16 +11,17 @@ use std::{
 
 use tekdek::serve::ViewerServer;
 
-use super::split_arguments;
+use super::{split_arguments, store_directory};
 
 pub(super) const USAGE: &str = "usage: tekdek serve [--store <directory>] [--port <n>] [--open]
-serve starts the Lift Deck on 127.0.0.1 and prints its URL. The default port
-is 8000; port 0 selects a free port. --open opens the URL in a browser.";
+serve starts the Lift Deck on 127.0.0.1 and prints its URL. The default store
+is the nearest .tekdek folder. The default port is 8000; port 0 selects a free
+port. --open opens the URL in a browser.";
 
 const DEFAULT_PORT: u16 = 8000;
 
 struct Arguments {
-    store: PathBuf,
+    store: Option<PathBuf>,
     port: u16,
     open: bool,
 }
@@ -34,7 +35,14 @@ pub(super) fn run(raw: impl Iterator<Item = String>) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let server = match ViewerServer::bind(&arguments.store, arguments.port) {
+    let store = match store_directory(arguments.store) {
+        Ok(store) => store,
+        Err(message) => {
+            eprintln!("error: {message}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let server = match ViewerServer::bind(&store, arguments.port) {
         Ok(server) => server,
         Err(error) => {
             eprintln!("error: {error}");
@@ -43,10 +51,7 @@ pub(super) fn run(raw: impl Iterator<Item = String>) -> ExitCode {
     };
     let url = server.url();
     println!("{url}");
-    eprintln!(
-        "Serving {}. Press Ctrl-C to stop.",
-        arguments.store.display()
-    );
+    eprintln!("Serving {}. Press Ctrl-C to stop.", store.display());
     if arguments.open
         && let Err(error) = open_browser(&url)
     {
@@ -62,9 +67,7 @@ fn parse(raw: impl Iterator<Item = String>) -> Result<Arguments, String> {
     if let Some(operand) = operands.first() {
         return Err(format!("unexpected argument: {operand}"));
     }
-    let store = options
-        .remove("--store")
-        .map_or_else(|| PathBuf::from("artifacts"), PathBuf::from);
+    let store = options.remove("--store").map(PathBuf::from);
     let port = options
         .remove("--port")
         .map(|port| {
@@ -110,10 +113,14 @@ mod tests {
     #[test]
     fn parses_the_store_the_port_and_the_open_flag() {
         let parsed = arguments(&["--store", "demo", "--port=0", "--open"]).expect("arguments");
-        assert_eq!(parsed.store, std::path::PathBuf::from("demo"));
+        assert_eq!(parsed.store, Some(std::path::PathBuf::from("demo")));
         assert_eq!(parsed.port, 0);
         assert!(parsed.open);
-        assert_eq!(arguments(&[]).expect("defaults").port, 8000);
+        let defaults = arguments(&[]).expect("defaults");
+        assert_eq!(
+            (defaults.store, defaults.port, defaults.open),
+            (None, 8000, false)
+        );
     }
 
     #[test]
