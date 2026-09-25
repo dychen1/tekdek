@@ -169,10 +169,7 @@ pub fn digest_of(bytes: &[u8]) -> String {
 mod tests {
     use std::fs;
 
-    use super::{
-        PROJECT_STORE, create_project_store, digest_of, find_project_store, reject_symlink,
-        write_bytes,
-    };
+    use super::{PROJECT_STORE, create_project_store, digest_of, find_project_store, write_bytes};
 
     #[test]
     fn finds_the_nearest_project_store_and_creates_one_with_an_ignore_file() {
@@ -215,6 +212,8 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn rejects_a_symbolic_link() {
+        use super::reject_symlink;
+
         let directory = tempfile::tempdir().expect("store");
         let target = directory.path().join("target.json");
         let link = directory.path().join("link.json");

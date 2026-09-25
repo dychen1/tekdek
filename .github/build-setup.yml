@@ -1,0 +1,18 @@
+# Steps that dist inserts into each build job before it runs cargo.
+# The build script of tekdek bundles the viewer with the locked npm dependencies.
+- name: Check that the tag is on main
+  if: ${{ github.event_name == 'push' }}
+  shell: bash
+  run: |
+    status="$(gh api "repos/${GITHUB_REPOSITORY}/compare/main...${GITHUB_SHA}" --jq .status)"
+    if [ "$status" != "identical" ] && [ "$status" != "behind" ]; then
+      echo "Release tags must point to a commit on main (compare status: $status)." >&2
+      exit 1
+    fi
+- name: Install Node.js
+  uses: actions/setup-node@v4
+  with:
+    node-version: 22
+    cache: npm
+- name: Install the viewer dependencies
+  run: npm ci
