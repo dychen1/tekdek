@@ -5,24 +5,28 @@
 //! requests until the process ends. Command arguments are the input.
 
 use std::{
-    path::PathBuf,
+    fs,
+    path::{Path, PathBuf},
     process::{Command, ExitCode, Stdio},
 };
 
+use serde_json::Value;
 use tekdek::serve::ViewerServer;
 
 use super::{split_arguments, store_directory};
 
-pub(super) const USAGE: &str = "usage: tekdek serve [--store <directory>] [--port <n>] [--open]
+pub(super) const USAGE: &str =
+    "usage: tekdek serve [--store <directory>] [--port <n>] [--flow <name>] [--open]
 serve starts the Lift Deck on 127.0.0.1 and prints its URL. The default store
 is the nearest .tekdek folder. The default port is 8000; port 0 selects a free
-port. --open opens the URL in a browser.";
+port. --flow prints the URL that opens one flow. --open opens the URL in a browser.";
 
 const DEFAULT_PORT: u16 = 8000;
 
 struct Arguments {
     store: Option<PathBuf>,
     port: u16,
+    flow: Option<String>,
     open: bool,
 }
 
@@ -49,7 +53,16 @@ pub(super) fn run(raw: impl Iterator<Item = String>) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let url = server.url();
+    let url = match &arguments.flow {
+        Some(flow) => match flow_url(&server.url(), &store, flow) {
+            Ok(url) => url,
+            Err(message) => {
+                eprintln!("error: {message}");
+                return ExitCode::FAILURE;
+            }
+        },
+        None => server.url(),
+    };
     println!("{url}");
     eprintln!("Serving {}. Press Ctrl-C to stop.", store.display());
     if arguments.open
@@ -63,7 +76,7 @@ pub(super) fn run(raw: impl Iterator<Item = String>) -> ExitCode {
 
 /// Parses the arguments after `serve`.
 fn parse(raw: impl Iterator<Item = String>) -> Result<Arguments, String> {
-    let (operands, mut options) = split_arguments(raw, &["--store", "--port"])?;
+    let (operands, mut options) = split_arguments(raw, &["--store", "--port", "--flow"])?;
     if let Some(operand) = operands.first() {
         return Err(format!("unexpected argument: {operand}"));
     }
@@ -76,11 +89,56 @@ fn parse(raw: impl Iterator<Item = String>) -> Result<Arguments, String> {
         })
         .transpose()?
         .unwrap_or(DEFAULT_PORT);
+    let flow = options.remove("--flow");
     let open = options.remove("--open").is_some();
     if let Some(option) = options.keys().next() {
         return Err(format!("unexpected option: {option}"));
     }
-    Ok(Arguments { store, port, open })
+    Ok(Arguments {
+        store,
+        port,
+        flow,
+        open,
+    })
+}
+
+/// Returns the viewer URL that opens one flow under the graph that the store index lists it with.
+fn flow_url(base: &str, store: &Path, flow: &str) -> Result<String, String> {
+    let text = fs::read_to_string(store.join("index.json"))
+        .map_err(|error| format!("cannot read the store index: {error}"))?;
+    let index: Value = serde_json::from_str(&text)
+        .map_err(|error| format!("cannot read the store index: {error}"))?;
+    let artifact = index["artifacts"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|entry| {
+            entry["flows"]
+                .as_array()
+                .is_some_and(|flows| flows.iter().any(|item| item["name"] == flow))
+        })
+        .and_then(|entry| entry["file"].as_str())
+        .ok_or_else(|| {
+            format!("the store index lists no flow named {flow}: run `tekdek flow list`")
+        })?;
+    Ok(format!(
+        "{base}?artifact={}&flow={}",
+        encode(artifact),
+        encode(flow)
+    ))
+}
+
+/// Percent-encodes every byte except the unreserved URL characters.
+fn encode(text: &str) -> String {
+    text.bytes()
+        .map(|byte| {
+            if byte.is_ascii_alphanumeric() || b"-._~".contains(&byte) {
+                char::from(byte).to_string()
+            } else {
+                format!("%{byte:02X}")
+            }
+        })
+        .collect()
 }
 
 /// Opens the URL with the browser of the operating system.
@@ -104,7 +162,7 @@ fn open_browser(url: &str) -> std::io::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::parse;
+    use super::{flow_url, parse};
 
     fn arguments(values: &[&str]) -> Result<super::Arguments, String> {
         parse(values.iter().map(|value| (*value).to_owned()))
@@ -121,6 +179,25 @@ mod tests {
             (defaults.store, defaults.port, defaults.open),
             (None, 8000, false)
         );
+    }
+
+    #[test]
+    fn builds_the_url_of_a_listed_flow() {
+        let store = tempfile::tempdir().expect("store");
+        let index = serde_json::json!({"artifacts": [
+            {"file": "other.json", "flows": []},
+            {"file": "my app.json", "flows": [{"name": "request-flow"}]}
+        ]});
+        std::fs::write(store.path().join("index.json"), index.to_string()).expect("index");
+
+        let url = flow_url("http://127.0.0.1:1/viewer/", store.path(), "request-flow")
+            .expect("listed flow");
+
+        assert_eq!(
+            url,
+            "http://127.0.0.1:1/viewer/?artifact=my%20app.json&flow=request-flow"
+        );
+        assert!(flow_url("http://127.0.0.1:1/viewer/", store.path(), "missing").is_err());
     }
 
     #[test]
