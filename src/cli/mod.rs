@@ -54,9 +54,12 @@ pub fn run(arguments: Vec<String>, input: &mut impl Read) -> ExitCode {
 // Arguments
 // -----------------------------------------------------------------------------
 
+/// The options that take no value. Each command removes the flags it accepts.
+const FLAGS: [&str; 2] = ["--json", "--check"];
+
 /// Separates options from command operands.
 ///
-/// `--json` is a flag. Each option in `value_options` takes one value, as
+/// Each option in `FLAGS` takes no value. Each option in `value_options` takes one value, as
 /// `--option value` or `--option=value`. A separate value cannot start with a
 /// hyphen, except `-` itself.
 fn split_arguments(
@@ -81,7 +84,7 @@ fn split_arguments(
         if options.contains_key(argument) {
             return Err(format!("duplicate option: {argument}"));
         }
-        let value = if argument == "--json" {
+        let value = if FLAGS.contains(&argument) {
             if inline.is_some() {
                 return Err(format!("{argument} does not accept a value"));
             }

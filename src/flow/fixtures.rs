@@ -150,6 +150,7 @@ pub fn import(directory: &Path, name: &str, output: &Value) -> Result<ImportOutc
             graph_file: "graph.json",
             input: &input,
             author: agent(),
+            dry_run: false,
         },
     )
 }

@@ -38,12 +38,12 @@ use super::{failure, render, required, split_arguments};
 pub(super) const USAGE: &str = "usage: tekdek flow <command> [--store <directory>] [--json]
   list [--graph <file>]
   show <name>
-  import <name> --graph <file> --input <path or ->
+  import <name> --graph <file> --input <path or -> [--check]
     [--author agent|human|system] [--author-name <name>] [--model-id <id>]
   verify <name>
   agent-contract
-import freezes one agent output as a new generation. verify recomputes the
-current generation. agent-contract prints the agent output JSON Schema.
+import freezes one agent output as a new generation; --check runs the complete
+import and writes nothing. verify recomputes the current generation. agent-contract prints the agent output JSON Schema.
 The default store is artifacts. Common options can appear anywhere after flow.
 Use --option=value for values that start with a hyphen.";
 
@@ -63,22 +63,19 @@ struct Command {
 }
 
 enum Action {
-    List {
-        graph: Option<String>,
-    },
-    Show {
-        name: String,
-    },
-    Import {
-        name: String,
-        graph: String,
-        input: PathBuf,
-        author: AuthorOptions,
-    },
-    Verify {
-        name: String,
-    },
+    List { graph: Option<String> },
+    Show { name: String },
+    Import(ImportCommand),
+    Verify { name: String },
     AgentContract,
+}
+
+struct ImportCommand {
+    name: String,
+    graph: String,
+    input: PathBuf,
+    author: AuthorOptions,
+    check: bool,
 }
 
 struct AuthorOptions {
@@ -110,7 +107,7 @@ impl Command {
                 name: (*name).to_owned(),
             },
             // Freeze one agent output as a new generation.
-            ["import", name] => Action::Import {
+            ["import", name] => Action::Import(ImportCommand {
                 name: (*name).to_owned(),
                 graph: required(&mut options, "--graph")?,
                 input: required(&mut options, "--input")?.into(),
@@ -119,7 +116,8 @@ impl Command {
                     name: options.remove("--author-name"),
                     model_id: options.remove("--model-id"),
                 },
-            },
+                check: options.remove("--check").is_some(),
+            }),
             // Verify the current generation.
             ["verify", name] => Action::Verify {
                 name: (*name).to_owned(),
@@ -191,12 +189,7 @@ fn execute(command: Command, input: &mut impl Read) -> Result<(u8, String), Box<
         // Return the current generation and readable step details.
         Action::Show { name } => show(directory, json, &name),
         // Freeze one agent output and report every issue of a rejection.
-        Action::Import {
-            name,
-            graph,
-            input: path,
-            author,
-        } => import(directory, json, &name, &graph, &path, author, input),
+        Action::Import(import_command) => import(directory, json, import_command, input),
         // Recompute the current generation without writes.
         Action::Verify { name } => verify(directory, json, &name),
         // Print the embedded contract as it is.
@@ -294,23 +287,27 @@ fn describe(artifact: &FlowArtifact, file: &str) -> String {
     lines.join("\n")
 }
 
-/// Freezes one agent output. A rejection prints every issue and exits with 2.
+/// Freezes or checks one agent output. A rejection prints every issue and exits with 2.
 fn import(
     directory: &Path,
     json: bool,
-    name: &str,
-    graph: &str,
-    path: &Path,
-    author: AuthorOptions,
+    command: ImportCommand,
     input: &mut impl Read,
 ) -> Result<(u8, String), Box<dyn Error>> {
+    let ImportCommand {
+        name,
+        graph,
+        input: path,
+        author,
+        check,
+    } = command;
     let author = author.resolve()?;
     let bytes = if path.as_os_str() == "-" {
         let mut bytes = Vec::new();
         input.read_to_end(&mut bytes)?;
         bytes
     } else {
-        fs::read(path).map_err(|error| {
+        fs::read(&path).map_err(|error| {
             std::io::Error::new(
                 error.kind(),
                 format!("cannot read {}: {error}", path.display()),
@@ -318,23 +315,25 @@ fn import(
         })?
     };
     let request = ImportRequest {
-        name,
-        graph_file: graph,
+        name: &name,
+        graph_file: &graph,
         input: &bytes,
         author,
+        dry_run: check,
     };
     match import::import_flow(directory, request) {
-        // Report the frozen or unchanged generation and refresh the catalog.
+        // Report the frozen, unchanged, or checked generation; refresh the catalog after a freeze.
         Ok(ImportOutcome::Frozen(generation)) => {
-            if !generation.unchanged {
+            if !generation.unchanged && !generation.dry_run {
                 catalog::refresh_artifact_index(directory).map_err(|error| {
                     format!("the tool froze the generation, but catalog refresh failed: {error}")
                 })?;
             }
-            let verb = if generation.unchanged {
-                "kept"
-            } else {
-                "froze"
+            let verb = match (generation.dry_run, generation.unchanged) {
+                (true, true) => "check passed, would keep",
+                (true, false) => "check passed, would freeze",
+                (false, true) => "kept",
+                (false, false) => "froze",
             };
             let mut lines = vec![format!(
                 "flow {name}: {verb} generation {} ({})\n  {}\n  {}",
@@ -474,7 +473,18 @@ mod tests {
         author[7] = "robot";
         assert!(execute(path, &author, &output().to_string(), 2)["error"].is_string());
 
+        let mut check = IMPORT.to_vec();
+        check.push("--check");
+        let checked = execute(path, &check, &output().to_string(), 0);
+        assert_eq!(checked["dryRun"], true);
+        assert_eq!(checked["ordinal"], 1);
+        assert!(!path.join("flows").exists());
+        assert!(!path.join("index.json").exists());
+
         let frozen = execute(path, &IMPORT, &output().to_string(), 0);
+        assert_eq!(frozen["dryRun"], false);
+        assert_eq!(frozen["generationDigest"], checked["generationDigest"]);
+        assert_eq!(frozen["file"], checked["file"]);
         assert_eq!(frozen["purpose"], "initial");
         assert_eq!(frozen["ordinal"], 1);
         let index: Value =
@@ -539,7 +549,7 @@ mod tests {
         )
         .expect("inline values");
         assert!(
-            matches!(command.action, super::Action::Import { graph, .. } if graph == "-weird.json")
+            matches!(command.action, super::Action::Import(super::ImportCommand { graph, .. }) if graph == "-weird.json")
         );
     }
 
