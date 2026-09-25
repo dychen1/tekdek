@@ -10,8 +10,10 @@
 //! `store` owns the store folder and the graph artifact.
 //! `flow` imports and verifies frozen flows.
 //! `catalog` writes `index.json` for the viewer.
+//! `query` searches graph nodes and lists their neighbors for agents.
 
 pub mod analysis;
 pub mod catalog;
 pub mod flow;
+pub mod query;
 pub mod store;

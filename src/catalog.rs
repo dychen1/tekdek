@@ -69,13 +69,27 @@ pub fn write_artifact_index(directory: &Path, default_artifact: &str) -> io::Res
 ///
 /// Returns an error if the store has no artifact or writing fails.
 pub fn refresh_artifact_index(directory: &Path) -> io::Result<()> {
+    let _lock = lock_store(directory)?;
+    let default = default_artifact(directory)?;
+    write_locked(directory, &default)
+}
+
+/// Returns the default graph file of the store.
+///
+/// The index default wins when it names a graph file of the store. A missing
+/// or unreadable index falls back to the first graph file in name order.
+///
+/// # Errors
+///
+/// Returns an error if the store has no graph file or cannot be read.
+pub fn default_artifact(directory: &Path) -> io::Result<String> {
     #[derive(serde::Deserialize)]
     #[serde(rename_all = "camelCase")]
     struct ExistingIndex {
         default_artifact: String,
     }
 
-    let _lock = lock_store(directory)?;
+    reject_symlink(directory)?;
     let files = artifact_files(directory)?;
     let first_artifact = files.first().cloned().ok_or_else(|| {
         io::Error::new(
@@ -88,10 +102,9 @@ pub fn refresh_artifact_index(directory: &Path) -> io::Result<()> {
         .ok()
         .and_then(|text| serde_json::from_str::<ExistingIndex>(&text).ok())
         .map(|index| index.default_artifact);
-    let default = existing
+    Ok(existing
         .filter(|file| files.contains(file))
-        .unwrap_or(first_artifact);
-    write_locked(directory, &default)
+        .unwrap_or(first_artifact))
 }
 
 fn write_locked(directory: &Path, default_artifact: &str) -> io::Result<()> {
