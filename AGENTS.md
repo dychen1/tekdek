@@ -24,6 +24,8 @@
 
 ## Checks
 
+Run `npm ci` once. Every Cargo build runs `build.rs`, which bundles the viewer with the npm dependencies.
+
 Run these commands after each Rust change:
 
 ```sh
