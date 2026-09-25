@@ -137,12 +137,21 @@ fn preflight_server_programs_with(
 }
 
 fn program_is_available(program: &str) -> bool {
+    find_program(program).is_some()
+}
+
+/// Returns the first executable file for a program name or path.
+///
+/// A name with one component is looked up in each `PATH` folder in order. On
+/// Windows, a name without an extension also matches `<name>.exe`.
+#[must_use]
+pub fn find_program(program: &str) -> Option<PathBuf> {
     let search_paths = env::var_os("PATH")
         .map(|value| env::split_paths(&value).collect::<Vec<_>>())
         .unwrap_or_default();
     program_candidates(program, &search_paths, executable_suffix())
-        .iter()
-        .any(|candidate| is_executable_file(candidate))
+        .into_iter()
+        .find(|candidate| is_executable_file(candidate))
 }
 
 fn program_candidates(

@@ -1,7 +1,7 @@
 //! Command-line interface.
 //!
-//! This module routes one command line to `index`, `graph`, `flow`, or
-//! `serve`, and prints the usage for `help`. Command arguments and standard
+//! This module routes one command line to `index`, `graph`, `flow`, `serve`,
+//! or `doctor`, and prints the usage for `help`. Command arguments and standard
 //! input are the input. The exit code is the output.
 //!
 //! # Sections
@@ -9,6 +9,7 @@
 //! `Routing` selects the command.
 //! `Arguments` holds the option parser and the store rule that the commands share.
 
+mod doctor;
 mod flow;
 mod graph;
 mod index;
@@ -28,6 +29,7 @@ const SUMMARY: &str = "usage: tekdek <command>
   graph    Search the nodes of a graph and show one node.
   flow     Import, check, verify, show, and list frozen flows.
   serve    Serve the Lift Deck for a store.
+  doctor   Check the language servers.
   help     Print the usage of every command.
   version  Print the version.";
 
@@ -51,14 +53,17 @@ pub fn run(arguments: Vec<String>, input: &mut impl Read) -> ExitCode {
         }
         // Serve the viewer until the process ends.
         Some("serve") => serve::run(arguments),
+        // Check the language servers.
+        Some("doctor") => doctor::run(arguments.collect()),
         // Print every usage.
         Some("help" | "--help" | "-h") => {
             println!(
-                "{SUMMARY}\n\n{}\n\n{}\n\n{}\n\n{}",
+                "{SUMMARY}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}",
                 index::USAGE,
                 graph::USAGE,
                 flow::USAGE,
-                serve::USAGE
+                serve::USAGE,
+                doctor::USAGE
             );
             ExitCode::SUCCESS
         }
