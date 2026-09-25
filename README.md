@@ -45,7 +45,7 @@ Open `http://127.0.0.1:8000/viewer/`. Press the right arrow to start the flow. P
    make index SOURCE=/path/to/codebase NAME=my-project
    ```
 
-2. Ask a coding agent to write a flow. The agent follows `.skills/flow/SKILL.md`: it finds node keys in the graph, writes one agent output document with clusters and a label on every step, and freezes it.
+2. Ask a coding agent to write a flow. The agent follows `plugin/skills/flow/SKILL.md`: it finds node keys in the graph, writes one agent output document with clusters and a label on every step, and freezes it.
 
    ```sh
    tekdek flow import request-handling --graph my-project.json \
@@ -241,7 +241,8 @@ tekdek . \
 |   |-- styles/deck.css        # Tokens and styles
 |   `-- fonts/                 # JetBrains Mono latin subset (SIL OFL 1.1)
 |-- demo/                      # Demo store: this repository's graph and one flow
-`-- .skills/flow/SKILL.md      # Flow authoring skill for coding agents
+|-- .claude-plugin/            # Claude Code marketplace
+`-- plugin/                    # Claude Code plugin: the flow and flow-view skills
 ```
 
 The analysis runs in this order:

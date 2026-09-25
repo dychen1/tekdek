@@ -192,3 +192,23 @@ fn failure(json: bool, message: &str) -> (u8, String) {
         },
     )
 }
+
+// -----------------------------------------------------------------------------
+// Tests
+// -----------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn the_plugin_version_matches_the_crate_version() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/plugin/.claude-plugin/plugin.json"
+        );
+        let manifest: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(path).expect("plugin manifest"))
+                .expect("plugin manifest JSON");
+
+        assert_eq!(manifest["version"], env!("CARGO_PKG_VERSION"));
+    }
+}

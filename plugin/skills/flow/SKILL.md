@@ -1,18 +1,20 @@
 ---
 name: flow
 description: Create frozen Tekdek flows with clusters for /flow requests. Use for overview or detailed walkthroughs of source behavior.
+argument-hint: "[--mode overview|detailed] <behavior>"
 ---
 
 # Flow Walkthroughs
 
 Create a frozen Tekdek flow, not only a prose explanation.
-This skill owns step selection, cluster labels, annotations, and verification. It uses an existing graph artifact and its source repository.
-Use `/flow` as the invocation name when the harness supports custom commands.
-Otherwise, ask the agent to read `.skills/flow/SKILL.md` and follow it for the request.
+This skill owns step selection, cluster labels, annotations, and verification. It uses an indexed graph and its source repository.
+With the tekdek Claude Code plugin, run `/tekdek:flow <behavior>`.
+Other agents read `plugin/skills/flow/SKILL.md` from the tekdek repository and follow it for the request.
 
 ## Inputs
 
-Accept a behavior, graph artifact, source root, and optional mode or flow name.
+Accept a behavior, and optionally a mode, a flow name, a store, a graph, and a source root.
+By default, the source root is the project that holds the nearest `.tekdek` folder, the store is that folder, and the graph is the default graph of its index.
 Use the conversation to resolve omitted inputs. Ask one short question if the graph, source root, or behavior remains ambiguous.
 
 - Default to `overview` for a non-detailed request.
@@ -25,45 +27,42 @@ Use the conversation to resolve omitted inputs. Ask one short question if the gr
 Examples:
 
 ```text
-/flow artifacts/app.json from /path/to/app explain PDF indexing
-/flow --mode detailed artifacts/app.json from /path/to/app explain PDF indexing
-/flow create both versions for request authentication in artifacts/app.json from /path/to/app
+/tekdek:flow explain PDF indexing
+/tekdek:flow --mode detailed explain PDF indexing
+/tekdek:flow create both versions for request authentication
 ```
 
-These are agent request examples, not analyzer CLI flags.
+These are agent request examples, not CLI flags.
 
 ## Commands
 
-Use the `tekdek` executable (`cargo install --locked --path .` from this repository). Without it, run `cargo run --release --locked --` from this repository root instead of `tekdek`.
+Use the `tekdek` executable. If `tekdek` is not on `PATH`, stop and give the user the install steps from the tekdek README.
 
-Every flow command reads one store. The default store is `artifacts` in the working directory. Pass `--store <directory>` on every command when the store is somewhere else, for example `--store demo`.
+Every command reads one store. The default store is the nearest `.tekdek` folder from the working directory. Run commands from the analyzed project, or pass `--store <directory>` on every command. If no store exists, run `tekdek index` in the project root first; `tekdek doctor` reports a missing language server.
 
 ```sh
+tekdek graph search <words> [--kind callable]                # find node keys
+tekdek graph show <key>                                      # signature, callers, callees
 tekdek flow agent-contract                                   # the output contract
-tekdek flow list --graph app.json --store <store>            # existing flows
-tekdek flow import <name> --graph app.json --input <file> --store <store> --author-name <agent> --json
-tekdek flow verify <name> --store <store>
-tekdek flow show <name> --store <store> [--json]
+tekdek flow list                                             # existing flows
+tekdek flow import <name> --graph app.json --input <file> --check --json
+tekdek flow import <name> --graph app.json --input <file> --author-name <agent> --json
+tekdek flow verify <name>
+tekdek flow show <name> [--json]
+tekdek serve --flow <name> --open                            # open the flow
 ```
 
 ## Inspect
 
 1. Read the analyzed repository's own agent instructions (`AGENTS.md`, `CLAUDE.md`, or `README.md`) when they exist.
 2. Print the output contract with `tekdek flow agent-contract`. Follow its field descriptions.
-3. Read the graph: `<store>/<graph>.json` has the shape `{"schemaVersion": 1, "graph": {"languages", "nodes", "edges"}}`. A node has `id`, `key`, `name`, `path`, and `kind` (`module`, `type`, `callable`, or `field`). An edge has `source` and `target` node `id`s and a `kind`; calls have `"kind": "calls"`.
-4. Read node keys correctly. A key is the file path followed by `::`-separated segments, for example `src/cli/flow.rs::callable:execute` or `src/cli/flow.rs::type:Command::callable:parse`. A `[n]` suffix (for example `callable:run[1]`) separates two declarations with the same path; read both in the source and pick the right one.
-5. Find keys and neighbors with a structured query, not by eye. For example, list the callables of one file and their callees:
+3. Read node keys correctly. A key is the file path followed by `::`-separated segments, for example `src/cli/flow.rs::callable:execute` or `src/cli/flow.rs::type:Command::callable:parse`. A node `kind` is `module`, `type`, `callable`, or `field`. A `[n]` suffix (for example `callable:run[1]`) separates two declarations with the same path; read both in the source and pick the right one.
+4. Find keys with `tekdek graph search <words>`: it lists the keys that contain every word, best name match first. Then read one node with `tekdek graph show <key>`: its signature, container, members, callers, and callees come from the static graph. Do not read the graph JSON by hand. A missing key error names close keys.
 
-   ```sh
-   jq -r --arg p src/flow/import.rs '.graph as $g | ($g.nodes | map({(.id|tostring): .key}) | add) as $k
-     | $g.nodes[] | select(.path == $p and .kind == "callable") | .id as $i
-     | "\(.key)  ->  \([$g.edges[] | select(.source == $i and .kind == "calls") | $k[.target|tostring]] | unique | join(", "))"' <store>/app.json
-   ```
-
-6. Trace the requested behavior in source code.
-7. Resolve the entry point, orchestration functions, persistent state, external boundaries, and terminal outcomes.
-8. Match each selected function to an existing graph node key. Copy keys exactly.
-9. Check existing flow names with `tekdek flow list`.
+5. Trace the requested behavior in source code.
+6. Resolve the entry point, orchestration functions, persistent state, external boundaries, and terminal outcomes.
+7. Match each selected function to an existing graph node key. Copy keys exactly.
+8. Check existing flow names with `tekdek flow list`.
 
 Do not infer execution order from graph edges alone. A static call graph does not prove a runtime sequence.
 Distinguish calls from references, imports, and type relationships.
@@ -164,17 +163,18 @@ Do not change production source code for a walkthrough request.
 }
 ```
 
-Write the output document outside the analyzed repository and outside this repository, for example in a temporary directory, so no stray file lands in either tree.
+Write the output document outside the analyzed repository, for example in a temporary directory, so no stray file lands in its tree.
+
+Check the document first. `--check` runs the complete import, including every node key, cluster, and membership rule, and writes nothing. Then import it.
 
 ```sh
+tekdek flow import indexing-overview --graph app.json --input /tmp/indexing-overview.json --check --json
 tekdek flow import indexing-overview --graph app.json --input /tmp/indexing-overview.json --author-name claude-code --json
 ```
 
-Before you import, check the document with a short script: every `nodeKey` exists in the graph, every step uses a declared cluster, and all steps of one function carry the same cluster.
-
-The graph argument is a file name inside the store, not a path from the working directory.
-Use `--store <directory>` consistently when the store is not `artifacts`.
-A rejected import prints every issue and writes nothing. Fix every issue in the document and import it again.
+The graph argument is a file name inside the store, not a path from the working directory. `tekdek graph search` prints the graph file that it reads, and the store `index.json` lists every graph file.
+Use `--store <directory>` on every command when the store is not the nearest `.tekdek` folder.
+A rejected import or check prints every issue and writes nothing. Fix every issue in the document and run it again.
 If the behavior is not in the index, answer with `"outcome": "no_flow"`, a `reason`, and an `explanation` instead of a forced flow.
 
 To revise a frozen flow on the same graph, read it with `flow show <name> --json`, copy each continued step's `id` into `priorStepId`, keep the cluster keys that keep their purpose, and write a `revisionSummary`.
@@ -201,4 +201,4 @@ Report connectivity separately. Use the count as a diagnostic, not a mandatory p
 State the frozen flow name, mode, step count, cluster labels, and generation file.
 Report connected transitions over total transitions and summarize the remaining boundary types.
 State whether verification passed and whether any evidence remains uncertain.
-Tell the user to open the viewer with `make serve` (add `ARTIFACT_STORE=<store>` for a store other than `artifacts`), select the codebase and the flow, and press the right arrow.
+Tell the user to open the flow with `/tekdek:flow-view <name>` or `tekdek serve --flow <name> --open`, and to press the right arrow to step through it.
