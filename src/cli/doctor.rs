@@ -160,6 +160,12 @@ fn describe(checks: &[ServerCheck]) -> String {
         };
         lines.push(format!("{:<8}{status:<10}{detail}", check.language));
     }
+    if checks.iter().any(|check| check.status == Status::Missing) {
+        lines.push(format!(
+            "Other install sources: {}#language-servers",
+            env!("CARGO_PKG_REPOSITORY")
+        ));
+    }
     lines.join("\n")
 }
 
@@ -248,6 +254,24 @@ mod tests {
 
         assert_eq!(code, 0);
         assert!(output.contains("disabled in the configuration"), "{output}");
+        assert!(!output.contains("#language-servers"), "{output}");
+    }
+
+    #[test]
+    fn names_other_install_sources_for_a_missing_server() {
+        let directory = tempfile::tempdir().expect("configuration");
+        let path = config(&directory, "program = \"tekdek-missing-server\"");
+
+        let (code, output) =
+            check(vec!["--config".to_owned(), path.display().to_string()]).expect("report");
+
+        assert_eq!(code, 1);
+        assert!(
+            output.ends_with(
+                "Other install sources: https://github.com/dychen1/tekdek#language-servers"
+            ),
+            "{output}"
+        );
     }
 
     #[test]

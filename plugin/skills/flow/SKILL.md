@@ -38,7 +38,9 @@ These are agent request examples, not CLI flags.
 
 Use the `tekdek` executable. If `tekdek` is not on `PATH`, stop and give the user the install steps from the tekdek README.
 
-Every command reads one store. The default store is the nearest `.tekdek` folder from the working directory. Run commands from the analyzed project, or pass `--store <directory>` on every command. If no store exists, run `tekdek index` in the project root first; `tekdek doctor` reports a missing language server.
+Every command reads one store. The default store is the nearest `.tekdek` folder from the working directory. Run commands from the analyzed project, or pass `--store <directory>` on every command. If no store exists, run `tekdek index` in the project root first.
+
+Before `tekdek index`, follow [language-servers.md](language-servers.md) (in the tekdek repository: `plugin/skills/flow/language-servers.md`). It lists the supported languages, finds local language servers, and asks the user before it installs a server. Never install a language server without the user's `y`.
 
 ```sh
 tekdek graph search <words> [--kind callable]                # find node keys

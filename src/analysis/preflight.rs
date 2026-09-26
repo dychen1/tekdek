@@ -130,7 +130,7 @@ fn preflight_server_programs_with(
         Ok(())
     } else {
         Err(PipelineError::Setup(format!(
-            "cannot start language servers: {}",
+            "cannot start language servers: {}. Run `tekdek doctor` for the install commands",
             missing.join("; ")
         )))
     }
@@ -324,7 +324,7 @@ mod tests {
 
         assert_eq!(
             error.to_string(),
-            "cannot start language servers: python needs pyright-langserver; rust needs rust-analyzer"
+            "cannot start language servers: python needs pyright-langserver; rust needs rust-analyzer. Run `tekdek doctor` for the install commands"
         );
     }
 

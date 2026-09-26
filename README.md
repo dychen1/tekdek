@@ -10,8 +10,7 @@
 
 ## Requirements
 
-- Put a language server on `PATH` for each language that you index: `rust-analyzer` for Rust and `pyright-langserver` for Python. Use a language-qualified `--server` option to select another executable.
-- Run `tekdek doctor` to check the servers. It prints the install command of each missing server.
+- Install a language server for each language that you index: `rust-analyzer` for Rust and `pyright-langserver` for Python. See [Language Servers](#language-servers).
 - To build from source, install the stable Rust toolchain and Node.js 22 or later. The build bundles the viewer with the locked npm dependencies.
 
 ## Install
@@ -38,6 +37,8 @@ Install the `tekdek` binary with one of these methods:
   cargo install --locked --path .
   ```
 
+The installers put `tekdek` in `$XDG_BIN_HOME`, else `$XDG_DATA_HOME/../bin`, else `~/.local/bin`, and add that folder to `PATH` in your shell profile. They do not need Rust or Node.js.
+
 The installers download from GitHub Releases. While `dychen1/tekdek` is a private repository, they work only after the repository becomes public. Until then, download a release archive with `gh release download --repo dychen1/tekdek`, or build from source.
 
 Install the agent skills in Claude Code:
@@ -48,6 +49,22 @@ Install the agent skills in Claude Code:
 ```
 
 The plugin adds `/tekdek:flow` and `/tekdek:flow-view`. It calls the `tekdek` binary, so install the binary first. For a private repository, Claude Code uses your git credentials (for GitHub, run `gh auth login` and `gh auth setup-git` once). Other coding agents can read `plugin/skills/flow/SKILL.md` and follow it.
+
+## Language Servers
+
+`tekdek index` asks a language server for the calls and references of each indexed language. The other commands need no language server.
+
+| Language | Indexed | Server | Install |
+| --- | --- | --- | --- |
+| Rust | Yes | `rust-analyzer` | `rustup component add rust-analyzer`, `brew install rust-analyzer`, or a binary from [the releases](https://github.com/rust-lang/rust-analyzer/releases) |
+| Python | Yes | `pyright-langserver` | `npm install -g pyright`, or without Node.js: `uv tool install 'pyright[nodejs]'` or `pipx install 'pyright[nodejs]'` |
+| TypeScript and JavaScript | Not yet | `typescript-language-server` | `npm install -g typescript-language-server typescript@6` |
+| Go | Not yet | `gopls` | `go install golang.org/x/tools/gopls@latest` |
+
+- Run `tekdek doctor` to check the servers. It prints the path and version of each server, or the install command of a missing server.
+- For a server that is not on `PATH`, pass its path: `tekdek index --server python=.venv/bin/pyright-langserver`.
+- `tekdek index` skips the files of a language that is not indexed yet. The graph and its flows do not contain their functions. Request a language in [issue #4](https://github.com/dychen1/tekdek/issues/4).
+- The `/tekdek:flow` skill checks the servers before it indexes. It first looks for a server that is already on your machine. For a missing server, it asks one question, for example `pyright needed for project acme-api - 20 MB. y or n to download and install?`, and installs only after `y`. The skill instructions are in [`plugin/skills/flow/language-servers.md`](plugin/skills/flow/language-servers.md).
 
 ## Quick Start
 
