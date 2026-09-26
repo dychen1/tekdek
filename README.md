@@ -2,20 +2,13 @@
 
 ## Overview
 
-- Purpose: help engineers follow one behavior of a codebase while they keep the file structure in view.
-- Scope: Python and Rust indexing, agent-written flows with clusters, the Lift Deck viewer, release installers, and a Claude Code plugin.
-- Approach: index source facts into a graph, let a coding agent write a flow against that graph, freeze the flow, and play it in the browser.
-- Boundaries: a flow explains ordered visits to functions; it never changes source facts. Lines show static calls in the source, not runtime counts.
+- Purpose: help engineers follow one behavior of a codebase while the file structure stays in view.
+- Scope: Rust and Python indexing, agent-written flows with clusters, the Lift Deck viewer, installers, and a Claude Code plugin.
+- Approach: index the source into a graph, let a coding agent write a flow against the graph, freeze the flow, and play it in the browser.
+- Boundaries: a flow explains ordered visits to functions and never changes the source facts. Lines show static calls, not runtime counts.
 - Outcome: a frozen, shareable flow that plays the same way for every reader.
 
-## Requirements
-
-- Install a language server for each language that you index: `rust-analyzer` for Rust and `pyright-langserver` for Python. See [Language Servers](#language-servers).
-- To build from source, install the stable Rust toolchain and Node.js 22 or later. The build bundles the viewer with the locked npm dependencies.
-
 ## Install
-
-Install the `tekdek` binary with one of these methods:
 
 - macOS and Linux:
 
@@ -29,7 +22,7 @@ Install the `tekdek` binary with one of these methods:
   powershell -ExecutionPolicy Bypass -c "irm https://github.com/dychen1/tekdek/releases/latest/download/tekdek-installer.ps1 | iex"
   ```
 
-- From source:
+- From source, with Rust and Node.js 22 or later:
 
   ```sh
   git clone https://github.com/dychen1/tekdek && cd tekdek
@@ -37,9 +30,7 @@ Install the `tekdek` binary with one of these methods:
   cargo install --locked --path .
   ```
 
-The installers put `tekdek` in `$XDG_BIN_HOME`, else `$XDG_DATA_HOME/../bin`, else `~/.local/bin`, and add that folder to `PATH` in your shell profile. They do not need Rust or Node.js.
-
-The installers download from GitHub Releases. While `dychen1/tekdek` is a private repository, they work only after the repository becomes public. Until then, download a release archive with `gh release download --repo dychen1/tekdek`, or build from source.
+The installers need no Rust or Node.js. They put `tekdek` in `$XDG_BIN_HOME`, else `$XDG_DATA_HOME/../bin`, else `~/.local/bin`, and add that folder to `PATH`. They download from GitHub Releases, so they work only after the repository becomes public. Until then, use `gh release download --repo dychen1/tekdek` or build from source.
 
 Install the agent skills in Claude Code:
 
@@ -48,23 +39,23 @@ Install the agent skills in Claude Code:
 /plugin install tekdek@tekdek
 ```
 
-The plugin adds `/tekdek:flow` and `/tekdek:flow-view`. It calls the `tekdek` binary, so install the binary first. For a private repository, Claude Code uses your git credentials (for GitHub, run `gh auth login` and `gh auth setup-git` once). Other coding agents can read `plugin/skills/flow/SKILL.md` and follow it.
+The plugin adds `/tekdek:flow` and `/tekdek:flow-view`, which call the `tekdek` binary. For the private repository, Claude Code uses your git credentials (`gh auth login`, then `gh auth setup-git`). Other coding agents can follow `plugin/skills/flow/SKILL.md`.
 
 ## Language Servers
 
-`tekdek index` asks a language server for the calls and references of each indexed language. The other commands need no language server.
+`tekdek index` gets calls and references from a language server. The other commands need no language server.
 
 | Language | Indexed | Server | Install |
 | --- | --- | --- | --- |
-| Rust | Yes | `rust-analyzer` | `rustup component add rust-analyzer`, `brew install rust-analyzer`, or a binary from [the releases](https://github.com/rust-lang/rust-analyzer/releases) |
+| Rust | Yes | `rust-analyzer` | `rustup component add rust-analyzer`, `brew install rust-analyzer`, or a [release binary](https://github.com/rust-lang/rust-analyzer/releases) |
 | Python | Yes | `pyright-langserver` | `npm install -g pyright`, or without Node.js: `uv tool install 'pyright[nodejs]'` or `pipx install 'pyright[nodejs]'` |
 | TypeScript and JavaScript | Not yet | `typescript-language-server` | `npm install -g typescript-language-server typescript@6` |
 | Go | Not yet | `gopls` | `go install golang.org/x/tools/gopls@latest` |
 
-- Run `tekdek doctor` to check the servers. It prints the path and version of each server, or the install command of a missing server.
-- For a server that is not on `PATH`, pass its path: `tekdek index --server python=.venv/bin/pyright-langserver`.
-- `tekdek index` skips the files of a language that is not indexed yet. The graph and its flows do not contain their functions. Request a language in [issue #4](https://github.com/dychen1/tekdek/issues/4).
-- The `/tekdek:flow` skill checks the servers before it indexes. It first looks for a server that is already on your machine. For a missing server, it asks one question, for example `pyright needed for project acme-api - 20 MB. y or n to download and install?`, and installs only after `y`. The skill instructions are in [`plugin/skills/flow/language-servers.md`](plugin/skills/flow/language-servers.md).
+- `tekdek doctor` prints the path and version of each server, or the install command of a missing server.
+- Pass a server that is not on `PATH` with `--server`, for example `tekdek index --server python=.venv/bin/pyright-langserver`.
+- `tekdek index` skips the files of a language that it does not index yet. Request a language in [issue #4](https://github.com/dychen1/tekdek/issues/4).
+- `/tekdek:flow` looks for a local server first and asks before it installs one, for example `pyright needed for project acme-api - ~20 MB. y or n to download and install?`.
 
 ## Quick Start
 
@@ -78,104 +69,68 @@ Press the right arrow to start the flow. Press `?` to show the key.
 
 ## Workflow
 
-1. Index the codebase. Run this in the project root. It writes the graph to `.tekdek/<project>.json` and refreshes `.tekdek/index.json`.
-
-   ```sh
-   tekdek index
-   ```
-
-2. Ask a coding agent to write a flow:
-
-   ```text
-   /tekdek:flow explain how a request is authenticated
-   ```
-
-   The agent finds node keys with `tekdek graph search` and `tekdek graph show`, writes one agent output document with clusters and a label on every step, checks it, and freezes it:
-
-   ```sh
-   tekdek flow import request-auth --graph my-project.json --input output.json --check
-   tekdek flow import request-auth --graph my-project.json --input output.json --author-name claude-code
-   tekdek flow verify request-auth
-   ```
-
-3. View the flow:
-
-   ```text
-   /tekdek:flow-view request-auth
-   ```
-
-   Or run `tekdek serve --flow request-auth --open`. The server runs until you stop it.
+1. Index the project: run `tekdek index` in the project root.
+2. Ask a coding agent for a flow, for example `/tekdek:flow explain how a request is authenticated`. The agent finds node keys with `tekdek graph search` and `tekdek graph show`, writes an output document with clusters, checks it with `tekdek flow import --check`, and freezes it with `tekdek flow import`.
+3. View the flow with `/tekdek:flow-view request-auth` or `tekdek serve --flow request-auth --open`.
 
 Every command after `index` uses the nearest `.tekdek` folder from the working directory. Pass `--store <directory>` to use another store.
 
 ## Project Store
 
-`tekdek index` writes to the nearest `.tekdek` folder in the codebase root or its parents. If there is none, it creates `<root>/.tekdek` with a `.gitignore` for the local lock file and interrupted writes.
+`tekdek index` writes to the nearest `.tekdek` folder at or above the project root, or creates `<root>/.tekdek`. Commit the folder to share flows.
 
-| Path | Content |
-| --- | --- |
-| `<name>.json` | The graph of one indexed codebase. |
-| `index.json` | The catalog that the viewer reads: graphs, digests, and current flows. |
-| `flows/<name>/` | The frozen generations of one flow and its `current.json` pointer. |
+```text
+acme-api/
+|-- src/
+`-- .tekdek/
+    |-- .gitignore                      # ignores the lock file and interrupted writes
+    |-- index.json                      # catalog of graphs and current flows; tekdek rebuilds it
+    |-- acme-api.json                   # graph of the project, from tekdek index
+    `-- flows/
+        |-- request-auth/
+        |   |-- current.json            # names the current generation
+        |   `-- generations/
+        |       |-- 1-3f9a0c1d2e4b.json # first freeze
+        |       `-- 2-8b21d0e7aa13.json # revision of 1, now current
+        `-- billing-webhook/
+            |-- current.json
+            `-- generations/
+                `-- 1-c0d4e5f60718.json
+```
 
-Commit the `.tekdek` folder to share flows. A flow binds to the digest of its graph, so commit the graph file with its flows: `flow verify` and the viewer need that graph. When you index changed source again, the graph digest changes and the flows become stale. A stale flow still plays, with a warning. To follow the new graph, write the flow again under a new name.
-
-## Lift Deck
-
-The viewer shows the whole codebase as one vertical file tree. Directories and files start closed. When a flow starts, the tree opens the path to every function that the flow needs, once. The tree does not move again until you clear the flow.
-
-Each flow cluster lifts its functions out of the tree as boxes onto a raised colored deck. Dashed slots and tethers join each box to its place in the tree. The callout at right describes the current cluster. The extracted stack lists the lifted functions in step order. The controls at the bottom show the step title and its annotation.
-
-| Key | Action |
-| --- | --- |
-| Left and Right | Previous or next step. |
-| Esc | Close the key, then clear the flow. |
-| F | Fit the map. |
-| ? | Show or hide the key. |
-
-The URL keeps the codebase, the flow, and the step: `?artifact=<file>&flow=<name>&step=<n>`. A flow whose graph changed after the freeze plays with a stale warning.
-
-`tekdek serve` binds to the loopback address. The viewer page, script, stylesheet, and fonts are embedded in the binary. The server reads only the store files that `index.json` lists.
+- A flow is one folder. Each freeze adds one generation file, named by its ordinal and the first 12 characters of its digest. A generation never changes after the freeze. `current.json` names the current generation.
+- The graph and `index.json` belong to the store, not to one flow. All flows of a project share its graph. To index another codebase into the same store, give it a name: `tekdek index services/worker --name worker` writes `worker.json`.
+- A flow binds to the digest of its graph, so commit the graph with its flows. When you index changed source again, the digest changes and the flows become stale. A stale flow still plays, with a warning. To follow the new graph, write the flow again under a new name.
 
 ## Frozen Flows
 
-A flow is one frozen, digest-bound artifact for each generation. The coding agent names 1 to 8 clusters for the phases of the flow and labels every step with one cluster. Code derives function membership (all steps of one function carry the same cluster), cluster colors, visit runs, static call transitions, step IDs, and digests. The same agent output on the same graph always freezes the same bytes, except provenance.
+The agent names 1 to 8 clusters for the phases of a flow and labels each step with one cluster. Code derives the rest: function membership, cluster colors, visit runs, static call transitions, step IDs, and digests. The same agent output on the same graph always freezes the same bytes, except the provenance.
 
-`flow agent-contract` prints the JSON Schema of the agent output. `flow import` validates the complete document and freezes one generation. On any error it prints every issue and writes nothing. `flow import --check` does the complete import and writes nothing.
+- `flow agent-contract` prints the JSON Schema of the agent output.
+- `flow import` validates the complete output and freezes one generation. On any error, it prints every issue and writes nothing. `--check` runs the complete import and writes nothing.
+- A new name freezes an `initial` generation. An existing name freezes a `revision` with a diff against its parent, on the graph of the parent.
+- `flow verify` recomputes the derived layers and digests. An edited generation fails with `digest_mismatch`.
 
-The store decides the generation purpose:
+## Lift Deck
 
-- A new name freezes an `initial` generation. The output has no prior step IDs and no revision summary.
-- A name with a frozen generation freezes a `revision` with a diff against its parent. Set `priorStepId` on the steps that continue a prior step, and write a revision summary. The graph must be the graph of the parent; to follow a changed graph, import the flow under a new name.
+The viewer shows the codebase as one vertical file tree. When a flow starts, the tree opens the path to each function of the flow once. Then the tree does not move until you clear the flow. Each cluster lifts its functions onto a raised colored deck, with tethers to their places in the tree. The callout describes the current cluster, and the controls show the step title and annotation.
 
-Generations live in `<store>/flows/<name>/generations/<ordinal>-<digest12>.json`. `<store>/flows/<name>/current.json` names the current one. The catalog lists it under its graph. `flow verify` recomputes the derived layers and digests; an edited generation fails with `digest_mismatch`.
+| Key | Action |
+| --- | --- |
+| Left and Right | Previous or next step |
+| Esc | Close the key, then clear the flow |
+| F | Fit the map |
+| ? | Show or hide the key |
+
+The URL keeps the graph, the flow, and the step: `?artifact=<file>&flow=<name>&step=<n>`. `tekdek serve` binds to the loopback address, serves the viewer from the binary, and reads only the store files that `index.json` lists.
 
 ## Language Analysis
 
-The source file extensions select the language adapters:
-
-- `.py` and `.pyi` select Python.
-- `.rs` selects Rust.
-
-The analyzer starts a language server only for a detected and enabled language. It runs the selected adapters in stable language order. All selected adapters must succeed. If one adapter fails, the analyzer writes no artifact.
-
-### Python
-
-The Python adapter analyzes `.py` and `.pyi` documents. It prefers a `.py` file when a matching `.pyi` file exists. It uses the RustPython parser for syntax facts (modules, classes, callables, fields, containment, internal imports, signatures, documentation, and source ranges) and Pyright through LSP for semantic facts (calls, references, and type definitions).
-
-The graph builder matches LSP locations to syntax declarations and scopes. Symbols outside the selected source root do not create graph edges.
-
-### Rust
-
-The Rust adapter analyzes `.rs` documents. It uses `syn` for syntax facts and rust-analyzer for semantic facts.
-
-The Rust parser does not expand macros. It does not evaluate conditional compilation. A generated symbol can have no matching syntax node. The analyzer skips such a Rust semantic anchor.
-
-The default rust-analyzer profile disables Cargo build scripts, procedural macros, check on save, and cache priming. A user configuration file can enable these features.
-
-### Language Boundaries
-
-Each graph node contains its language. The graph metadata lists all analyzed languages. Semantic edges connect nodes from the same language only.
+- The file extension selects the adapter: `.rs` for Rust, and `.py` and `.pyi` for Python. A `.py` file wins over a matching `.pyi` file.
+- A parser makes the syntax facts, which define all graph nodes: `syn` for Rust and the RustPython parser for Python. The language server adds the call, reference, and type edges.
+- Edges connect nodes of the same language only. Symbols outside the source root make no edges.
+- The Rust parser does not expand macros or evaluate conditional compilation. The default rust-analyzer profile disables build scripts, procedural macros, check on save, and cache priming.
+- When one adapter fails, `index` writes no graph.
 
 ## CLI Reference
 
@@ -201,84 +156,38 @@ tekdek help
 tekdek version
 ```
 
-The `graph` and `flow` commands accept `--store <directory>` and `--json`, and `graph` also accepts `--graph <file>`. The default store is the nearest `.tekdek` folder from the working directory. A `--graph` value is a JSON file name inside the store; the default graph of `graph` commands is the index default. Use `--input -` to read the agent output from standard input, and `--option=value` when a value starts with a hyphen. JSON mode returns one document, including for errors.
+The `graph` and `flow` commands accept `--store <directory>` and `--json`. `--graph` takes a file name inside the store. JSON mode returns one document, also for errors. Write `--option=value` for a value that starts with a hyphen.
 
-| Command or argument | Description |
+| Command | Notes |
 | --- | --- |
-| `index [<root>]` | Indexes the codebase root. The default root is the working directory. |
-| `--name <name>` | Writes `<store>/<name>.json` and refreshes `<store>/index.json`. The default name is the root folder name. |
-| `--store <directory>` | Selects the store. The default is the nearest `.tekdek` folder, or a new `<root>/.tekdek` for `index`. |
-| `--output <path>` | Writes one artifact and leaves every index as it is. It cannot appear with `--name` or `--store`. |
-| `--config <path>` | Reads profile overrides from this TOML file. |
-| `--server <language>=<program>` | Replaces one language server program. |
-| `--server-arg <language>=<argument>` | Replaces one profile's server arguments. Repeat this option to add arguments in order. |
-| `graph search` | Lists the node keys that contain every word of the text, best name match first, with the kind and signature of each. The default limit is 20. |
-| `graph show` | Shows one node: its signature, documentation summary, container, members, callers, and callees. A missing key names close keys. |
+| `index` | The default root is the working directory, and the default name is the root folder name. `--output` writes one graph and changes no index. `--server` replaces a server program, and each `--server-arg` replaces the server arguments in order. |
+| `graph search` | Lists the keys that contain every word, best name match first. The default limit is 20. |
+| `graph show` | Shows the signature, documentation summary, container, members, callers, and callees. A missing key names close keys. |
 | `flow list` | Lists the current generation of each flow, with its freshness. |
-| `flow show` | Shows the current generation: clusters, then steps. JSON mode prints the artifact. |
-| `flow import` | Freezes one agent output. Returns 1 for a `no_flow` answer and 2 for a rejected output. The default author is `system`; `--author-name` alone records an agent. `--check` writes nothing. |
-| `flow verify` | Recomputes the current generation. Returns 1 when it finds an issue. |
-| `flow agent-contract` | Prints the agent output JSON Schema. |
-| `serve` | Serves the Lift Deck on `127.0.0.1` and prints the URL. The default port is 8000; port 0 selects a free port. `--flow` prints the URL of one flow, and `--open` opens the URL in a browser. |
-| `doctor` | Prints the version or the install command of each language server. Returns 1 when an enabled language has no server. |
-
-Python uses `pyright-langserver --stdio` by default. Rust uses `rust-analyzer` by default.
+| `flow import` | Returns 1 for a `no_flow` answer and 2 for a rejected output. `--author-name` alone records an agent author. |
+| `flow verify` | Returns 1 when it finds an issue. |
+| `serve` | Serves on `127.0.0.1:8000` by default. Port 0 selects a free port. `--flow` prints the URL of one flow, and `--open` opens it. |
+| `doctor` | Returns 1 when an enabled language has no server. |
 
 ## Configuration
 
-The analyzer discovers only the global TOML configuration. It does not discover configuration in the analyzed repository.
+tekdek reads `tekdek/config.toml` in the configuration directory of the operating system (on macOS, `~/Library/Application Support/tekdek/config.toml`), or the file that `--config <path>` names. It never reads a configuration from the analyzed repository. Inspect a `--config` file before you use it.
 
-The default path is `tekdek/config.toml` in the operating system configuration directory. On macOS, this is usually `~/Library/Application Support/tekdek/config.toml`.
-
-Use `--config <path>` to select another file. The analyzer trusts an explicit path. The path can point anywhere, including into the analyzed repository. Inspect an explicit configuration file before you use it.
-
-Each `[languages.<name>]` table can set these fields:
-
-- `enabled` enables or disables the profile.
-- `extensions` replaces the source extensions.
-- `language_id` replaces the LSP language identifier.
-- `program` replaces the server program.
-- `arguments` replaces all server arguments.
-- `initialization_options` replaces the complete built-in initialization options object.
-
-For example:
+Each `[languages.<name>]` table can set `enabled`, `extensions`, `language_id`, `program`, `arguments`, and `initialization_options`. CLI options override the file, and the file overrides the built-in settings.
 
 ```toml
 [languages.python]
-enabled = true
 program = "pyright-langserver"
 arguments = ["--stdio"]
 
-[languages.rust]
-enabled = true
-program = "rust-analyzer"
-arguments = []
-
 [languages.rust.initialization_options]
 checkOnSave = false
-
-[languages.rust.initialization_options.cargo.buildScripts]
-enable = false
-
-[languages.rust.initialization_options.procMacro]
-enable = false
-
-[languages.rust.initialization_options.cachePriming]
-enable = false
+cargo.buildScripts.enable = false
+procMacro.enable = false
+cachePriming.enable = false
 ```
 
-The Rust initialization options in this example keep all built-in safety settings. Include each required safety setting when you replace this object.
-
-Built-in settings have the lowest priority. The global configuration overrides built-in settings. CLI options override the global configuration.
-
-Program-only CLI overrides keep the profile arguments. One or more `--server-arg` options replace the profile arguments.
-
-```sh
-tekdek index . \
-  --server rust=/opt/rust-analyzer \
-  --server-arg rust=--log-file \
-  --server-arg rust=/tmp/rust-analyzer.log
-```
+`initialization_options` replaces the complete built-in object. For Rust, keep the four safety settings of this example.
 
 ## Project Structure
 
@@ -294,7 +203,7 @@ tekdek index . \
 |   |-- cli/                   # Command routing and the index, graph, flow, serve, and doctor commands
 |   |-- analysis/              # Indexer: pipeline, preflight, configuration, sources
 |   |   |-- fact/              # Syntax and semantic fact models
-|   |   |-- graph/             # Graph models and construction (build, semantic, lookup)
+|   |   |-- graph/             # Graph models and construction
 |   |   |-- language/          # Python and Rust adapters and their profiles
 |   |   `-- lsp/               # Language server client, session, and capture
 |   |-- store/                 # Store folder, project store, atomic writes, graph artifact
@@ -316,14 +225,6 @@ tekdek index . \
 `-- .github/                   # Release workflow and its build setup steps
 ```
 
-The analysis runs in this order:
-
-```text
-codebase root -> source documents -> syntax facts -> semantic facts -> graph -> graph artifact
-```
-
-The language adapter produces syntax facts from the source syntax and semantic facts from a language server. The syntax facts define all graph nodes. The graph builder resolves the semantic facts against the syntax nodes and adds call, reference, and type-use edges.
-
 ## Development
 
 ```sh
@@ -331,18 +232,14 @@ npm ci
 make check
 ```
 
-`make check` runs `cargo fmt --check`, `cargo clippy --locked --all-targets --all-features`, the TypeScript check, `cargo test --locked --all-targets`, and `npm test`. `make test` runs the two test suites only. `make demo` serves the demo store, `make serve` serves the nearest `.tekdek` folder (set `STORE=<directory>` for another store), and `make index SOURCE=<root>` indexes a codebase. Set `PORT=8001` to use another port.
+`make check` runs `cargo fmt --check`, `cargo clippy --locked --all-targets --all-features`, the TypeScript check, `cargo test --locked --all-targets`, and `npm test`. `make test` runs the two test suites only. `make demo` serves the demo store, `make serve` serves the nearest `.tekdek` folder (`STORE=<directory>` for another store), and `make index SOURCE=<root>` indexes a codebase. `PORT=8001` selects another port.
 
-Every Cargo build runs `build.rs`, which bundles `viewer/src` into the build output with esbuild. A build without `npm ci` fails with a message that says to run it.
+Every Cargo build runs `build.rs`, which bundles `viewer/src` with esbuild. A build without `npm ci` fails with a message that says to run it.
 
 ## Releases
 
 1. Set the same version in `Cargo.toml` and `plugin/.claude-plugin/plugin.json`. A test fails when they differ.
 2. Merge the change to `main`.
-3. Tag the commit on `main` and push the tag:
+3. Tag the commit on `main` and push the tag: `git tag v0.2.0 && git push origin v0.2.0`.
 
-   ```sh
-   git tag v0.2.0 && git push origin v0.2.0
-   ```
-
-The release workflow builds archives for macOS (arm64 and x86_64), Linux (x86_64 and arm64), and Windows (x86_64), with shell and PowerShell installers, and publishes them on GitHub Releases. It stops when the tag does not point to a commit on `main`. Claude Code users receive the plugin update when the plugin version changes.
+The release workflow builds archives and installers for macOS (arm64 and x86_64), Linux (x86_64 and arm64), and Windows (x86_64), and publishes them on GitHub Releases. It stops when the tag does not point to a commit on `main`. Claude Code users get the plugin update when the plugin version changes.
