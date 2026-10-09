@@ -211,4 +211,21 @@ mod tests {
 
         assert_eq!(manifest["version"], env!("CARGO_PKG_VERSION"));
     }
+
+    #[test]
+    fn the_skills_require_the_crate_version() {
+        let requirement = format!("needs tekdek {} or later", env!("CARGO_PKG_VERSION"));
+        for skill in ["flow", "flow-view"] {
+            let path = format!(
+                "{}/plugin/skills/{skill}/SKILL.md",
+                env!("CARGO_MANIFEST_DIR")
+            );
+            let text = std::fs::read_to_string(&path).expect("skill file");
+
+            assert!(
+                text.contains(&requirement),
+                "{path} must say: {requirement}"
+            );
+        }
+    }
 }
