@@ -454,7 +454,7 @@ pub(crate) mod tests {
         let facts = produce_semantic_facts(&config, &sources)
             .expect("the fake language server should complete");
 
-        assert!(facts.is_empty());
+        assert_eq!(facts, Vec::new());
     }
 
     #[test]
@@ -657,7 +657,7 @@ pub(crate) mod tests {
         let facts = produce_semantic_facts(&config, &sources)
             .expect("the session should proceed after the quiescent status");
 
-        assert!(facts.is_empty());
+        assert_eq!(facts, Vec::new());
     }
 
     #[test]

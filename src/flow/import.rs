@@ -428,7 +428,7 @@ mod tests {
             (generation.ordinal, generation.purpose),
             (1, GenerationPurpose::Initial)
         );
-        assert!(generation.warnings.is_empty());
+        assert_eq!(generation.warnings, Vec::new());
         assert_eq!(generation.generation_digest.as_str(), GOLDEN_GENERATION);
         let artifact = fixtures::current(path, "demo-flow");
         assert!(artifact.diff.is_none());

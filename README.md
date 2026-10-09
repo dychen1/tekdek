@@ -26,7 +26,7 @@
   powershell -ExecutionPolicy Bypass -c "irm https://github.com/dychen1/tekdek/releases/latest/download/tekdek-installer.ps1 | iex"
   ```
 
-- From source, with Rust and Node.js 22 or later:
+- From source, with rustup and Node.js 22 or later. rustup installs the Rust version that `rust-toolchain.toml` pins:
 
   ```sh
   git clone https://github.com/dychen1/tekdek && cd tekdek
@@ -34,7 +34,17 @@
   cargo install --locked --path .
   ```
 
-The installers need no Rust or Node.js. They put `tekdek` in `$XDG_BIN_HOME`, else `$XDG_DATA_HOME/../bin`, else `~/.local/bin`, and add that folder to `PATH`. They download from GitHub Releases, so they work only after the repository becomes public. Until then, use `gh release download --repo dychen1/tekdek` or build from source.
+The installers need no Rust or Node.js. They put `tekdek` in `$XDG_BIN_HOME`, else `$XDG_DATA_HOME/../bin`, else `~/.local/bin`, and add that folder to `PATH`. The Linux binaries need glibc 2.34 or later: Ubuntu 22.04, Debian 12, RHEL 9, Amazon Linux 2023, or newer. Alpine and older distributions cannot run them; build from source there.
+
+The installers download from GitHub Releases without credentials, so they work only after the repository becomes public. Until then, a user with access can download the archive for their system with the GitHub CLI, extract it, and move the binary into a folder on `PATH`:
+
+```sh
+gh release download --repo dychen1/tekdek --pattern 'tekdek-aarch64-apple-darwin.tar.xz'
+tar -xJf tekdek-aarch64-apple-darwin.tar.xz
+mkdir -p ~/.local/bin && mv tekdek-aarch64-apple-darwin/tekdek ~/.local/bin/
+```
+
+The archives are `tekdek-aarch64-apple-darwin.tar.xz` (Apple silicon), `tekdek-x86_64-apple-darwin.tar.xz` (Intel Mac), `tekdek-x86_64-unknown-linux-gnu.tar.xz`, `tekdek-aarch64-unknown-linux-gnu.tar.xz`, and `tekdek-x86_64-pc-windows-msvc.zip`. Add `--tag v0.1.0` for a specific release.
 
 Install the agent skills in Claude Code:
 
@@ -241,7 +251,7 @@ cachePriming.enable = false
 |-- demo/                      # Demo store: this repository's graph and one flow
 |-- .claude-plugin/            # Claude Code marketplace
 |-- plugin/                    # Claude Code plugin: the flow and flow-view skills
-`-- .github/                   # Release workflow and its build setup steps
+`-- .github/                   # CI and release workflows, and the release build setup steps
 ```
 
 ## Development
@@ -257,8 +267,13 @@ Every Cargo build runs `build.rs`, which bundles `viewer/src` with esbuild. A bu
 
 ## Releases
 
-1. Set the same version in `Cargo.toml` and `plugin/.claude-plugin/plugin.json`. A test fails when they differ.
-2. Merge the change to `main`.
-3. Tag the commit on `main` and push the tag: `git tag v0.2.0 && git push origin v0.2.0`.
+The CI workflow runs `make check` on every pull request and every push to `main`.
 
-The release workflow builds archives and installers for macOS (arm64 and x86_64), Linux (x86_64 and arm64), and Windows (x86_64), and publishes them on GitHub Releases. It stops when the tag does not point to a commit on `main`. Claude Code users get the plugin update when the plugin version changes.
+1. Set the new version in `Cargo.toml`, `plugin/.claude-plugin/plugin.json`, and the "needs tekdek X or later" line of both skills. Tests fail when they differ.
+2. Merge the change to `main`, and wait until its CI run passes.
+3. Tag that commit and push the tag: `git tag v0.2.0 && git push origin v0.2.0`.
+4. Wait until the release workflow succeeds and the release has its archives and installers.
+
+The release workflow builds archives and installers for macOS (arm64 and x86_64), Linux (x86_64 and arm64), and Windows (x86_64), and publishes them on GitHub Releases. Each archive holds the binary, `LICENSE`, `README.md`, and `OFL.txt`, the license of the embedded font. A build job stops when the tag does not point to a commit on `main`. That check only catches mistakes: the workflow runs from the tagged commit, so a tag on another commit can change the check, and a free private repository has no tag rules. Tag only `main` commits whose CI run passed. Claude Code users get the plugin update when the plugin version changes.
+
+The crate sets `publish = false`: `build.rs` needs the npm dependencies of a checkout, so a crate from crates.io could not build.

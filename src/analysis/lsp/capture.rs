@@ -727,7 +727,7 @@ mod tests {
         let symbols = nested_symbols(Some(DocumentSymbolResponse::Nested(Vec::new())), "app.py")
             .expect("nested symbols should be accepted");
 
-        assert!(symbols.is_empty());
+        assert_eq!(symbols, Vec::new());
     }
 
     #[test]
@@ -735,7 +735,7 @@ mod tests {
         let symbols = nested_symbols(Some(DocumentSymbolResponse::Flat(Vec::new())), "empty.py")
             .expect("an empty flat response states that a file has no symbol");
 
-        assert!(symbols.is_empty());
+        assert_eq!(symbols, Vec::new());
     }
 
     #[test]

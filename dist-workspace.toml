@@ -21,3 +21,5 @@ install-updater = false
 tag-namespace = "v"
 # Steps that install Node.js and the npm dependencies before each build
 github-build-setup = "../build-setup.yml"
+# Extra files in each archive: the license of the embedded JetBrains Mono font
+include = ["viewer/fonts/OFL.txt"]
