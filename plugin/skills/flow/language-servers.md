@@ -14,7 +14,7 @@ Sources: [rust-analyzer](https://rust-analyzer.github.io), [pyright](https://git
 
 ## Find a Local Server
 
-Run `tekdek doctor <project root>`. It checks only the languages that have source files in the project. A `missing` server is not on `PATH`. A `broken` server is on `PATH` but cannot run, for example a rustup `rust-analyzer` proxy without the component; treat it as missing. For a missing or broken server, look for a copy that is not on `PATH`, for example `rustup which rust-analyzer`, the project `.venv` or `node_modules/.bin`, or uv and pipx tools. Pass a copy that you find with `tekdek index --server <language>=<path>`.
+Run `tekdek doctor`. For a missing server, look for a copy that is not on `PATH`, for example `rustup which rust-analyzer`, the project `.venv` or `node_modules/.bin`, or uv and pipx tools. Pass a copy that you find with `tekdek index --server <language>=<path>`. rustup can install a `rust-analyzer` proxy without the component: if `rust-analyzer --version` fails, the server is missing.
 
 ## Ask Before You Install
 
@@ -26,7 +26,7 @@ pyright needed for project acme-api - ~20 MB. y or n to download and install?
 
 - The project is the name of the project root folder. The size is the size of the install that you will run.
 - Install only after `y`. Treat any other answer as `n`.
-- After the install, run `tekdek doctor <project root>` again. If the server is still not on `PATH`, pass its full path with `--server`.
+- After the install, run `tekdek doctor` again. If the server is still not on `PATH`, pass its full path with `--server`.
 - On `n`, offer to index only the other languages: pass a configuration file with `[languages.<name>]` and `enabled = false` to `tekdek index --config <file>`. When no indexed language remains, stop.
 
 ## Language Not Indexed Yet
