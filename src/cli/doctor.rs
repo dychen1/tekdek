@@ -309,7 +309,11 @@ fn describe(checks: &[ServerCheck], root: Option<&Path>) -> String {
             Status::Broken => format!(
                 "{}{at} cannot run: {}. Install it with `{}`",
                 check.program,
-                check.note.as_deref().unwrap_or_default().trim_end_matches('.'),
+                check
+                    .note
+                    .as_deref()
+                    .unwrap_or_default()
+                    .trim_end_matches('.'),
                 check.install.unwrap_or_default()
             ),
             // Give the install command.
