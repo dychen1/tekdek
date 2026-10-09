@@ -1,22 +1,61 @@
 //! Artifact store.
 //!
-//! This module owns the store folder on disk: its lock, its atomic writes, its
-//! link checks, and the content digest of stored bytes. The `graph` submodule
-//! owns the graph artifact. The flow and catalog modules write through these
-//! helpers.
+//! This module owns the store folder on disk: its location, its lock, its atomic
+//! writes, its link checks, and the content digest of stored bytes. The `graph`
+//! submodule owns the graph artifact. The flow and catalog modules write through
+//! these helpers.
 //!
 //! # Sections
 //!
+//! `Project store` finds and creates the `.tekdek` folder of a project.
 //! `Writes` replaces files atomically.
 //! `Locks and links` guards one store operation.
 //! `Digests` names stored bytes.
 
 pub mod graph;
 
-use std::{fmt::Write as _, fs, io, path::Path};
+use std::{
+    fmt::Write as _,
+    fs, io,
+    path::{Path, PathBuf},
+};
 
 use serde::Serialize;
 use sha2::{Digest, Sha256};
+
+// -----------------------------------------------------------------------------
+// Project store
+// -----------------------------------------------------------------------------
+
+/// The folder name of a project store.
+pub const PROJECT_STORE: &str = ".tekdek";
+
+/// The ignore file of a new project store: the lock and interrupted writes stay local.
+const PROJECT_IGNORE: &str =
+    "# Local files of tekdek. Commit the rest of this folder.\n.store.lock\n*.tmp\n";
+
+/// Returns the nearest project store in `start` or one of its parents.
+#[must_use]
+pub fn find_project_store(start: &Path) -> Option<PathBuf> {
+    start
+        .ancestors()
+        .map(|directory| directory.join(PROJECT_STORE))
+        .find(|store| store.is_dir())
+}
+
+/// Creates a project store with its ignore file. An existing folder stays as it is.
+///
+/// # Errors
+///
+/// Returns an error if the folder or its ignore file cannot be written.
+pub fn create_project_store(store: &Path) -> io::Result<()> {
+    reject_symlink(store)?;
+    if store.exists() {
+        return Ok(());
+    }
+    fs::create_dir_all(store)?;
+    write_bytes(&store.join(".gitignore"), PROJECT_IGNORE.as_bytes())
+}
 
 // -----------------------------------------------------------------------------
 // Writes
@@ -130,7 +169,30 @@ pub fn digest_of(bytes: &[u8]) -> String {
 mod tests {
     use std::fs;
 
-    use super::{digest_of, reject_symlink, write_bytes};
+    use super::{PROJECT_STORE, create_project_store, digest_of, find_project_store, write_bytes};
+
+    #[test]
+    fn finds_the_nearest_project_store_and_creates_one_with_an_ignore_file() {
+        let directory = tempfile::tempdir().expect("project");
+        let project = directory.path().join("project");
+        let nested = project.join("src").join("cli");
+        fs::create_dir_all(&nested).expect("folders");
+        assert_eq!(find_project_store(&nested), None);
+
+        let store = project.join(PROJECT_STORE);
+        create_project_store(&store).expect("create");
+        assert_eq!(find_project_store(&nested), Some(store.clone()));
+        assert_eq!(find_project_store(&project), Some(store.clone()));
+        let ignore = fs::read_to_string(store.join(".gitignore")).expect("ignore file");
+        assert!(ignore.contains(".store.lock"));
+
+        fs::write(store.join(".gitignore"), "kept\n").expect("edit");
+        create_project_store(&store).expect("keep");
+        assert_eq!(
+            fs::read_to_string(store.join(".gitignore")).expect("ignore"),
+            "kept\n"
+        );
+    }
 
     #[test]
     fn replaces_a_file_and_leaves_no_temporary_file() {
@@ -150,6 +212,8 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn rejects_a_symbolic_link() {
+        use super::reject_symlink;
+
         let directory = tempfile::tempdir().expect("store");
         let target = directory.path().join("target.json");
         let link = directory.path().join("link.json");

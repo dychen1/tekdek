@@ -1,0 +1,317 @@
+//! Graph queries.
+//!
+//! This module answers the questions that a coding agent asks about one graph
+//! artifact before it writes a flow: which node keys match a text, and what one
+//! node declares and calls. A graph artifact is the input. Node summaries and
+//! one node detail are the outputs.
+//!
+//! # Sections
+//!
+//! `Models` defines the query results.
+//! `Search` ranks the nodes that match a text.
+//! `Show` collects one node and its neighbors.
+
+use std::collections::{BTreeMap, BTreeSet};
+
+use serde::Serialize;
+
+use crate::store::graph::{ArtifactGraph, ArtifactNode};
+
+// -----------------------------------------------------------------------------
+// Models
+// -----------------------------------------------------------------------------
+
+/// The node kinds that a search can filter on.
+pub const NODE_KINDS: [&str; 4] = ["module", "type", "callable", "field"];
+
+/// One node in a search result.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NodeSummary {
+    pub key: String,
+    pub name: String,
+    pub kind: String,
+    pub path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub signature: Option<String>,
+}
+
+/// The ranked matches of one search. `total` counts the matches before the limit.
+#[derive(Debug, Serialize)]
+pub struct SearchResult {
+    pub total: usize,
+    pub nodes: Vec<NodeSummary>,
+}
+
+/// One node reference in a neighbor list.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+pub struct NodeRef {
+    pub key: String,
+    pub kind: String,
+}
+
+/// One node with its declaration facts and its static neighbors.
+///
+/// `callers` and `callees` come from `calls` edges only. `container` and
+/// `members` come from `contains` edges.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NodeDetail {
+    pub key: String,
+    pub name: String,
+    pub kind: String,
+    pub language: String,
+    pub path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub signature: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub declared_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub documentation: Option<String>,
+    pub container: Option<NodeRef>,
+    pub members: Vec<NodeRef>,
+    pub callers: Vec<NodeRef>,
+    pub callees: Vec<NodeRef>,
+}
+
+// -----------------------------------------------------------------------------
+// Search
+// -----------------------------------------------------------------------------
+
+/// Returns the nodes whose key contains every word of `text`, best match first.
+///
+/// Matching ignores case. The name decides the rank: the exact text (with `_`
+/// for spaces), then a name that starts with the first word and holds every
+/// word, then a name that holds every word, then a name that holds some words,
+/// then a key match only. In each rank, nodes outside tests come first, then
+/// callables before types, modules, and fields; the key breaks ties.
+#[must_use]
+pub fn search(graph: &ArtifactGraph, text: &str, kind: Option<&str>, limit: usize) -> SearchResult {
+    let needle = text.trim().to_lowercase();
+    let words: Vec<&str> = needle.split_whitespace().collect();
+    let exact = words.join("_");
+    let mut matches: Vec<((u8, bool, u8), &ArtifactNode)> = graph
+        .nodes
+        .iter()
+        .filter(|node| kind.is_none_or(|kind| node.kind == kind))
+        .filter_map(|node| {
+            let key = node.key.to_lowercase();
+            if words.is_empty() || !words.iter().all(|word| key.contains(word)) {
+                return None;
+            }
+            let name = node.name.to_lowercase();
+            let held = words.iter().filter(|word| name.contains(**word)).count();
+            let rank = if name == exact {
+                0
+            } else if held == words.len() && name.starts_with(words[0]) {
+                1
+            } else if held == words.len() {
+                2
+            } else if held > 0 {
+                3
+            } else {
+                4
+            };
+            Some(((rank, is_test(&key), kind_order(&node.kind)), node))
+        })
+        .collect();
+    matches.sort_by(|left, right| (left.0, &left.1.key).cmp(&(right.0, &right.1.key)));
+    SearchResult {
+        total: matches.len(),
+        nodes: matches
+            .into_iter()
+            .take(limit)
+            .map(|(_, node)| NodeSummary {
+                key: node.key.clone(),
+                name: node.name.clone(),
+                kind: node.kind.clone(),
+                path: node.path.clone(),
+                signature: node.signature.as_deref().map(one_line),
+            })
+            .collect(),
+    }
+}
+
+/// True for a node in a test module or a test file.
+fn is_test(key: &str) -> bool {
+    let path = key.split("::").next().unwrap_or(key);
+    key.contains("::module:tests")
+        || path
+            .split('/')
+            .any(|part| part.starts_with("test") || part.starts_with("conftest"))
+}
+
+fn kind_order(kind: &str) -> u8 {
+    match kind {
+        "callable" => 0,
+        "type" => 1,
+        "module" => 2,
+        _ => 3,
+    }
+}
+
+/// Joins a multi-line signature into one line.
+#[must_use]
+pub fn one_line(signature: &str) -> String {
+    signature
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
+        .replace("( ", "(")
+        .replace(", )", ")")
+        .replace(" )", ")")
+}
+
+// -----------------------------------------------------------------------------
+// Show
+// -----------------------------------------------------------------------------
+
+/// Returns one node by its exact key, or `None` when no node has the key.
+#[must_use]
+pub fn show(graph: &ArtifactGraph, key: &str) -> Option<NodeDetail> {
+    let node = graph.nodes.iter().find(|node| node.key == key)?;
+    let by_id: BTreeMap<u32, &ArtifactNode> =
+        graph.nodes.iter().map(|node| (node.id, node)).collect();
+    let reference = |id: u32| {
+        by_id.get(&id).map(|node| NodeRef {
+            key: node.key.clone(),
+            kind: node.kind.clone(),
+        })
+    };
+    let mut container = None;
+    let mut members = BTreeSet::new();
+    let mut calling = BTreeSet::new();
+    let mut called = BTreeSet::new();
+    for edge in &graph.edges {
+        match edge.kind.as_str() {
+            "contains" if edge.target == node.id => container = reference(edge.source),
+            "contains" if edge.source == node.id => members.extend(reference(edge.target)),
+            "calls" if edge.target == node.id => calling.extend(reference(edge.source)),
+            "calls" if edge.source == node.id => called.extend(reference(edge.target)),
+            _ => {}
+        }
+    }
+    Some(NodeDetail {
+        key: node.key.clone(),
+        name: node.name.clone(),
+        kind: node.kind.clone(),
+        language: node.language.clone(),
+        path: node.path.clone(),
+        signature: node.signature.as_deref().map(one_line),
+        declared_type: node.declared_type.clone(),
+        documentation: node.documentation.clone(),
+        container,
+        members: members.into_iter().collect(),
+        callers: calling.into_iter().collect(),
+        callees: called.into_iter().collect(),
+    })
+}
+
+// -----------------------------------------------------------------------------
+// Tests
+// -----------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::{one_line, search, show};
+    use crate::store::graph::{ArtifactGraph, GraphArtifact};
+
+    fn graph() -> ArtifactGraph {
+        let node = |id: u32, key: &str, name: &str, kind: &str| {
+            serde_json::json!({
+                "id": id, "language": "rust", "key": key, "name": name, "kind": kind,
+                "path": key.split("::").next().expect("path"), "origin": "syntax", "declarations": []
+            })
+        };
+        let edge = |source: u32, target: u32, kind: &str| serde_json::json!({"source": source, "target": target, "kind": kind, "weight": 1, "origin": "syntax"});
+        let mut import = node(
+            2,
+            "src/flow/import.rs::callable:import_flow",
+            "import_flow",
+            "callable",
+        );
+        import["signature"] =
+            "pub fn import_flow(\n    directory: &Path,\n) -> Result<(), Error>".into();
+        let document = serde_json::json!({
+            "schemaVersion": 1,
+            "graph": {
+                "languages": ["rust"],
+                "nodes": [
+                    node(0, "src/flow/import.rs", "import", "module"),
+                    node(1, "src/cli/flow.rs::callable:import", "import", "callable"),
+                    import,
+                    node(3, "src/flow/lineage.rs::callable:write_current", "write_current", "callable"),
+                    node(4, "src/flow/import.rs::type:ImportRequest", "ImportRequest", "type"),
+                ],
+                "edges": [
+                    edge(0, 2, "contains"), edge(0, 4, "contains"),
+                    edge(1, 2, "calls"), edge(2, 3, "calls"), edge(2, 4, "uses_type"),
+                ]
+            }
+        });
+        GraphArtifact::read(&serde_json::to_vec(&document).expect("serialize"))
+            .expect("graph")
+            .graph
+    }
+
+    #[test]
+    fn ranks_exact_names_first_and_filters_by_kind_and_limit() {
+        let graph = graph();
+
+        let result = search(&graph, "IMPORT", None, 10);
+        let keys: Vec<_> = result.nodes.iter().map(|node| node.key.as_str()).collect();
+        assert_eq!(
+            keys,
+            [
+                "src/cli/flow.rs::callable:import",
+                "src/flow/import.rs",
+                "src/flow/import.rs::callable:import_flow",
+                "src/flow/import.rs::type:ImportRequest",
+            ]
+        );
+        assert_eq!(
+            result.nodes[2].signature.as_deref(),
+            Some("pub fn import_flow(directory: &Path) -> Result<(), Error>")
+        );
+
+        let limited = search(&graph, "import", Some("callable"), 1);
+        assert_eq!(limited.total, 2);
+        assert_eq!(limited.nodes.len(), 1);
+        assert_eq!(
+            search(&graph, "import flow", None, 10).nodes[0].key,
+            "src/flow/import.rs::callable:import_flow"
+        );
+        assert_eq!(search(&graph, "flow write", None, 10).total, 1);
+        assert_eq!(search(&graph, "  ", None, 10).total, 0);
+    }
+
+    #[test]
+    fn shows_a_node_with_its_container_members_callers_and_callees() {
+        let graph = graph();
+
+        let detail = show(&graph, "src/flow/import.rs::callable:import_flow").expect("node");
+        assert_eq!(
+            detail.container.map(|node| node.key).as_deref(),
+            Some("src/flow/import.rs")
+        );
+        assert_eq!(detail.callers[0].key, "src/cli/flow.rs::callable:import");
+        assert_eq!(
+            detail.callees[0].key,
+            "src/flow/lineage.rs::callable:write_current"
+        );
+        assert!(detail.members.is_empty());
+        let module = show(&graph, "src/flow/import.rs").expect("module");
+        assert_eq!(module.members.len(), 2);
+        assert!(show(&graph, "src/flow/import.rs::callable:missing").is_none());
+    }
+
+    #[test]
+    fn joins_a_multi_line_signature() {
+        assert_eq!(
+            one_line("fn run(\n    a: u8,\n    b: u8,\n) -> u8"),
+            "fn run(a: u8, b: u8) -> u8"
+        );
+    }
+}

@@ -23,6 +23,15 @@ impl Language {
         }
     }
 
+    /// Returns the command that installs the default language server.
+    #[must_use]
+    pub const fn server_install_command(self) -> &'static str {
+        match self {
+            Self::Python => "npm install -g pyright",
+            Self::Rust => "rustup component add rust-analyzer",
+        }
+    }
+
     /// Parses one stable language name.
     ///
     /// # Errors

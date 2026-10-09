@@ -1,0 +1,14 @@
+{
+  "name": "tekdek",
+  "description": "The tekdek plugin: frozen code flows that coding agents write and people walk in the Lift Deck.",
+  "owner": {
+    "name": "dychen1"
+  },
+  "plugins": [
+    {
+      "name": "tekdek",
+      "source": "./plugin",
+      "description": "Write frozen flows with /tekdek:flow and open them with /tekdek:flow-view. Needs the tekdek CLI."
+    }
+  ]
+}

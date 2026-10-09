@@ -32,3 +32,5 @@ pub mod source;
 pub use pipeline::{
     PipelineConfig, PipelineError, PipelineOutputError, PipelineResult, run, run_and_write,
 };
+#[cfg(any(feature = "python", feature = "rust"))]
+pub use preflight::find_program;

@@ -12,14 +12,12 @@
 //! `Execution` calls the backend and formats one output document.
 
 use std::{
-    collections::BTreeMap,
     error::Error,
     fs,
     io::Read,
     path::{Path, PathBuf},
 };
 
-use serde::Serialize;
 use tekdek::{
     catalog,
     flow::{
@@ -31,6 +29,8 @@ use tekdek::{
     },
 };
 
+use super::{failure, render, required, split_arguments, store_directory};
+
 // -----------------------------------------------------------------------------
 // Commands
 // -----------------------------------------------------------------------------
@@ -38,38 +38,44 @@ use tekdek::{
 pub(super) const USAGE: &str = "usage: tekdek flow <command> [--store <directory>] [--json]
   list [--graph <file>]
   show <name>
-  import <name> --graph <file> --input <path or ->
+  import <name> --graph <file> --input <path or -> [--check]
     [--author agent|human|system] [--author-name <name>] [--model-id <id>]
   verify <name>
   agent-contract
-import freezes one agent output as a new generation. verify recomputes the
-current generation. agent-contract prints the agent output JSON Schema.
-The default store is artifacts. Common options can appear anywhere after flow.
+import freezes one agent output as a new generation; --check runs the complete
+import and writes nothing. verify recomputes the current generation. agent-contract prints the agent output JSON Schema.
+The default store is the nearest .tekdek folder. Common options can appear anywhere after flow.
 Use --option=value for values that start with a hyphen.";
 
+const VALUE_OPTIONS: &[&str] = &[
+    "--store",
+    "--graph",
+    "--input",
+    "--author",
+    "--author-name",
+    "--model-id",
+];
+
 struct Command {
-    store: PathBuf,
+    store: Option<PathBuf>,
     json: bool,
     action: Action,
 }
 
 enum Action {
-    List {
-        graph: Option<String>,
-    },
-    Show {
-        name: String,
-    },
-    Import {
-        name: String,
-        graph: String,
-        input: PathBuf,
-        author: AuthorOptions,
-    },
-    Verify {
-        name: String,
-    },
+    List { graph: Option<String> },
+    Show { name: String },
+    Import(ImportCommand),
+    Verify { name: String },
     AgentContract,
+}
+
+struct ImportCommand {
+    name: String,
+    graph: String,
+    input: PathBuf,
+    author: AuthorOptions,
+    check: bool,
 }
 
 struct AuthorOptions {
@@ -85,11 +91,9 @@ struct AuthorOptions {
 impl Command {
     /// Parses the arguments after `flow` without file access.
     fn parse(arguments: impl Iterator<Item = String>) -> Result<Self, String> {
-        let (operands, mut options) = split_arguments(arguments)?;
+        let (operands, mut options) = split_arguments(arguments, VALUE_OPTIONS)?;
         let json = options.remove("--json").is_some();
-        let store = options
-            .remove("--store")
-            .map_or_else(|| PathBuf::from("artifacts"), PathBuf::from);
+        let store = options.remove("--store").map(PathBuf::from);
         let words: Vec<_> = operands.iter().map(String::as_str).collect();
         let action = match words.as_slice() {
             // List flows with an optional graph filter.
@@ -101,7 +105,7 @@ impl Command {
                 name: (*name).to_owned(),
             },
             // Freeze one agent output as a new generation.
-            ["import", name] => Action::Import {
+            ["import", name] => Action::Import(ImportCommand {
                 name: (*name).to_owned(),
                 graph: required(&mut options, "--graph")?,
                 input: required(&mut options, "--input")?.into(),
@@ -110,7 +114,8 @@ impl Command {
                     name: options.remove("--author-name"),
                     model_id: options.remove("--model-id"),
                 },
-            },
+                check: options.remove("--check").is_some(),
+            }),
             // Verify the current generation.
             ["verify", name] => Action::Verify {
                 name: (*name).to_owned(),
@@ -129,66 +134,6 @@ impl Command {
             action,
         })
     }
-}
-
-/// Separates options from command operands.
-fn split_arguments(
-    mut arguments: impl Iterator<Item = String>,
-) -> Result<(Vec<String>, BTreeMap<String, String>), String> {
-    let mut operands = Vec::new();
-    let mut options = BTreeMap::new();
-    while let Some(argument) = arguments.next() {
-        if !argument.starts_with('-') {
-            if argument.trim().is_empty() {
-                return Err("a command operand cannot be empty".to_owned());
-            }
-            operands.push(argument);
-            continue;
-        }
-        let (argument, inline) = argument
-            .split_once('=')
-            .map_or((argument.as_str(), None), |(option, value)| {
-                (option, Some(value))
-            });
-        if options.contains_key(argument) {
-            return Err(format!("duplicate option: {argument}"));
-        }
-        let value = match argument {
-            "--json" => {
-                if inline.is_some() {
-                    return Err(format!("{argument} does not accept a value"));
-                }
-                String::new()
-            }
-            "--store" | "--graph" | "--input" | "--author" | "--author-name" | "--model-id" => {
-                let value = if let Some(value) = inline {
-                    value.to_owned()
-                } else {
-                    let value = arguments
-                        .next()
-                        .ok_or_else(|| format!("{argument} needs a value"))?;
-                    if value.starts_with("--") || (value.starts_with('-') && value != "-") {
-                        return Err(format!("{argument} needs a value, not an option"));
-                    }
-                    value
-                };
-                if value.trim().is_empty() {
-                    return Err(format!("{argument} needs a non-empty value"));
-                }
-                value
-            }
-            _ => return Err(format!("unknown option: {argument}")),
-        };
-        options.insert(argument.to_owned(), value);
-    }
-    Ok((operands, options))
-}
-
-/// Removes one required option value.
-fn required(options: &mut BTreeMap<String, String>, key: &str) -> Result<String, String> {
-    options
-        .remove(key)
-        .ok_or_else(|| format!("the command needs {key} <value>"))
 }
 
 impl AuthorOptions {
@@ -229,22 +174,13 @@ pub(super) fn run(arguments: Vec<String>, input: &mut impl Read) -> (u8, String)
     let result = Command::parse(arguments.into_iter())
         .map_err(|message| format!("{message}\n{USAGE}"))
         .and_then(|command| execute(command, input).map_err(|error| error.to_string()));
-    match result {
-        Ok(output) => output,
-        Err(message) => (
-            2,
-            if json {
-                serde_json::json!({"error": message}).to_string()
-            } else {
-                format!("error: {message}")
-            },
-        ),
-    }
+    result.unwrap_or_else(|message| failure(json, &message))
 }
 
 /// Executes one validated command through the flow backend.
 fn execute(command: Command, input: &mut impl Read) -> Result<(u8, String), Box<dyn Error>> {
-    let directory = command.store.as_path();
+    let store = store_directory(command.store)?;
+    let directory = store.as_path();
     let json = command.json;
     match command.action {
         // Return the flow listings without changing storage.
@@ -252,12 +188,7 @@ fn execute(command: Command, input: &mut impl Read) -> Result<(u8, String), Box<
         // Return the current generation and readable step details.
         Action::Show { name } => show(directory, json, &name),
         // Freeze one agent output and report every issue of a rejection.
-        Action::Import {
-            name,
-            graph,
-            input: path,
-            author,
-        } => import(directory, json, &name, &graph, &path, author, input),
+        Action::Import(import_command) => import(directory, json, import_command, input),
         // Recompute the current generation without writes.
         Action::Verify { name } => verify(directory, json, &name),
         // Print the embedded contract as it is.
@@ -355,23 +286,27 @@ fn describe(artifact: &FlowArtifact, file: &str) -> String {
     lines.join("\n")
 }
 
-/// Freezes one agent output. A rejection prints every issue and exits with 2.
+/// Freezes or checks one agent output. A rejection prints every issue and exits with 2.
 fn import(
     directory: &Path,
     json: bool,
-    name: &str,
-    graph: &str,
-    path: &Path,
-    author: AuthorOptions,
+    command: ImportCommand,
     input: &mut impl Read,
 ) -> Result<(u8, String), Box<dyn Error>> {
+    let ImportCommand {
+        name,
+        graph,
+        input: path,
+        author,
+        check,
+    } = command;
     let author = author.resolve()?;
     let bytes = if path.as_os_str() == "-" {
         let mut bytes = Vec::new();
         input.read_to_end(&mut bytes)?;
         bytes
     } else {
-        fs::read(path).map_err(|error| {
+        fs::read(&path).map_err(|error| {
             std::io::Error::new(
                 error.kind(),
                 format!("cannot read {}: {error}", path.display()),
@@ -379,23 +314,25 @@ fn import(
         })?
     };
     let request = ImportRequest {
-        name,
-        graph_file: graph,
+        name: &name,
+        graph_file: &graph,
         input: &bytes,
         author,
+        dry_run: check,
     };
     match import::import_flow(directory, request) {
-        // Report the frozen or unchanged generation and refresh the catalog.
+        // Report the frozen, unchanged, or checked generation; refresh the catalog after a freeze.
         Ok(ImportOutcome::Frozen(generation)) => {
-            if !generation.unchanged {
+            if !generation.unchanged && !generation.dry_run {
                 catalog::refresh_artifact_index(directory).map_err(|error| {
                     format!("the tool froze the generation, but catalog refresh failed: {error}")
                 })?;
             }
-            let verb = if generation.unchanged {
-                "kept"
-            } else {
-                "froze"
+            let verb = match (generation.dry_run, generation.unchanged) {
+                (true, true) => "check passed, would keep",
+                (true, false) => "check passed, would freeze",
+                (false, true) => "kept",
+                (false, false) => "froze",
             };
             let mut lines = vec![format!(
                 "flow {name}: {verb} generation {} ({})\n  {}\n  {}",
@@ -445,15 +382,6 @@ fn verify(directory: &Path, json: bool, name: &str) -> Result<(u8, String), Box<
     )];
     lines.extend(report.issues.iter().map(|issue| format!("  {issue}")));
     Ok((code, render(json, &report, lines.join("\n"))?))
-}
-
-/// Formats one successful command result.
-fn render(json: bool, value: &impl Serialize, human: String) -> Result<String, serde_json::Error> {
-    if json {
-        serde_json::to_string(value)
-    } else {
-        Ok(human)
-    }
 }
 
 // -----------------------------------------------------------------------------
@@ -544,7 +472,18 @@ mod tests {
         author[7] = "robot";
         assert!(execute(path, &author, &output().to_string(), 2)["error"].is_string());
 
+        let mut check = IMPORT.to_vec();
+        check.push("--check");
+        let checked = execute(path, &check, &output().to_string(), 0);
+        assert_eq!(checked["dryRun"], true);
+        assert_eq!(checked["ordinal"], 1);
+        assert!(!path.join("flows").exists());
+        assert!(!path.join("index.json").exists());
+
         let frozen = execute(path, &IMPORT, &output().to_string(), 0);
+        assert_eq!(frozen["dryRun"], false);
+        assert_eq!(frozen["generationDigest"], checked["generationDigest"]);
+        assert_eq!(frozen["file"], checked["file"]);
         assert_eq!(frozen["purpose"], "initial");
         assert_eq!(frozen["ordinal"], 1);
         let index: Value =
@@ -609,7 +548,7 @@ mod tests {
         )
         .expect("inline values");
         assert!(
-            matches!(command.action, super::Action::Import { graph, .. } if graph == "-weird.json")
+            matches!(command.action, super::Action::Import(super::ImportCommand { graph, .. }) if graph == "-weird.json")
         );
     }
 

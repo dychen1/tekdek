@@ -1,26 +1,28 @@
-ARTIFACT_STORE ?= artifacts
+STORE ?=
 DEMO_STORE ?= demo
 PORT ?= 8000
-SOURCE ?=
-NAME ?= $(notdir $(abspath $(SOURCE)))
+SOURCE ?= .
+NAME ?=
+
+store_option = $(if $(STORE),--store "$(STORE)")
+name_option = $(if $(NAME),--name "$(NAME)")
 
 .PHONY: serve
-serve: build
-	node viewer/server.mjs --store "$(ARTIFACT_STORE)" --port "$(PORT)"
+serve:
+	cargo run --release --locked -- serve $(store_option) --port "$(PORT)"
 
 .PHONY: demo
-demo: build
-	node viewer/server.mjs --store "$(DEMO_STORE)" --port "$(PORT)"
+demo:
+	cargo run --release --locked -- serve --store "$(DEMO_STORE)" --port "$(PORT)"
 
 .PHONY: build
 build:
 	npm run typecheck
-	npm run build
+	cargo build --release --locked
 
 .PHONY: index
 index:
-	@test -n "$(SOURCE)" || (echo 'Set SOURCE to the codebase directory.' >&2; exit 1)
-	cargo run --release --locked -- "$(SOURCE)" --name "$(NAME)" --store "$(ARTIFACT_STORE)"
+	cargo run --release --locked -- index "$(SOURCE)" $(name_option) $(store_option)
 
 .PHONY: test
 test:

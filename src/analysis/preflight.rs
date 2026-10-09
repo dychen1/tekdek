@@ -130,19 +130,28 @@ fn preflight_server_programs_with(
         Ok(())
     } else {
         Err(PipelineError::Setup(format!(
-            "cannot start language servers: {}",
+            "cannot start language servers: {}. Run `tekdek doctor` for the install commands",
             missing.join("; ")
         )))
     }
 }
 
 fn program_is_available(program: &str) -> bool {
+    find_program(program).is_some()
+}
+
+/// Returns the first executable file for a program name or path.
+///
+/// A name with one component is looked up in each `PATH` folder in order. On
+/// Windows, a name without an extension also matches `<name>.exe`.
+#[must_use]
+pub fn find_program(program: &str) -> Option<PathBuf> {
     let search_paths = env::var_os("PATH")
         .map(|value| env::split_paths(&value).collect::<Vec<_>>())
         .unwrap_or_default();
     program_candidates(program, &search_paths, executable_suffix())
-        .iter()
-        .any(|candidate| is_executable_file(candidate))
+        .into_iter()
+        .find(|candidate| is_executable_file(candidate))
 }
 
 fn program_candidates(
@@ -315,7 +324,7 @@ mod tests {
 
         assert_eq!(
             error.to_string(),
-            "cannot start language servers: python needs pyright-langserver; rust needs rust-analyzer"
+            "cannot start language servers: python needs pyright-langserver; rust needs rust-analyzer. Run `tekdek doctor` for the install commands"
         );
     }
 

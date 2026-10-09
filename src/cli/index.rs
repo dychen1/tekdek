@@ -1,11 +1,11 @@
 //! Index command.
 //!
-//! This module owns the default command: it analyzes one codebase root, writes
-//! the graph artifact, and refreshes the catalog of the store. Command
-//! arguments are the input. One graph file and a status line are the output.
+//! This module owns `index`: it analyzes one codebase root, writes the graph
+//! artifact, and refreshes the catalog of the store. Command arguments are the
+//! input. One graph file and a status line are the output.
 //!
-//! Use `tekdek <root>` with optional artifact, store,
-//! configuration, and language server overrides.
+//! Use `tekdek index [<root>]` with optional artifact, store, configuration,
+//! and language server overrides.
 //!
 //! # Sections
 //!
@@ -29,19 +29,22 @@ use tekdek::{
         language::Language,
     },
     catalog::write_artifact_index,
+    store::{PROJECT_STORE, create_project_store, find_project_store},
 };
 
 // -----------------------------------------------------------------------------
 // Entry
 // -----------------------------------------------------------------------------
 
-pub(super) const USAGE: &str = "usage: tekdek <root>
+pub(super) const USAGE: &str = "usage: tekdek index [<root>]
   [--name <name>] [--store <directory>] | [--output <path>]
   [--config <path>]
   [--server <language>=<program>]
   [--server-arg <language>=<argument>]...
-The default store is artifacts. --name and --store write <store>/<name>.json and
-refresh <store>/index.json. --output writes one file and leaves every index as it is.";
+The default root is the working directory. The default store is the nearest
+.tekdek folder in the root or its parents; without one, index creates
+<root>/.tekdek. index writes <store>/<name>.json and refreshes
+<store>/index.json. --output writes one file and leaves every index as it is.";
 
 /// Analyzes one codebase, writes its graph, and refreshes the catalog.
 #[cfg(any(feature = "python", feature = "rust"))]
@@ -61,6 +64,16 @@ pub(super) fn run(raw: impl Iterator<Item = String>) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    if destination.create_store
+        && let Some((store, _)) = &destination.indexed
+        && let Err(error) = create_project_store(store)
+    {
+        eprintln!(
+            "error: cannot create the store {}: {error}",
+            store.display()
+        );
+        return ExitCode::FAILURE;
+    }
     let config = match pipeline_config(&arguments) {
         Ok(config) => config,
         Err(error) => {
@@ -145,8 +158,8 @@ impl Arguments {
     ///
     /// # Errors
     ///
-    /// Returns a message if the root is missing, a second positional value
-    /// exists, an option is invalid, or `--output` appears with `--name` or `--store`.
+    /// Returns a message if a second positional value exists, an option is
+    /// invalid, or `--output` appears with `--name` or `--store`.
     fn parse(arguments: impl Iterator<Item = String>) -> Result<Self, String> {
         let mut root = None;
         let mut output = None;
@@ -212,7 +225,7 @@ impl Arguments {
         }
 
         Ok(Self {
-            root: root.ok_or("the codebase root is required")?,
+            root: root.unwrap_or_else(|| PathBuf::from(".")),
             output,
             name,
             store,
@@ -267,20 +280,22 @@ fn next_value(
 // Artifact destination
 // -----------------------------------------------------------------------------
 
-#[cfg(any(feature = "python", feature = "rust"))]
-const DEFAULT_STORE: &str = "artifacts";
-
 /// The graph file to write, and the store and file name to index when it is indexed.
+///
+/// `create_store` is true when the destination is a new project store.
 #[cfg(any(feature = "python", feature = "rust"))]
 #[derive(Debug, PartialEq, Eq)]
 struct Destination {
     output: PathBuf,
     indexed: Option<(PathBuf, String)>,
+    create_store: bool,
 }
 
 /// Returns an explicit output or an indexed artifact destination.
 ///
 /// Without `--name`, the name is the final component of the resolved root.
+/// Without `--store`, the store is the nearest project store in the resolved
+/// root or its parents, or a new `<root>/.tekdek`.
 ///
 /// # Errors
 ///
@@ -291,15 +306,18 @@ fn artifact_destination(arguments: &Arguments) -> Result<Destination, String> {
         return Ok(Destination {
             output: output.clone(),
             indexed: None,
+            create_store: false,
         });
     }
 
+    let resolve_root = || {
+        fs::canonicalize(&arguments.root)
+            .map_err(|error| format!("cannot resolve {}: {error}", arguments.root.display()))
+    };
     let name = if let Some(name) = &arguments.name {
         name.clone()
     } else {
-        let root = fs::canonicalize(&arguments.root)
-            .map_err(|error| format!("cannot resolve {}: {error}", arguments.root.display()))?;
-        match root.file_name() {
+        match resolve_root()?.file_name() {
             Some(name) => name
                 .to_str()
                 .ok_or_else(|| "the codebase root has no valid UTF-8 name".to_owned())?
@@ -309,14 +327,18 @@ fn artifact_destination(arguments: &Arguments) -> Result<Destination, String> {
     };
     validate_artifact_name(&name)?;
     let file = format!("{name}.json");
-    let store = arguments
-        .store
-        .clone()
-        .unwrap_or_else(|| PathBuf::from(DEFAULT_STORE));
+    let (store, create_store) = if let Some(store) = &arguments.store {
+        (store.clone(), false)
+    } else {
+        let root = resolve_root()?;
+        find_project_store(&root)
+            .map_or_else(|| (root.join(PROJECT_STORE), true), |store| (store, false))
+    };
 
     Ok(Destination {
         output: store.join(&file),
         indexed: Some((store, file)),
+        create_store,
     })
 }
 
@@ -512,42 +534,43 @@ mod tests {
     }
 
     #[test]
-    fn builds_an_indexed_destination_in_the_default_or_named_store() {
-        let default = artifact_destination(&parse(&["missing", "--name", "sample"]).expect("args"))
-            .expect("the explicit name should not require the root");
+    fn builds_an_indexed_destination_in_the_named_store() {
         let named = artifact_destination(
             &parse(&["missing", "--name", "sample", "--store", "demo"]).expect("args"),
         )
-        .expect("destination");
+        .expect("an explicit name and store should not require the root");
 
         assert_eq!(
-            default,
+            named,
             Destination {
-                output: PathBuf::from("artifacts/sample.json"),
-                indexed: Some((PathBuf::from("artifacts"), "sample.json".to_owned())),
+                output: PathBuf::from("demo/sample.json"),
+                indexed: Some((PathBuf::from("demo"), "sample.json".to_owned())),
+                create_store: false,
             }
-        );
-        assert_eq!(named.output, PathBuf::from("demo/sample.json"));
-        assert_eq!(
-            named.indexed,
-            Some((PathBuf::from("demo"), "sample.json".to_owned()))
         );
     }
 
     #[test]
-    fn names_the_artifact_after_the_root_folder() {
+    fn names_the_artifact_after_the_root_and_uses_the_nearest_project_store() {
         let directory = tempfile::TempDir::new().expect("the temporary directory should exist");
         let root = directory.path().join("sample-app");
-        std::fs::create_dir_all(&root).expect("the codebase root should exist");
-        let root = root.to_str().expect("path");
+        let nested = root.join("services").join("api");
+        std::fs::create_dir_all(&nested).expect("the codebase root should exist");
+        let root = std::fs::canonicalize(root).expect("canonical root");
+        let store = root.join(".tekdek");
 
-        let destination =
-            artifact_destination(&parse(&[root]).expect("args")).expect("destination");
+        let fresh = artifact_destination(&parse(&[root.to_str().expect("path")]).expect("args"))
+            .expect("destination");
+        assert_eq!(fresh.output, store.join("sample-app.json"));
+        assert!(fresh.create_store);
 
-        assert_eq!(
-            destination.output,
-            PathBuf::from("artifacts/sample-app.json")
-        );
+        std::fs::create_dir(&store).expect("project store");
+        let existing =
+            artifact_destination(&parse(&[nested.to_str().expect("path")]).expect("args"))
+                .expect("destination");
+        assert_eq!(existing.output, store.join("api.json"));
+        assert!(!existing.create_store);
+        assert_eq!(parse(&[]).expect("args").root, PathBuf::from("."));
     }
 
     #[test]

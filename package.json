@@ -3,9 +3,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "node tools/build-viewer.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "npm run build && node --import tsx --test viewer/tests/*.test.mjs"
+    "test": "node --import tsx --test viewer/tests/*.test.ts"
   },
   "devDependencies": {
     "esbuild": "0.25.10",

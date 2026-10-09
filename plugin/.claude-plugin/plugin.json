@@ -1,0 +1,17 @@
+{
+  "name": "tekdek",
+  "version": "0.1.0",
+  "description": "Write frozen tekdek flows with clusters, and open them in the Lift Deck.",
+  "author": {
+    "name": "dychen1"
+  },
+  "homepage": "https://github.com/dychen1/tekdek",
+  "repository": "https://github.com/dychen1/tekdek",
+  "license": "Apache-2.0",
+  "keywords": [
+    "code-walkthrough",
+    "call-graph",
+    "lsp",
+    "flows"
+  ]
+}

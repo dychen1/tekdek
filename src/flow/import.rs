@@ -5,7 +5,8 @@
 //! generation file and a moved current pointer are the outputs.
 //!
 //! An import validates the complete output before any write. It writes nothing
-//! when any error issue exists. The purpose follows from the store: a flow with a
+//! when any error issue exists. A dry run does the complete import, including
+//! the self-check of the new generation, and writes nothing. The purpose follows from the store: a flow with a
 //! lineage gets a `revision`, and any other flow gets an `initial` generation. A
 //! revision must use the graph of its parent. The caller refreshes the catalog
 //! after a freeze.
@@ -48,6 +49,7 @@ pub struct ImportRequest<'a> {
     pub graph_file: &'a str,
     pub input: &'a [u8],
     pub author: Author,
+    pub dry_run: bool,
 }
 
 /// The result of one successful freeze.
@@ -62,6 +64,8 @@ pub struct FrozenGeneration {
     pub file: String,
     /// True when the output equals the current generation and nothing was written.
     pub unchanged: bool,
+    /// True when the request was a dry run and nothing was written.
+    pub dry_run: bool,
     pub warnings: Vec<FlowIssue>,
 }
 
@@ -75,6 +79,9 @@ pub enum ImportOutcome {
 }
 
 /// Freezes one agent output as the next generation of one flow.
+///
+/// A dry run takes no store lock and returns the generation that a freeze
+/// would write.
 ///
 /// # Errors
 /// Returns `Rejected` with every issue when the output is invalid; nothing is
@@ -99,7 +106,11 @@ pub fn import_flow(
         Ok(flow) => flow,
         Err(outcome) => return Ok(outcome),
     };
-    let _lock = lock_store(directory)?;
+    let _lock = if request.dry_run {
+        None
+    } else {
+        Some(lock_store(directory)?)
+    };
     let (graph, graph_digest) = read_graph(directory, request.graph_file)?;
     let binding = FactBinding {
         graph_artifact: request.graph_file.to_owned(),
@@ -139,6 +150,7 @@ pub fn import_flow(
                 &parent.digests.generation,
             ),
             unchanged: true,
+            dry_run: request.dry_run,
             warnings,
         }));
     }
@@ -150,7 +162,15 @@ pub fn import_flow(
         intent,
         request.author,
     )?;
-    let file = lineage::write_current(directory, &artifact)?;
+    let file = if request.dry_run {
+        lineage::generation_file(
+            &artifact.flow_id,
+            artifact.generation.ordinal,
+            &artifact.digests.generation,
+        )
+    } else {
+        lineage::write_current(directory, &artifact)?
+    };
     Ok(ImportOutcome::Frozen(FrozenGeneration {
         name: artifact.flow_id.to_string(),
         ordinal: artifact.generation.ordinal,
@@ -158,6 +178,7 @@ pub fn import_flow(
         generation_digest: artifact.digests.generation,
         file,
         unchanged: false,
+        dry_run: request.dry_run,
         warnings,
     }))
 }
@@ -703,6 +724,7 @@ mod tests {
                 graph_file: "missing.json",
                 input: &input,
                 author: fixtures::agent(),
+                dry_run: false,
             },
         )
         .expect_err("missing graph");
