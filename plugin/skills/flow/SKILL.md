@@ -17,7 +17,7 @@ Freeze one behavior of a codebase as a tekdek flow: an ordered walk through its 
 
 ## Setup
 
-- This skill needs tekdek 0.1.0 or later. Run `tekdek version`. If the command is not found, follow [install.md](install.md): use an installed binary by its full path, or give the user the install command and stop. If the version is older, stop and tell the user to run the installer again to upgrade.
+- This skill needs tekdek 0.1.0 or later. Run `tekdek version`. If the command is not found, stop and give the user the install steps from the tekdek README. If the version is older, stop and tell the user to run the installer again to upgrade.
 - If the project has no store, follow [language-servers.md](language-servers.md), then run `tekdek index` in the project root.
 - If the source no longer matches the graph, tell the user before you index again or import.
 

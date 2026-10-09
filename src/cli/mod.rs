@@ -236,35 +236,6 @@ mod tests {
     }
 
     #[test]
-    fn the_marketplace_pins_a_released_version_tag_no_newer_than_the_crate() {
-        let path = concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/.claude-plugin/marketplace.json"
-        );
-        let marketplace: serde_json::Value =
-            serde_json::from_str(&std::fs::read_to_string(path).expect("marketplace"))
-                .expect("marketplace JSON");
-        let source = &marketplace["plugins"][0]["source"];
-        assert_eq!(source["source"], "git-subdir");
-        assert_eq!(source["path"], "plugin");
-
-        let version = |text: &str| -> Vec<u64> {
-            text.split('.')
-                .map(|part| part.parse().expect("a numeric version part"))
-                .collect()
-        };
-        let pinned = source["ref"]
-            .as_str()
-            .and_then(|tag| tag.strip_prefix('v'))
-            .expect("a v<version> tag");
-        assert_eq!(version(pinned).len(), 3, "{pinned}");
-        assert!(
-            version(pinned) <= version(env!("CARGO_PKG_VERSION")),
-            "{pinned}"
-        );
-    }
-
-    #[test]
     fn the_skills_require_the_crate_version() {
         let requirement = format!("needs tekdek {} or later", env!("CARGO_PKG_VERSION"));
         for skill in ["flow", "flow-view"] {

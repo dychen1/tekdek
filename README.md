@@ -53,9 +53,7 @@ Install the agent skills in Claude Code:
 /plugin install tekdek@tekdek
 ```
 
-The plugin adds `/tekdek:flow` and `/tekdek:flow-view`, which call the `tekdek` binary. The marketplace pins the plugin to the latest release tag, so the skills always match a released binary. For the private repository, Claude Code uses your git credentials (`gh auth login`, then `gh auth setup-git`). Other coding agents can follow `plugin/skills/flow/SKILL.md`.
-
-Claude Code does not update plugins from third-party marketplaces by default. Turn on auto-update for the `tekdek` marketplace in `/plugin`, or update by hand with `/plugin marketplace update tekdek`. Upgrade the binary with the same installer command.
+The plugin adds `/tekdek:flow` and `/tekdek:flow-view`, which call the `tekdek` binary. For the private repository, Claude Code uses your git credentials (`gh auth login`, then `gh auth setup-git`). Other coding agents can follow `plugin/skills/flow/SKILL.md`.
 
 ## Language Servers
 
@@ -275,8 +273,7 @@ The CI workflow runs `make check` on every pull request and every push to `main`
 2. Merge the change to `main`, and wait until its CI run passes.
 3. Tag that commit and push the tag: `git tag v0.2.0 && git push origin v0.2.0`.
 4. Wait until the release workflow succeeds and the release has its archives and installers.
-5. Set `ref` in `.claude-plugin/marketplace.json` to the new tag and merge it to `main`. Plugin users get the new skills only after this step, so the skills never ask for a binary that has no release yet. A test fails when the pinned tag is newer than the crate version.
 
-The release workflow builds archives and installers for macOS (arm64 and x86_64), Linux (x86_64 and arm64), and Windows (x86_64), and publishes them on GitHub Releases. Each archive holds the binary, `LICENSE`, `README.md`, and `OFL.txt`, the license of the embedded font. A build job stops when the tag does not point to a commit on `main`. That check only catches mistakes: the workflow runs from the tagged commit, so a tag on another commit can change the check, and a free private repository has no tag rules. Tag only `main` commits whose CI run passed.
+The release workflow builds archives and installers for macOS (arm64 and x86_64), Linux (x86_64 and arm64), and Windows (x86_64), and publishes them on GitHub Releases. Each archive holds the binary, `LICENSE`, `README.md`, and `OFL.txt`, the license of the embedded font. A build job stops when the tag does not point to a commit on `main`. That check only catches mistakes: the workflow runs from the tagged commit, so a tag on another commit can change the check, and a free private repository has no tag rules. Tag only `main` commits whose CI run passed. Claude Code users get the plugin update when the plugin version changes.
 
 The crate sets `publish = false`: `build.rs` needs the npm dependencies of a checkout, so a crate from crates.io could not build.
