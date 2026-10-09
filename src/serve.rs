@@ -2,8 +2,8 @@
 //!
 //! This module serves the Lift Deck on the loopback address. The viewer page,
 //! its script, its stylesheet, and its fonts come from the binary. Store files
-//! come from one store directory, and only when its `index.json` lists them.
-//! The server never writes. A store directory and a port are the inputs. HTTP
+//! come from one store directory, and only when its catalog lists them. The
+//! server builds the catalog from the store for each request and never writes. A store directory and a port are the inputs. HTTP
 //! responses are the output.
 //!
 //! # Sections
@@ -11,7 +11,7 @@
 //! `Server` binds the address and answers requests.
 //! `Requests` checks the headers and the method of one request.
 //! `Routes` maps a request path onto an embedded asset or a store file.
-//! `Index allowlist` decides which store files the viewer can read.
+//! `Catalog allowlist` decides which store files the viewer can read.
 //! `Safe reads` reads one store file without following a link.
 
 use std::{
@@ -21,9 +21,8 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use serde_json::Value;
-
 use crate::{
+    catalog::{build_catalog, readable_files},
     flow::models::is_flow_id,
     store::{graph::check_graph_name, reject_symlink},
 };
@@ -254,10 +253,17 @@ fn route(store: &Path, parts: &[String]) -> Result<Reply, Reply> {
             .find(|(font, _)| font == name)
             .map(|(_, bytes)| Reply::asset("font/woff2", bytes))
             .ok_or_else(not_found),
-        // Serve the index and the store files that it lists.
+        // Serve the catalog that the server builds from the store.
+        ["artifacts", "index.json"] => Ok(Reply {
+            status: 200,
+            content_type: JSON,
+            body: Cow::Owned(catalog_document(store)?),
+            location: None,
+        }),
+        // Serve the store files that the catalog lists.
         ["artifacts", rest @ ..] if !rest.is_empty() => {
             let file = rest.join("/");
-            if file != "index.json" && !listed(&read_index(store)?, &file) {
+            if !listed(&catalog_files(store)?, &file) {
                 return Err(not_found());
             }
             let bytes = read_safe(store, rest)?;
@@ -321,30 +327,36 @@ fn percent_decode(part: &str) -> Option<String> {
 }
 
 // -----------------------------------------------------------------------------
-// Index allowlist
+// Catalog allowlist
 // -----------------------------------------------------------------------------
 
-fn read_index(store: &Path) -> Result<Value, Reply> {
-    let bytes = read_safe(store, &["index.json"])?;
-    serde_json::from_slice(&bytes).map_err(|_| Reply::failure(500, "Cannot read the store index."))
+/// Returns the catalog JSON. A store without a graph file is a 404.
+fn catalog_document(store: &Path) -> Result<Vec<u8>, Reply> {
+    check_link(store)?;
+    let catalog = build_catalog(store).map_err(|error| catalog_failure(&error))?;
+    serde_json::to_vec(&catalog).map_err(|_| Reply::failure(500, "Cannot build the store catalog."))
 }
 
-/// True when the index lists the file: a graph file, or a schema 3 flow generation under `flows/`.
-fn listed(index: &Value, file: &str) -> bool {
-    let entries = index["artifacts"].as_array().map_or(&[][..], Vec::as_slice);
-    entries.iter().any(|entry| {
-        entry["file"]
-            .as_str()
-            .is_some_and(|name| graph_name(name) && name == file)
-            || entry["flows"].as_array().is_some_and(|flows| {
-                flows.iter().any(|flow| {
-                    flow["schemaVersion"] == 3
-                        && flow["file"].as_str().is_some_and(|path| {
-                            generation_file(path) && file.strip_prefix("flows/") == Some(path)
-                        })
-                })
-            })
-    })
+fn catalog_files(store: &Path) -> Result<Vec<String>, Reply> {
+    check_link(store)?;
+    readable_files(store).map_err(|error| catalog_failure(&error))
+}
+
+fn catalog_failure(error: &io::Error) -> Reply {
+    if error.kind() == io::ErrorKind::InvalidInput {
+        not_found()
+    } else {
+        Reply::failure(500, "Cannot build the store catalog.")
+    }
+}
+
+/// True when the catalog lists the file: a graph file, or a current flow generation under `flows/`.
+fn listed(files: &[String], file: &str) -> bool {
+    let named = match file.strip_prefix("flows/") {
+        Some(path) => generation_file(path),
+        None => graph_name(file),
+    };
+    named && files.iter().any(|listed| listed == file)
 }
 
 /// Accepts a graph file name: one store entry that ends in `.json`, does not start with a dot, and is not the index.
@@ -445,45 +457,34 @@ mod tests {
     };
 
     use super::{PAGE, Reply, ViewerServer, answer};
+    use crate::flow::fixtures::{self, frozen, import, output};
 
-    const GENERATION: &str = "demo-flow/generations/1-0123456789ab.json";
     const HOST: &str = "127.0.0.1:9";
 
-    fn fixture() -> tempfile::TempDir {
-        let root = tempfile::tempdir().expect("store");
+    /// A store with one frozen flow, its graph, and files that the catalog does not list.
+    ///
+    /// Returns the store and the path of the current generation under `flows/`.
+    fn fixture() -> (tempfile::TempDir, String) {
+        let root = fixtures::store();
         let store = root.path();
-        fs::create_dir_all(store.join("flows/demo-flow/generations")).expect("folders");
+        let generation = frozen(import(store, "demo-flow", &output())).file;
         let graph = r#"{"schemaVersion":1,"graph":{"nodes":[],"edges":[]}}"#;
-        let index = serde_json::json!({"schemaVersion": 3, "defaultArtifact": "graph.json", "artifacts": [
-            {"file": "graph.json", "label": "Graph", "digest": "stale", "flows": [
-                {"name": "demo-flow", "file": GENERATION, "schemaVersion": 3},
-                {"name": "loose", "file": "demo-flow/current.json", "schemaVersion": 3},
-                {"name": "older", "file": "demo-flow/generations/2-0123456789ab.json"},
-                {"name": "legacy", "file": "legacy.json"}
-            ]},
-            {"file": "same.json", "flows": []},
-            {"file": ".hidden.json", "flows": []}
-        ]});
+        fs::create_dir_all(store.join("notes")).expect("folders");
         for (file, text) in [
-            ("graph.json", graph.to_owned()),
-            ("same.json", graph.to_owned()),
-            (".hidden.json", graph.to_owned()),
-            ("index.json", index.to_string()),
-            ("secret.json", r#"{"secret":true}"#.to_owned()),
-            (
-                &format!("flows/{GENERATION}"),
-                r#"{"schemaVersion":3}"#.to_owned(),
-            ),
+            ("same.json", graph),
+            (".hidden.json", graph),
+            ("index.json", "<<<<<<< HEAD"),
+            ("secret.txt", "secret"),
+            ("notes/a.json", "{}"),
             (
                 "flows/demo-flow/generations/2-0123456789ab.json",
-                r#"{"schemaVersion":3}"#.to_owned(),
+                r#"{"schemaVersion":3}"#,
             ),
-            ("flows/demo-flow/current.json", "{}".to_owned()),
-            ("flows/legacy.json", r#"{"schemaVersion":2}"#.to_owned()),
+            ("flows/legacy.json", r#"{"schemaVersion":2}"#),
         ] {
             fs::write(store.join(file), text).expect("write fixture");
         }
-        root
+        (root, generation)
     }
 
     fn get(store: &Path, url: &str) -> Reply {
@@ -509,7 +510,7 @@ mod tests {
 
     #[test]
     fn serves_the_embedded_page_script_stylesheet_and_fonts_only() {
-        let root = fixture();
+        let (root, _) = fixture();
         let store = root.path();
         let page = get(store, "/viewer/");
         assert_eq!(
@@ -551,18 +552,23 @@ mod tests {
     }
 
     #[test]
-    fn serves_the_index_listed_graphs_and_listed_schema_3_generations_only() {
-        let root = fixture();
+    fn serves_the_built_catalog_its_graphs_and_current_generations_only() {
+        let (root, generation) = fixture();
         let store = root.path();
-        assert_eq!(status(store, "/artifacts/index.json"), 200);
+        let catalog = get(store, "/artifacts/index.json");
+        assert_eq!(catalog.status, 200);
+        let catalog: serde_json::Value = serde_json::from_slice(&catalog.body).expect("catalog");
+        assert_eq!(catalog["defaultArtifact"], "graph.json");
+        assert_eq!(catalog["artifacts"][0]["flows"][0]["file"], generation);
+        assert_eq!(catalog["artifacts"].as_array().map(Vec::len), Some(2));
         assert_eq!(status(store, "/artifacts/graph.json"), 200);
         assert_eq!(status(store, "/artifacts/same.json"), 200);
         assert_eq!(
-            status(store, &format!("/artifacts/flows/{GENERATION}")),
+            status(store, &format!("/artifacts/flows/{generation}")),
             200
         );
         for path in [
-            "/artifacts/secret.json",
+            "/artifacts/secret.txt",
             "/artifacts/.hidden.json",
             "/artifacts/flows/legacy.json",
             "/artifacts/flows/demo-flow/current.json",
@@ -573,11 +579,13 @@ mod tests {
         ] {
             assert_error(&get(store, path), 404);
         }
+        let empty = tempfile::tempdir().expect("empty store");
+        assert_error(&get(empty.path(), "/artifacts/index.json"), 404);
     }
 
     #[test]
     fn requires_the_exact_host_the_same_origin_and_a_read_method() {
-        let root = fixture();
+        let (root, _) = fixture();
         let store = root.path();
         let host = ("Host".to_owned(), HOST.to_owned());
         for value in ["evil.example", "localhost:9", "127.0.0.1:1"] {
@@ -644,10 +652,10 @@ mod tests {
 
     #[test]
     fn rejects_traversal_encoded_separators_and_symbolic_links() {
-        let root = fixture();
+        let (root, generation) = fixture();
         let store = root.path();
         for path in [
-            "/artifacts/../secret.json",
+            "/artifacts/../secret.txt",
             "/viewer/%2e%2e/AGENTS.md",
             "/artifacts/%2fetc%2fpasswd",
             "/artifacts/flows%5cdemo.json",
@@ -661,19 +669,20 @@ mod tests {
         #[cfg(unix)]
         {
             fs::remove_file(store.join("graph.json")).expect("remove graph");
-            std::os::unix::fs::symlink(store.join("secret.json"), store.join("graph.json"))
+            std::os::unix::fs::symlink(store.join("secret.txt"), store.join("graph.json"))
                 .expect("link graph");
-            assert_error(&get(store, "/artifacts/graph.json"), 403);
-            fs::remove_dir_all(store.join("flows")).expect("remove flows");
-            let outside = tempfile::tempdir().expect("outside");
-            std::os::unix::fs::symlink(outside.path(), store.join("flows")).expect("link flows");
-            assert_error(&get(store, &format!("/artifacts/flows/{GENERATION}")), 403);
+            assert_error(&get(store, "/artifacts/graph.json"), 404);
+            let flows = store.join("flows");
+            let moved = tempfile::tempdir().expect("outside");
+            fs::rename(&flows, moved.path().join("flows")).expect("move flows");
+            std::os::unix::fs::symlink(moved.path().join("flows"), &flows).expect("link flows");
+            assert_error(&get(store, &format!("/artifacts/flows/{generation}")), 404);
         }
     }
 
     #[test]
     fn answers_over_http_with_security_headers_and_headless_head_responses() {
-        let root = fixture();
+        let (root, _) = fixture();
         let server = ViewerServer::bind(root.path(), 0).expect("bind");
         let url = server.url();
         let host = url
@@ -697,7 +706,7 @@ mod tests {
         assert!(page.contains("X-Content-Type-Options: nosniff"));
         assert!(page.contains(&format!("Content-Length: {}", PAGE.len())));
         let head = request(format!(
-            "HEAD /artifacts/secret.json HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\r\n"
+            "HEAD /artifacts/secret.txt HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\r\n"
         ));
         assert!(head.starts_with("HTTP/1.1 404"), "{head}");
         assert!(
@@ -709,7 +718,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn refuses_a_missing_or_linked_store() {
-        let root = fixture();
+        let (root, _) = fixture();
         assert!(ViewerServer::bind(&root.path().join("missing"), 0).is_err());
         let linked = root.path().join("linked");
         std::os::unix::fs::symlink(root.path(), &linked).expect("link store");

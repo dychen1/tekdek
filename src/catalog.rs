@@ -1,23 +1,30 @@
 //! Artifact catalog.
 //!
-//! This module owns `index.json`, the catalog that the viewer reads. It lists
-//! every graph artifact of one store with its digest, and the current
+//! This module builds the catalog that the viewer reads as `index.json`. It
+//! lists every graph file of one store with its digest, and the current
 //! generation of every flow lineage under the graph that the flow binds. The
-//! store directory is the input. One index document is the output.
+//! store directory is the input. One catalog document in memory is the output.
+//! No command stores the catalog: the graph files and the flow lineages are the
+//! only source, so two branches that add flows never conflict on it.
 //!
 //! # Sections
 //!
-//! `Schema` defines the index document.
-//! `Writing` rebuilds and writes the index.
+//! `Schema` defines the catalog document.
+//! `Building` builds the catalog and selects the default graph.
 //! `Scanning` lists graph files and flow lineages.
 
-use std::{collections::BTreeMap, ffi::OsStr, fs, io, path::Path};
+use std::{
+    collections::BTreeMap,
+    ffi::OsStr,
+    fs, io,
+    path::{Path, PathBuf},
+};
 
 use serde::Serialize;
 
 use crate::{
-    flow::lineage::{FlowListing, lineage_listings, lineage_state},
-    store::{digest_of, lock_store, reject_symlink, write_json},
+    flow::lineage::{FlowListing, lineage_listings},
+    store::{digest_of, reject_symlink},
 };
 
 // -----------------------------------------------------------------------------
@@ -26,9 +33,10 @@ use crate::{
 
 const INDEX_SCHEMA_VERSION: u32 = 3;
 
+/// The catalog document of one store.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct ArtifactIndex {
+pub struct ArtifactIndex {
     schema_version: u32,
     default_artifact: String,
     artifacts: Vec<ArtifactIndexEntry>,
@@ -43,99 +51,96 @@ struct ArtifactIndexEntry {
     flows: Vec<FlowListing>,
 }
 
-// -----------------------------------------------------------------------------
-// Writing
-// -----------------------------------------------------------------------------
-
-/// Rebuilds the index with `default_artifact` as the default.
-///
-/// The writer rescans after writing and retries if a graph file or a flow
-/// pointer changed meanwhile.
-///
-/// # Errors
-///
-/// Returns an error if scanning, reading, serialization, or writing fails, or if
-/// the default artifact is not in the store.
-pub fn write_artifact_index(directory: &Path, default_artifact: &str) -> io::Result<()> {
-    let _lock = lock_store(directory)?;
-    write_locked(directory, default_artifact)
+impl ArtifactIndex {
+    /// Returns the graph file that lists the flow, or `None` when no graph lists it.
+    #[must_use]
+    pub fn graph_of_flow(&self, flow: &str) -> Option<&str> {
+        self.artifacts
+            .iter()
+            .find(|artifact| artifact.flows.iter().any(|listing| listing.name == flow))
+            .map(|artifact| artifact.file.as_str())
+    }
 }
 
-/// Rebuilds the index and keeps the current default artifact.
-///
-/// A missing or unreadable index falls back to the first artifact file.
+// -----------------------------------------------------------------------------
+// Building
+// -----------------------------------------------------------------------------
+
+/// Builds the catalog of the store from its graph files and flow lineages.
 ///
 /// # Errors
 ///
-/// Returns an error if the store has no artifact or writing fails.
-pub fn refresh_artifact_index(directory: &Path) -> io::Result<()> {
-    let _lock = lock_store(directory)?;
-    let default = default_artifact(directory)?;
-    write_locked(directory, &default)
+/// Returns an error if the store has no graph file, or if scanning or reading fails.
+pub fn build_catalog(directory: &Path) -> io::Result<ArtifactIndex> {
+    let files = artifact_files(directory)?;
+    let default_artifact = select_default(directory, &files)?;
+    artifact_index(directory, &files, default_artifact)
+}
+
+/// Returns the store paths that the viewer can read: the graph files and the current generations.
+///
+/// A generation path starts with `flows/`. This listing reads no graph bytes.
+///
+/// # Errors
+///
+/// Returns an error if scanning fails.
+pub fn readable_files(directory: &Path) -> io::Result<Vec<String>> {
+    let mut files = artifact_files(directory)?;
+    for lineage in lineage_listings(directory)? {
+        files.push(format!("flows/{}", lineage.listing.file));
+    }
+    Ok(files)
 }
 
 /// Returns the default graph file of the store.
 ///
-/// The index default wins when it names a graph file of the store. A missing
-/// or unreadable index falls back to the first graph file in name order.
+/// The only graph file is the default. With more graph files, the graph named
+/// after the project folder wins, and then the first graph file in name order.
+/// The project folder is the folder that holds the store.
 ///
 /// # Errors
 ///
 /// Returns an error if the store has no graph file or cannot be read.
 pub fn default_artifact(directory: &Path) -> io::Result<String> {
-    #[derive(serde::Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    struct ExistingIndex {
-        default_artifact: String,
-    }
-
-    reject_symlink(directory)?;
     let files = artifact_files(directory)?;
-    let first_artifact = files.first().cloned().ok_or_else(|| {
-        io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "the artifact directory is empty",
-        )
-    })?;
-    reject_symlink(&directory.join("index.json"))?;
-    let existing = fs::read_to_string(directory.join("index.json"))
-        .ok()
-        .and_then(|text| serde_json::from_str::<ExistingIndex>(&text).ok())
-        .map(|index| index.default_artifact);
-    Ok(existing
-        .filter(|file| files.contains(file))
-        .unwrap_or(first_artifact))
+    select_default(directory, &files)
 }
 
-fn write_locked(directory: &Path, default_artifact: &str) -> io::Result<()> {
-    loop {
-        let files = artifact_files(directory)?;
-        let lineages = lineage_state(directory)?;
-        let index = artifact_index(directory, &files, default_artifact)?;
-        if !index
-            .artifacts
-            .iter()
-            .any(|artifact| artifact.file == default_artifact)
-        {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "the default artifact is not in the artifact directory",
-            ));
-        }
+/// Returns the graph file named after the project folder of the store, if the folder has a UTF-8 name.
+#[must_use]
+pub fn project_graph_file(directory: &Path) -> Option<String> {
+    let directory = fs::canonicalize(directory).unwrap_or_else(|_| PathBuf::from(directory));
+    let name = directory.parent()?.file_name()?.to_str()?;
+    Some(format!("{name}.json"))
+}
 
-        write_json(&directory.join("index.json"), &index)?;
-        if artifact_files(directory)? == files && lineage_state(directory)? == lineages {
-            return Ok(());
-        }
+fn select_default(directory: &Path, files: &[String]) -> io::Result<String> {
+    let first = files.first().ok_or_else(|| {
+        io::Error::new(io::ErrorKind::InvalidInput, "the store has no graph file")
+    })?;
+    if files.len() == 1 {
+        return Ok(first.clone());
     }
+    Ok(project_graph_file(directory)
+        .filter(|file| files.contains(file))
+        .unwrap_or_else(|| first.clone()))
 }
 
 // -----------------------------------------------------------------------------
 // Scanning
 // -----------------------------------------------------------------------------
 
-/// Lists the graph files of the store in name order: every `*.json` file except `index.json`.
-fn artifact_files(directory: &Path) -> io::Result<Vec<String>> {
+/// Lists the graph files of the store in name order: every regular `*.json` file
+/// that does not start with a dot, except `index.json`.
+///
+/// An `index.json` file from an older tekdek is not a graph file, and the catalog ignores it.
+/// A symbolic link is not a regular file.
+///
+/// # Errors
+///
+/// Returns an error if the store is a symbolic link or cannot be listed.
+pub fn artifact_files(directory: &Path) -> io::Result<Vec<String>> {
+    reject_symlink(directory)?;
     let mut files = Vec::new();
     for entry in fs::read_dir(directory)? {
         let entry = entry?;
@@ -145,7 +150,9 @@ fn artifact_files(directory: &Path) -> io::Result<Vec<String>> {
             continue;
         }
         match name.into_string() {
-            Ok(name) if name != "index.json" => files.push(name),
+            Ok(name) if !name.starts_with('.') && !name.eq_ignore_ascii_case("index.json") => {
+                files.push(name);
+            }
             Ok(_) => {}
             Err(_) => eprintln!("warning: cannot list a JSON file: its name is not valid UTF-8"),
         }
@@ -154,11 +161,11 @@ fn artifact_files(directory: &Path) -> io::Result<Vec<String>> {
     Ok(files)
 }
 
-/// Builds the index document. A flow is stale when its graph digest differs from the file.
+/// Builds the catalog document. A flow is stale when its graph digest differs from the file.
 fn artifact_index(
     directory: &Path,
     files: &[String],
-    default_artifact: &str,
+    default_artifact: String,
 ) -> io::Result<ArtifactIndex> {
     let mut listings: BTreeMap<String, Vec<(String, FlowListing)>> = BTreeMap::new();
     for lineage in lineage_listings(directory)? {
@@ -209,7 +216,7 @@ fn artifact_index(
 
     Ok(ArtifactIndex {
         schema_version: INDEX_SCHEMA_VERSION,
-        default_artifact: default_artifact.to_owned(),
+        default_artifact,
         artifacts,
     })
 }
@@ -224,31 +231,31 @@ mod tests {
 
     use serde_json::Value;
 
-    use super::{refresh_artifact_index, write_artifact_index};
+    use super::{build_catalog, default_artifact, readable_files};
     use crate::{
         flow::fixtures::{self, frozen, import, output},
         store::digest_of,
     };
 
-    fn index(directory: &std::path::Path) -> Value {
-        serde_json::from_slice(&fs::read(directory.join("index.json")).expect("index"))
-            .expect("index JSON")
+    fn catalog(directory: &std::path::Path) -> Value {
+        serde_json::to_value(build_catalog(directory).expect("catalog")).expect("catalog JSON")
     }
 
     #[test]
-    fn indexes_artifacts_by_file_name() {
+    fn lists_graph_files_by_name_and_ignores_an_old_index_file() {
         let directory = tempfile::tempdir().expect("store");
         fs::write(directory.path().join("zeta.json"), "{}").expect("artifact");
         fs::write(directory.path().join("alpha.json"), "{}").expect("artifact");
+        fs::write(directory.path().join("index.json"), "<<<<<<< HEAD").expect("old index");
 
-        write_artifact_index(directory.path(), "zeta.json").expect("index");
+        let document = catalog(directory.path());
 
-        let document = index(directory.path());
         assert_eq!(document["schemaVersion"], 3);
-        assert_eq!(document["defaultArtifact"], "zeta.json");
+        assert_eq!(document["defaultArtifact"], "alpha.json");
         assert_eq!(document["artifacts"][0]["label"], "alpha");
         assert_eq!(document["artifacts"][0]["digest"], digest_of(b"{}"));
         assert_eq!(document["artifacts"][1]["file"], "zeta.json");
+        assert_eq!(document["artifacts"].as_array().map(Vec::len), Some(2));
         assert!(document["artifacts"][0].get("flows").is_none());
     }
 
@@ -258,9 +265,7 @@ mod tests {
         let path = directory.path();
         let generation = frozen(import(path, "demo-flow", &output()));
 
-        write_artifact_index(path, "graph.json").expect("index");
-
-        let document = index(path);
+        let document = catalog(path);
         let flow = &document["artifacts"][0]["flows"][0];
         assert_eq!(
             *flow,
@@ -274,29 +279,44 @@ mod tests {
                 "stale": false
             })
         );
+        assert_eq!(
+            build_catalog(path)
+                .expect("catalog")
+                .graph_of_flow("demo-flow"),
+            Some("graph.json")
+        );
+        assert_eq!(
+            readable_files(path).expect("files"),
+            [
+                "graph.json".to_owned(),
+                format!("flows/{}", generation.file)
+            ]
+        );
         fixtures::write_graph(path, "src/extra.rs::callable:another");
-        refresh_artifact_index(path).expect("refresh");
-        assert_eq!(index(path)["artifacts"][0]["flows"][0]["stale"], true);
+        assert_eq!(catalog(path)["artifacts"][0]["flows"][0]["stale"], true);
     }
 
     #[test]
-    fn refreshes_the_index_and_keeps_the_default() {
-        let directory = tempfile::tempdir().expect("store");
-        fs::write(directory.path().join("beta.json"), "{}").expect("artifact");
-        fs::write(directory.path().join("alpha.json"), "{}").expect("artifact");
-        write_artifact_index(directory.path(), "beta.json").expect("index");
+    fn selects_the_project_graph_as_the_default_and_then_the_first_graph() {
+        let directory = tempfile::tempdir().expect("project");
+        let project = directory.path().join("acme");
+        let store = project.join(".tekdek");
+        fs::create_dir_all(&store).expect("store");
+        fs::write(store.join("worker.json"), "{}").expect("artifact");
+        assert_eq!(default_artifact(&store).expect("default"), "worker.json");
 
-        refresh_artifact_index(directory.path()).expect("refresh");
+        fs::write(store.join("api.json"), "{}").expect("artifact");
+        assert_eq!(default_artifact(&store).expect("default"), "api.json");
 
-        assert_eq!(index(directory.path())["defaultArtifact"], "beta.json");
+        fs::write(store.join("acme.json"), "{}").expect("artifact");
+        assert_eq!(default_artifact(&store).expect("default"), "acme.json");
     }
 
     #[test]
-    fn rejects_a_default_artifact_outside_the_store() {
+    fn rejects_a_store_without_a_graph_file() {
         let directory = tempfile::tempdir().expect("store");
-        fs::write(directory.path().join("alpha.json"), "{}").expect("artifact");
 
-        let error = write_artifact_index(directory.path(), "missing.json").expect_err("missing");
+        let error = build_catalog(directory.path()).err().expect("no graph");
 
         assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
     }

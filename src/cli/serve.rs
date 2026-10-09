@@ -5,13 +5,11 @@
 //! requests until the process ends. Command arguments are the input.
 
 use std::{
-    fs,
     path::{Path, PathBuf},
     process::{Command, ExitCode, Stdio},
 };
 
-use serde_json::Value;
-use tekdek::serve::ViewerServer;
+use tekdek::{catalog::build_catalog, serve::ViewerServer};
 
 use super::{split_arguments, store_directory};
 
@@ -102,30 +100,19 @@ fn parse(raw: impl Iterator<Item = String>) -> Result<Arguments, String> {
     })
 }
 
-/// Returns the viewer URL that opens one flow under the graph that the store index lists it with.
+/// Returns the viewer URL that opens one flow under the graph that the store catalog lists it with.
 fn flow_url(base: &str, store: &Path, flow: &str) -> Result<String, String> {
-    let text = fs::read_to_string(store.join("index.json"))
-        .map_err(|error| format!("cannot read the store index: {error}"))?;
-    let index: Value = serde_json::from_str(&text)
-        .map_err(|error| format!("cannot read the store index: {error}"))?;
-    let artifact = index["artifacts"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .find(|entry| {
-            entry["flows"]
-                .as_array()
-                .is_some_and(|flows| flows.iter().any(|item| item["name"] == flow))
-        })
-        .and_then(|entry| entry["file"].as_str())
-        .ok_or_else(|| {
-            format!("the store index lists no flow named {flow}: run `tekdek flow list`")
-        })?;
-    Ok(format!(
-        "{base}?artifact={}&flow={}",
-        encode(artifact),
-        encode(flow)
-    ))
+    let catalog =
+        build_catalog(store).map_err(|error| format!("cannot read the store catalog: {error}"))?;
+    let artifact = catalog
+        .graph_of_flow(flow)
+        .ok_or_else(|| format!("the store lists no flow named {flow}: run `tekdek flow list`"))?;
+    Ok(viewer_url(base, artifact, flow))
+}
+
+/// Returns the viewer URL of one flow under one graph file.
+fn viewer_url(base: &str, artifact: &str, flow: &str) -> String {
+    format!("{base}?artifact={}&flow={}", encode(artifact), encode(flow))
 }
 
 /// Percent-encodes every byte except the unreserved URL characters.
@@ -162,7 +149,7 @@ fn open_browser(url: &str) -> std::io::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{flow_url, parse};
+    use super::{flow_url, parse, viewer_url};
 
     fn arguments(values: &[&str]) -> Result<super::Arguments, String> {
         parse(values.iter().map(|value| (*value).to_owned()))
@@ -182,22 +169,16 @@ mod tests {
     }
 
     #[test]
-    fn builds_the_url_of_a_listed_flow() {
-        let store = tempfile::tempdir().expect("store");
-        let index = serde_json::json!({"artifacts": [
-            {"file": "other.json", "flows": []},
-            {"file": "my app.json", "flows": [{"name": "request-flow"}]}
-        ]});
-        std::fs::write(store.path().join("index.json"), index.to_string()).expect("index");
-
-        let url = flow_url("http://127.0.0.1:1/viewer/", store.path(), "request-flow")
-            .expect("listed flow");
-
+    fn builds_the_url_of_a_flow_and_rejects_an_unlisted_flow() {
         assert_eq!(
-            url,
+            viewer_url("http://127.0.0.1:1/viewer/", "my app.json", "request-flow"),
             "http://127.0.0.1:1/viewer/?artifact=my%20app.json&flow=request-flow"
         );
-        assert!(flow_url("http://127.0.0.1:1/viewer/", store.path(), "missing").is_err());
+        let store = tempfile::tempdir().expect("store");
+        std::fs::write(store.path().join("app.json"), "{}").expect("graph");
+        let error = flow_url("http://127.0.0.1:1/viewer/", store.path(), "missing")
+            .expect_err("unlisted flow");
+        assert!(error.contains("no flow named missing"), "{error}");
     }
 
     #[test]

@@ -2,8 +2,8 @@
 //!
 //! This module owns the store folder on disk: its location, its lock, its atomic
 //! writes, its link checks, and the content digest of stored bytes. The `graph`
-//! submodule owns the graph artifact. The flow and catalog modules write through
-//! these helpers.
+//! submodule owns the graph artifact. The flow modules write through these
+//! helpers.
 //!
 //! # Sections
 //!
@@ -30,17 +30,45 @@ use sha2::{Digest, Sha256};
 /// The folder name of a project store.
 pub const PROJECT_STORE: &str = ".tekdek";
 
-/// The ignore file of a new project store: the lock and interrupted writes stay local.
+/// The ignore file of a new project store.
+///
+/// The lock and interrupted writes stay local. An older tekdek wrote the catalog
+/// to `index.json`; tekdek now builds it in memory, so the file stays out of Git.
 const PROJECT_IGNORE: &str =
-    "# Local files of tekdek. Commit the rest of this folder.\n.store.lock\n*.tmp\n";
+    "# Local files of tekdek. Commit the rest of this folder.\n.store.lock\n*.tmp\nindex.json\n";
 
 /// Returns the nearest project store in `start` or one of its parents.
+///
+/// The search stops at the top folder of a Git work tree, after it examines
+/// that folder. It also stops below the home folder: the home folder is
+/// examined only when the search starts there. So a stray `~/.tekdek` does not
+/// capture the projects under the home folder.
 #[must_use]
 pub fn find_project_store(start: &Path) -> Option<PathBuf> {
-    start
-        .ancestors()
-        .map(|directory| directory.join(PROJECT_STORE))
-        .find(|store| store.is_dir())
+    find_store_below(start, home_directory().as_deref())
+}
+
+fn find_store_below(start: &Path, home: Option<&Path>) -> Option<PathBuf> {
+    let start = fs::canonicalize(start).unwrap_or_else(|_| start.to_path_buf());
+    for directory in start.ancestors() {
+        if home == Some(directory) && directory != start {
+            return None;
+        }
+        let store = directory.join(PROJECT_STORE);
+        if store.is_dir() {
+            return Some(store);
+        }
+        if directory.join(".git").exists() {
+            return None;
+        }
+    }
+    None
+}
+
+/// Returns the canonical home folder of the user, if the system names one.
+fn home_directory() -> Option<PathBuf> {
+    let home = std::env::home_dir()?;
+    Some(fs::canonicalize(&home).unwrap_or(home))
 }
 
 /// Creates a project store with its ignore file. An existing folder stays as it is.
@@ -111,10 +139,9 @@ fn temporary_suffix() -> String {
 // Locks and links
 // -----------------------------------------------------------------------------
 
-/// Locks cooperative graph writes, flow imports, and catalog writes in one store.
+/// Locks cooperative graph writes and flow imports in one store.
 ///
 /// The caller must keep the file open through the complete operation.
-/// A graph write or a flow import and its later catalog write use separate lock scopes.
 pub(crate) fn lock_store(directory: &Path) -> io::Result<fs::File> {
     reject_symlink(directory)?;
     fs::create_dir_all(directory)?;
@@ -169,12 +196,17 @@ pub fn digest_of(bytes: &[u8]) -> String {
 mod tests {
     use std::fs;
 
-    use super::{PROJECT_STORE, create_project_store, digest_of, find_project_store, write_bytes};
+    use super::{
+        PROJECT_STORE, create_project_store, digest_of, find_project_store, find_store_below,
+        write_bytes,
+    };
 
     #[test]
     fn finds_the_nearest_project_store_and_creates_one_with_an_ignore_file() {
         let directory = tempfile::tempdir().expect("project");
-        let project = directory.path().join("project");
+        let project = fs::canonicalize(directory.path())
+            .expect("canonical folder")
+            .join("project");
         let nested = project.join("src").join("cli");
         fs::create_dir_all(&nested).expect("folders");
         assert_eq!(find_project_store(&nested), None);
@@ -185,12 +217,39 @@ mod tests {
         assert_eq!(find_project_store(&project), Some(store.clone()));
         let ignore = fs::read_to_string(store.join(".gitignore")).expect("ignore file");
         assert!(ignore.contains(".store.lock"));
+        assert!(ignore.lines().any(|line| line == "index.json"));
 
         fs::write(store.join(".gitignore"), "kept\n").expect("edit");
         create_project_store(&store).expect("keep");
         assert_eq!(
             fs::read_to_string(store.join(".gitignore")).expect("ignore"),
             "kept\n"
+        );
+    }
+
+    #[test]
+    fn stops_the_search_at_the_git_top_folder_and_below_the_home_folder() {
+        let directory = tempfile::tempdir().expect("home");
+        let home = fs::canonicalize(directory.path()).expect("canonical home");
+        fs::create_dir_all(home.join(PROJECT_STORE)).expect("stray store");
+        let repository = home.join("code").join("acme");
+        let nested = repository.join("src");
+        fs::create_dir_all(&nested).expect("folders");
+        let loose = home.join("notes").join("draft");
+        fs::create_dir_all(&loose).expect("folders");
+
+        assert_eq!(find_store_below(&loose, Some(&home)), None);
+        assert_eq!(
+            find_store_below(&home, Some(&home)),
+            Some(home.join(PROJECT_STORE))
+        );
+
+        fs::create_dir(repository.join(".git")).expect("git folder");
+        assert_eq!(find_store_below(&nested, None), None);
+        fs::create_dir(repository.join(PROJECT_STORE)).expect("project store");
+        assert_eq!(
+            find_store_below(&nested, Some(&home)),
+            Some(repository.join(PROJECT_STORE))
         );
     }
 

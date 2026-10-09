@@ -1,8 +1,7 @@
 //! Flow commands.
 //!
 //! This module owns the arguments and the output of `flow` commands. It calls
-//! the flow backend and refreshes the catalog after a freeze. Command
-//! arguments and standard input are the inputs. One exit code and one output
+//! the flow backend. Command arguments and standard input are the inputs. One exit code and one output
 //! document are the output.
 //!
 //! # Sections
@@ -18,15 +17,12 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use tekdek::{
-    catalog,
-    flow::{
-        AGENT_OUTPUT_SCHEMA, FlowError,
-        import::{self, ImportOutcome, ImportRequest},
-        lineage,
-        models::{Author, FlowArtifact, FlowId, FlowIssue, IssueCode, wire_name},
-        verify,
-    },
+use tekdek::flow::{
+    AGENT_OUTPUT_SCHEMA, FlowError,
+    import::{self, ImportOutcome, ImportRequest},
+    lineage,
+    models::{Author, FlowArtifact, FlowId, FlowIssue, IssueCode, wire_name},
+    verify,
 };
 
 use super::{failure, render, required, split_arguments, store_directory};
@@ -321,13 +317,8 @@ fn import(
         dry_run: check,
     };
     match import::import_flow(directory, request) {
-        // Report the frozen, unchanged, or checked generation; refresh the catalog after a freeze.
+        // Report the frozen, unchanged, or checked generation.
         Ok(ImportOutcome::Frozen(generation)) => {
-            if !generation.unchanged && !generation.dry_run {
-                catalog::refresh_artifact_index(directory).map_err(|error| {
-                    format!("the tool froze the generation, but catalog refresh failed: {error}")
-                })?;
-            }
             let verb = match (generation.dry_run, generation.unchanged) {
                 (true, true) => "check passed, would keep",
                 (true, false) => "check passed, would freeze",
@@ -486,10 +477,7 @@ mod tests {
         assert_eq!(frozen["file"], checked["file"]);
         assert_eq!(frozen["purpose"], "initial");
         assert_eq!(frozen["ordinal"], 1);
-        let index: Value =
-            serde_json::from_slice(&fs::read(path.join("index.json")).expect("index"))
-                .expect("index JSON");
-        assert_eq!(index["artifacts"][0]["flows"][0]["name"], "entry-flow");
+        assert!(!path.join("index.json").exists());
         assert_eq!(
             execute(path, &["verify", "entry-flow"], "", 0)["issues"],
             serde_json::json!([])

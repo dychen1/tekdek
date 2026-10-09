@@ -77,18 +77,20 @@ Press the right arrow to start the flow. Press `?` to show the key.
 2. Ask a coding agent for a flow, for example `/tekdek:flow explain how a request is authenticated`. The agent finds node keys with `tekdek graph search` and `tekdek graph show`, writes an output document with clusters, checks it with `tekdek flow import --check`, and freezes it with `tekdek flow import`.
 3. View the flow with `/tekdek:flow-view request-auth` or `tekdek serve --flow request-auth --open`.
 
-Every command after `index` uses the nearest `.tekdek` folder from the working directory. Pass `--store <directory>` to use another store.
+Every command uses the nearest `.tekdek` folder from the working directory. The search stops at the top folder of the Git work tree, and it does not go up into your home folder. Pass `--store <directory>` to use another store.
 
 ## Project Store
 
-`tekdek index` writes to the nearest `.tekdek` folder at or above the project root, or creates `<root>/.tekdek`. Commit the folder to share flows.
+`tekdek index` writes to the nearest `.tekdek` folder at or above the root. When the project has no store, `index` creates `<root>/.tekdek` after the analysis succeeds. Commit the folder to share flows.
+
+- In a project that has a store, `tekdek index` without a root indexes the project root from any subfolder, as Git commands do. The project root is the folder that holds the store.
+- A root argument inside that project needs `--name`, so a partial graph never replaces the project graph: `tekdek index services/worker --name worker` writes `worker.json`.
 
 ```text
 acme-api/
 |-- src/
 `-- .tekdek/
-    |-- .gitignore                      # ignores the lock file and interrupted writes
-    |-- index.json                      # catalog of graphs and current flows; tekdek rebuilds it
+    |-- .gitignore                      # ignores the lock file, interrupted writes, and index.json
     |-- acme-api.json                   # graph of the project, from tekdek index
     `-- flows/
         |-- request-auth/
@@ -103,7 +105,9 @@ acme-api/
 ```
 
 - A flow is one folder. Each freeze adds one generation file, named by its ordinal and the first 12 characters of its digest. A generation never changes after the freeze. `current.json` names the current generation.
-- The graph and `index.json` belong to the store, not to one flow. All flows of a project share its graph. To index another codebase into the same store, give it a name: `tekdek index services/worker --name worker` writes `worker.json`.
+- The graph belongs to the store, not to one flow. All flows of a project share its graph.
+- The catalog of graphs and current flows is not a file in the store. `tekdek serve` builds it from the store for each request, so two branches that add flows merge without a conflict. An `index.json` file from an older tekdek has no effect; delete it.
+- The default graph is the only graph, else the graph named after the project folder, else the first graph in name order. A named index does not change the default. The `graph` commands and the viewer use the default when you do not name a graph.
 - A flow binds to the digest of its graph, so commit the graph with its flows. When you index changed source again, the digest changes and the flows become stale. A stale flow still plays, with a warning. To follow the new graph, write the flow again under a new name.
 
 ## Frozen Flows
@@ -126,7 +130,7 @@ The viewer shows the codebase as one vertical file tree. When a flow starts, the
 | F | Fit the map |
 | ? | Show or hide the key |
 
-The URL keeps the graph, the flow, and the step: `?artifact=<file>&flow=<name>&step=<n>`. `tekdek serve` binds to the loopback address, serves the viewer from the binary, and reads only the store files that `index.json` lists.
+The URL keeps the graph, the flow, and the step: `?artifact=<file>&flow=<name>&step=<n>`. `tekdek serve` binds to the loopback address, serves the viewer from the binary, and reads only the store files that its catalog lists: the graph files and the current generation of each flow.
 
 ## Language Analysis
 
@@ -213,7 +217,7 @@ cachePriming.enable = false
 |   |-- store/                 # Store folder, project store, atomic writes, graph artifact
 |   |-- flow/                  # Frozen flows: models, import, verify, lineage, rules
 |   |   `-- schema/            # Agent output and flow artifact JSON Schemas
-|   |-- catalog.rs             # index.json for the viewer
+|   |-- catalog.rs             # catalog of graphs and flows for the viewer
 |   |-- query.rs               # Graph search and node neighbors for agents
 |   `-- serve.rs               # Viewer server with the embedded viewer
 |-- tools/build-viewer.ts      # esbuild script that build.rs runs

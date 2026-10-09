@@ -1,8 +1,8 @@
 //! Index command.
 //!
-//! This module owns `index`: it analyzes one codebase root, writes the graph
-//! artifact, and refreshes the catalog of the store. Command arguments are the
-//! input. One graph file and a status line are the output.
+//! This module owns `index`: it analyzes one codebase root and writes the graph
+//! artifact into a store. Command arguments are the input. One graph file and
+//! status lines are the output.
 //!
 //! Use `tekdek index [<root>]` with optional artifact, store, configuration,
 //! and language server overrides.
@@ -28,8 +28,7 @@ use tekdek::{
         config::{ConfigError, apply_cli_overrides, configured_profiles},
         language::Language,
     },
-    catalog::write_artifact_index,
-    store::{PROJECT_STORE, create_project_store, find_project_store},
+    store::{PROJECT_STORE, create_project_store, find_project_store, graph::GraphArtifact},
 };
 
 // -----------------------------------------------------------------------------
@@ -41,12 +40,14 @@ pub(super) const USAGE: &str = "usage: tekdek index [<root>]
   [--config <path>]
   [--server <language>=<program>]
   [--server-arg <language>=<argument>]...
-The default root is the working directory. The default store is the nearest
-.tekdek folder in the root or its parents; without one, index creates
-<root>/.tekdek. index writes <store>/<name>.json and refreshes
-<store>/index.json. --output writes one file and leaves every index as it is.";
+The default store is the nearest .tekdek folder in the root or its parents, up
+to the top folder of the Git work tree. Without a root, index analyzes the
+working directory, or the project root when a store exists: the folder that
+holds the store. A root inside the project of a store needs --name. Without a
+store, index creates <root>/.tekdek after the analysis succeeds. index writes
+<store>/<name>.json. --output writes one file and changes no store.";
 
-/// Analyzes one codebase, writes its graph, and refreshes the catalog.
+/// Analyzes one codebase and writes its graph into the store.
 #[cfg(any(feature = "python", feature = "rust"))]
 pub(super) fn run(raw: impl Iterator<Item = String>) -> ExitCode {
     let arguments = match Arguments::parse(raw) {
@@ -64,34 +65,41 @@ pub(super) fn run(raw: impl Iterator<Item = String>) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    if destination.create_store
-        && let Some((store, _)) = &destination.indexed
-        && let Err(error) = create_project_store(store)
-    {
-        eprintln!(
-            "error: cannot create the store {}: {error}",
-            store.display()
-        );
-        return ExitCode::FAILURE;
+    if destination.project_root {
+        println!("indexing the project root {}", destination.root.display());
     }
-    let config = match pipeline_config(&arguments) {
+    let config = match pipeline_config(&arguments, &destination.root) {
         Ok(config) => config,
         Err(error) => {
             eprintln!("error: {error}");
             return ExitCode::FAILURE;
         }
     };
-    let result = match analysis::run_and_write(&config, &destination.output) {
+    let result = match analysis::run(&config) {
         Ok(result) => result,
         Err(error) => {
             eprintln!("error: {error}");
             return ExitCode::FAILURE;
         }
     };
-    if let Some((store, file)) = &destination.indexed
-        && let Err(error) = write_artifact_index(store, file)
+    // Create a new store only after the analysis succeeds, so a failed first index leaves no store.
+    if destination.create_store
+        && let Some((store, _)) = &destination.indexed
     {
-        eprintln!("error: cannot update the artifact index: {error}");
+        if let Err(error) = create_project_store(store) {
+            eprintln!(
+                "error: cannot create the store {}: {error}",
+                store.display()
+            );
+            return ExitCode::FAILURE;
+        }
+        println!("created the store {}", store.display());
+    }
+    if let Err(error) = GraphArtifact::new(&result.graph).write(&destination.output) {
+        eprintln!(
+            "error: cannot write {}: {error}",
+            destination.output.display()
+        );
         return ExitCode::FAILURE;
     }
 
@@ -117,14 +125,14 @@ pub(super) fn run(_raw: impl Iterator<Item = String>) -> ExitCode {
 ///
 /// Returns an error if configuration loading or override application fails.
 #[cfg(any(feature = "python", feature = "rust"))]
-fn pipeline_config(arguments: &Arguments) -> Result<PipelineConfig, ConfigError> {
+fn pipeline_config(arguments: &Arguments, root: &Path) -> Result<PipelineConfig, ConfigError> {
     let mut profiles = configured_profiles(arguments.config.as_deref())?;
     apply_cli_overrides(
         &mut profiles,
         &arguments.servers,
         &arguments.server_arguments,
     )?;
-    let mut config = PipelineConfig::new(arguments.root.clone());
+    let mut config = PipelineConfig::new(root.to_path_buf());
     config.profiles = profiles;
     Ok(config)
 }
@@ -137,6 +145,7 @@ fn pipeline_config(arguments: &Arguments) -> Result<PipelineConfig, ConfigError>
 #[derive(Debug)]
 struct Arguments {
     root: PathBuf,
+    root_given: bool,
     output: Option<PathBuf>,
     name: Option<String>,
     store: Option<PathBuf>,
@@ -225,6 +234,7 @@ impl Arguments {
         }
 
         Ok(Self {
+            root_given: root.is_some(),
             root: root.unwrap_or_else(|| PathBuf::from(".")),
             output,
             name,
@@ -280,66 +290,111 @@ fn next_value(
 // Artifact destination
 // -----------------------------------------------------------------------------
 
-/// The graph file to write, and the store and file name to index when it is indexed.
+/// The root to analyze, the graph file to write, and the store and file name when it is indexed.
 ///
 /// `create_store` is true when the destination is a new project store.
+/// `project_root` is true when index analyzes the project root instead of the working directory.
 #[cfg(any(feature = "python", feature = "rust"))]
 #[derive(Debug, PartialEq, Eq)]
 struct Destination {
+    root: PathBuf,
     output: PathBuf,
     indexed: Option<(PathBuf, String)>,
     create_store: bool,
+    project_root: bool,
 }
 
 /// Returns an explicit output or an indexed artifact destination.
 ///
-/// Without `--name`, the name is the final component of the resolved root.
-/// Without `--store`, the store is the nearest project store in the resolved
-/// root or its parents, or a new `<root>/.tekdek`.
+/// Without `--name`, the name is the final component of the analyzed root.
+/// Without `--store`, the store is the nearest project store of the resolved
+/// root. A root inside the project of that store, which is the folder that
+/// holds the store, has these rules: without a root argument, index analyzes
+/// the project root, as Git commands do. With a root argument, the graph needs
+/// `--name`, so a partial graph never replaces the project graph. Without a
+/// store, the destination is a new `<root>/.tekdek`.
 ///
 /// # Errors
 ///
-/// Returns a message if the root or artifact name is invalid.
+/// Returns a message if the root or artifact name is invalid, or if a root
+/// inside a project has no `--name`.
 #[cfg(any(feature = "python", feature = "rust"))]
 fn artifact_destination(arguments: &Arguments) -> Result<Destination, String> {
     if let Some(output) = &arguments.output {
         return Ok(Destination {
+            root: arguments.root.clone(),
             output: output.clone(),
             indexed: None,
             create_store: false,
+            project_root: false,
         });
     }
 
-    let resolve_root = || {
-        fs::canonicalize(&arguments.root)
-            .map_err(|error| format!("cannot resolve {}: {error}", arguments.root.display()))
+    let resolve = |root: &Path| {
+        fs::canonicalize(root)
+            .map_err(|error| format!("cannot resolve {}: {error}", root.display()))
     };
-    let name = if let Some(name) = &arguments.name {
-        name.clone()
+    let name_of = |root: &Path| match &arguments.name {
+        Some(name) => Ok(name.clone()),
+        None => folder_name(&resolve(root)?),
+    };
+    let mut project_root = false;
+    let (root, store, name, create_store) = if let Some(store) = &arguments.store {
+        let name = name_of(&arguments.root)?;
+        (arguments.root.clone(), store.clone(), name, false)
     } else {
-        match resolve_root()?.file_name() {
-            Some(name) => name
-                .to_str()
-                .ok_or_else(|| "the codebase root has no valid UTF-8 name".to_owned())?
-                .to_owned(),
-            None => "root".to_owned(),
+        let root = resolve(&arguments.root)?;
+        if let Some(store) = find_project_store(&root) {
+            let project = store
+                .parent()
+                .ok_or_else(|| format!("the store {} has no parent folder", store.display()))?
+                .to_path_buf();
+            let root = if root == project || arguments.name.is_some() {
+                root
+            } else if arguments.root_given {
+                return Err(format!(
+                    "{} is inside the project {} of the store {}: index the project root, or name this graph with --name <name>",
+                    root.display(),
+                    project.display(),
+                    store.display()
+                ));
+            } else {
+                project_root = true;
+                project
+            };
+            let name = name_of(&root)?;
+            (root, store, name, false)
+        } else {
+            let name = name_of(&root)?;
+            (root.clone(), root.join(PROJECT_STORE), name, true)
         }
     };
     validate_artifact_name(&name)?;
     let file = format!("{name}.json");
-    let (store, create_store) = if let Some(store) = &arguments.store {
-        (store.clone(), false)
-    } else {
-        let root = resolve_root()?;
-        find_project_store(&root)
-            .map_or_else(|| (root.join(PROJECT_STORE), true), |store| (store, false))
-    };
 
     Ok(Destination {
+        root,
         output: store.join(&file),
         indexed: Some((store, file)),
         create_store,
+        project_root,
     })
+}
+
+/// Returns the final component of a resolved root, or `root` for a file system root.
+///
+/// # Errors
+///
+/// Returns a message if the name is not valid UTF-8.
+#[cfg(any(feature = "python", feature = "rust"))]
+fn folder_name(root: &Path) -> Result<String, String> {
+    match root.file_name() {
+        Some(name) => name
+            .to_str()
+            .map(str::to_owned)
+            .ok_or_else(|| "the codebase root has no valid UTF-8 name".to_owned()),
+        None => Ok("root".to_owned()),
+    }
 }
 
 /// Validates one artifact file stem.
@@ -521,7 +576,8 @@ mod tests {
         ])
         .expect("the arguments should be valid");
 
-        let config = pipeline_config(&arguments).expect("the pipeline configuration should build");
+        let config = pipeline_config(&arguments, &arguments.root)
+            .expect("the pipeline configuration should build");
         fs::remove_file(&config_path).expect("the test configuration should be removed");
         let rust = config
             .profiles
@@ -546,12 +602,14 @@ mod tests {
                 output: PathBuf::from("demo/sample.json"),
                 indexed: Some((PathBuf::from("demo"), "sample.json".to_owned())),
                 create_store: false,
+                project_root: false,
+                root: PathBuf::from("missing"),
             }
         );
     }
 
     #[test]
-    fn names_the_artifact_after_the_root_and_uses_the_nearest_project_store() {
+    fn indexes_the_project_root_from_a_subfolder_and_needs_a_name_for_a_nested_root() {
         let directory = tempfile::TempDir::new().expect("the temporary directory should exist");
         let root = directory.path().join("sample-app");
         let nested = root.join("services").join("api");
@@ -565,12 +623,26 @@ mod tests {
         assert!(fresh.create_store);
 
         std::fs::create_dir(&store).expect("project store");
-        let existing =
-            artifact_destination(&parse(&[nested.to_str().expect("path")]).expect("args"))
-                .expect("destination");
-        assert_eq!(existing.output, store.join("api.json"));
-        assert!(!existing.create_store);
-        assert_eq!(parse(&[]).expect("args").root, PathBuf::from("."));
+        let nested = std::fs::canonicalize(nested).expect("canonical folder");
+        let error = artifact_destination(&parse(&[nested.to_str().expect("path")]).expect("args"))
+            .expect_err("a root inside the project needs a name");
+        assert!(error.contains("--name"), "{error}");
+
+        let named = artifact_destination(
+            &parse(&[nested.to_str().expect("path"), "--name", "api"]).expect("args"),
+        )
+        .expect("destination");
+        assert_eq!(named.output, store.join("api.json"));
+        assert_eq!(named.root, nested);
+        assert!(!named.create_store && !named.project_root);
+
+        let mut working = parse(&[]).expect("args");
+        assert_eq!(working.root, PathBuf::from("."));
+        working.root = nested;
+        let project = artifact_destination(&working).expect("destination");
+        assert_eq!(project.root, root);
+        assert_eq!(project.output, store.join("sample-app.json"));
+        assert!(project.project_root);
     }
 
     #[test]
