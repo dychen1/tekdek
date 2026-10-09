@@ -215,8 +215,11 @@ mod tests {
             std::slice::from_ref(&profile),
         );
 
-        assert!(detected.is_empty());
-        assert!(enabled_extensions(std::slice::from_ref(&profile)).is_empty());
+        assert_eq!(detected, Vec::new());
+        assert_eq!(
+            enabled_extensions(std::slice::from_ref(&profile)),
+            Vec::<String>::new()
+        );
     }
 
     #[test]
