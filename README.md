@@ -34,7 +34,17 @@
   cargo install --locked --path .
   ```
 
-The installers need no Rust or Node.js. They put `tekdek` in `$XDG_BIN_HOME`, else `$XDG_DATA_HOME/../bin`, else `~/.local/bin`, and add that folder to `PATH`. They download from GitHub Releases, so they work only after the repository becomes public. Until then, use `gh release download --repo dychen1/tekdek` or build from source.
+The installers need no Rust or Node.js. They put `tekdek` in `$XDG_BIN_HOME`, else `$XDG_DATA_HOME/../bin`, else `~/.local/bin`, and add that folder to `PATH`. The Linux binaries need glibc 2.34 or later: Ubuntu 22.04, Debian 12, RHEL 9, Amazon Linux 2023, or newer. Alpine and older distributions cannot run them; build from source there.
+
+The installers download from GitHub Releases without credentials, so they work only after the repository becomes public. Until then, a user with access can download the archive for their system with the GitHub CLI, extract it, and move the binary into a folder on `PATH`:
+
+```sh
+gh release download --repo dychen1/tekdek --pattern 'tekdek-aarch64-apple-darwin.tar.xz'
+tar -xJf tekdek-aarch64-apple-darwin.tar.xz
+mkdir -p ~/.local/bin && mv tekdek-aarch64-apple-darwin/tekdek ~/.local/bin/
+```
+
+The archives are `tekdek-aarch64-apple-darwin.tar.xz` (Apple silicon), `tekdek-x86_64-apple-darwin.tar.xz` (Intel Mac), `tekdek-x86_64-unknown-linux-gnu.tar.xz`, `tekdek-aarch64-unknown-linux-gnu.tar.xz`, and `tekdek-x86_64-pc-windows-msvc.zip`. Add `--tag v0.1.0` for a specific release.
 
 Install the agent skills in Claude Code:
 
@@ -43,7 +53,9 @@ Install the agent skills in Claude Code:
 /plugin install tekdek@tekdek
 ```
 
-The plugin adds `/tekdek:flow` and `/tekdek:flow-view`, which call the `tekdek` binary. For the private repository, Claude Code uses your git credentials (`gh auth login`, then `gh auth setup-git`). Other coding agents can follow `plugin/skills/flow/SKILL.md`.
+The plugin adds `/tekdek:flow` and `/tekdek:flow-view`, which call the `tekdek` binary. The marketplace pins the plugin to the latest release tag, so the skills always match a released binary. For the private repository, Claude Code uses your git credentials (`gh auth login`, then `gh auth setup-git`). Other coding agents can follow `plugin/skills/flow/SKILL.md`.
+
+Claude Code does not update plugins from third-party marketplaces by default. Turn on auto-update for the `tekdek` marketplace in `/plugin`, or update by hand with `/plugin marketplace update tekdek`. Upgrade the binary with the same installer command.
 
 ## Language Servers
 
@@ -241,7 +253,7 @@ cachePriming.enable = false
 |-- demo/                      # Demo store: this repository's graph and one flow
 |-- .claude-plugin/            # Claude Code marketplace
 |-- plugin/                    # Claude Code plugin: the flow and flow-view skills
-`-- .github/                   # Release workflow and its build setup steps
+`-- .github/                   # CI and release workflows, and the release build setup steps
 ```
 
 ## Development
@@ -257,8 +269,14 @@ Every Cargo build runs `build.rs`, which bundles `viewer/src` with esbuild. A bu
 
 ## Releases
 
-1. Set the same version in `Cargo.toml` and `plugin/.claude-plugin/plugin.json`. A test fails when they differ.
-2. Merge the change to `main`.
-3. Tag the commit on `main` and push the tag: `git tag v0.2.0 && git push origin v0.2.0`.
+The CI workflow runs `make check` on every pull request and every push to `main`.
 
-The release workflow builds archives and installers for macOS (arm64 and x86_64), Linux (x86_64 and arm64), and Windows (x86_64), and publishes them on GitHub Releases. It stops when the tag does not point to a commit on `main`. Claude Code users get the plugin update when the plugin version changes.
+1. Set the new version in `Cargo.toml`, `plugin/.claude-plugin/plugin.json`, and the "needs tekdek X or later" line of both skills. Tests fail when they differ.
+2. Merge the change to `main`, and wait until its CI run passes.
+3. Tag that commit and push the tag: `git tag v0.2.0 && git push origin v0.2.0`.
+4. Wait until the release workflow succeeds and the release has its archives and installers.
+5. Set `ref` in `.claude-plugin/marketplace.json` to the new tag and merge it to `main`. Plugin users get the new skills only after this step, so the skills never ask for a binary that has no release yet. A test fails when the pinned tag is newer than the crate version.
+
+The release workflow builds archives and installers for macOS (arm64 and x86_64), Linux (x86_64 and arm64), and Windows (x86_64), and publishes them on GitHub Releases. Each archive holds the binary, `LICENSE`, `README.md`, and `OFL.txt`, the license of the embedded font. A build job stops when the tag does not point to a commit on `main`. That check only catches mistakes: the workflow runs from the tagged commit, so a tag on another commit can change the check, and a free private repository has no tag rules. Tag only `main` commits whose CI run passed.
+
+The crate sets `publish = false`: `build.rs` needs the npm dependencies of a checkout, so a crate from crates.io could not build.

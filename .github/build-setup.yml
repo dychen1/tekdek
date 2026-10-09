@@ -1,5 +1,7 @@
 # Steps that dist inserts into each build job before it runs cargo.
 # The build script of tekdek bundles the viewer with the locked npm dependencies.
+# The tag check catches mistakes only: a tag push runs the workflow of the tagged
+# commit, so a tag on another commit can change this check.
 - name: Check that the tag is on main
   if: ${{ github.event_name == 'push' }}
   shell: bash
@@ -10,7 +12,7 @@
       exit 1
     fi
 - name: Install Node.js
-  uses: actions/setup-node@v4
+  uses: actions/setup-node@v7
   with:
     node-version: 22
     cache: npm

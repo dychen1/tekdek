@@ -1,0 +1,39 @@
+# Checks every pull request and every push to main: formatting, lints, the
+# Rust tests, the TypeScript check, and the viewer tests. Tag a release only
+# from a commit on main whose run passed.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Format, lint, and test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install the viewer dependencies
+        run: npm ci
+      - name: Install the Rust toolchain from rust-toolchain.toml
+        run: rustup toolchain install
+      - name: Check the formatting
+        run: cargo fmt --check
+      - name: Run Clippy
+        run: cargo clippy --locked --all-targets --all-features
+      - name: Run the Rust tests
+        run: cargo test --locked --all-targets
+      - name: Check the TypeScript
+        run: npm run typecheck
+      - name: Run the viewer tests
+        run: npm test

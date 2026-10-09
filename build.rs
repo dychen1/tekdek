@@ -7,7 +7,12 @@
 use std::{env, path::PathBuf, process::Command};
 
 fn main() {
-    for input in ["viewer/src", "tools/build-viewer.ts", "package-lock.json"] {
+    for input in [
+        "viewer/src",
+        "tools/build-viewer.ts",
+        "package-lock.json",
+        "tsconfig.json",
+    ] {
         println!("cargo::rerun-if-changed={input}");
     }
     if let Err(message) = bundle() {

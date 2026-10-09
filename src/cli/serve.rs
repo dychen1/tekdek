@@ -130,26 +130,30 @@ fn encode(text: &str) -> String {
 
 /// Opens the URL with the browser of the operating system.
 fn open_browser(url: &str) -> std::io::Result<()> {
-    let mut command = if cfg!(target_os = "macos") {
-        Command::new("open")
-    } else if cfg!(windows) {
-        let mut command = Command::new("cmd");
-        command.args(["/C", "start", ""]);
-        command
-    } else {
-        Command::new("xdg-open")
-    };
-    command
-        .arg(url)
+    let (program, arguments) = browser_command(std::env::consts::OS, url);
+    Command::new(program)
+        .args(arguments)
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
         .map(drop)
 }
 
+/// Returns the program and the arguments that open a URL on one operating system.
+///
+/// Windows uses the URL protocol handler directly. `cmd /C start` would split
+/// the URL at each `&` and drop the flow and the step.
+fn browser_command<'a>(os: &str, url: &'a str) -> (&'static str, Vec<&'a str>) {
+    match os {
+        "macos" => ("open", vec![url]),
+        "windows" => ("rundll32.exe", vec!["url.dll,FileProtocolHandler", url]),
+        _ => ("xdg-open", vec![url]),
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{flow_url, parse, viewer_url};
+    use super::{browser_command, flow_url, parse, viewer_url};
 
     fn arguments(values: &[&str]) -> Result<super::Arguments, String> {
         parse(values.iter().map(|value| (*value).to_owned()))
@@ -179,6 +183,17 @@ mod tests {
         let error = flow_url("http://127.0.0.1:1/viewer/", store.path(), "missing")
             .expect_err("unlisted flow");
         assert!(error.contains("no flow named missing"), "{error}");
+    }
+
+    #[test]
+    fn opens_the_complete_url_on_each_operating_system() {
+        let url = "http://127.0.0.1:1/viewer/?artifact=a.json&flow=b&step=3";
+        assert_eq!(
+            browser_command("windows", url),
+            ("rundll32.exe", vec!["url.dll,FileProtocolHandler", url])
+        );
+        assert_eq!(browser_command("macos", url), ("open", vec![url]));
+        assert_eq!(browser_command("linux", url), ("xdg-open", vec![url]));
     }
 
     #[test]

@@ -7,7 +7,12 @@
   "plugins": [
     {
       "name": "tekdek",
-      "source": "./plugin",
+      "source": {
+        "source": "git-subdir",
+        "url": "dychen1/tekdek",
+        "path": "plugin",
+        "ref": "v0.1.0"
+      },
       "description": "Write frozen flows with /tekdek:flow and open them with /tekdek:flow-view. Needs the tekdek CLI."
     }
   ]

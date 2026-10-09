@@ -5,10 +5,16 @@ edition = "2024"
 description = "Index a codebase, freeze agent-authored flows with clusters, and walk them in the Lift Deck."
 license = "Apache-2.0"
 repository = "https://github.com/dychen1/tekdek"
+# The build script needs the npm dependencies of a checkout, so the crate is not published.
+publish = false
 
 [[bin]]
 name = "tekdek"
 path = "src/main.rs"
+
+# Release the binary with dist although the crate is not published.
+[package.metadata.dist]
+dist = true
 
 [features]
 default = ["python", "rust"]
