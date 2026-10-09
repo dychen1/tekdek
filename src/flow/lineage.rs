@@ -299,25 +299,6 @@ pub fn lineage_ids(directory: &Path) -> io::Result<Vec<FlowId>> {
     Ok(ids)
 }
 
-/// Returns the bytes of every current pointer, so a catalog writer can detect a change.
-///
-/// # Errors
-/// Returns an error for a link or a file failure.
-pub fn lineage_state(directory: &Path) -> io::Result<Vec<(FlowId, Vec<u8>)>> {
-    lineage_ids(directory)?
-        .into_iter()
-        .map(|id| {
-            let bytes = fs::read(
-                directory
-                    .join("flows")
-                    .join(id.as_str())
-                    .join("current.json"),
-            )?;
-            Ok((id, bytes))
-        })
-        .collect()
-}
-
 fn flows_path(directory: &Path) -> io::Result<PathBuf> {
     reject_symlink(directory)?;
     let flows = directory.join("flows");
