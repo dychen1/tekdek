@@ -1,3 +1,7 @@
+<p align="center">
+  <img src=".github/banner.svg" alt="tekdek: a fingerboard deck whose graphic shows three functions lifted out of a file tree onto a deck" width="100%">
+</p>
+
 # Tekdek
 
 ## Overview
