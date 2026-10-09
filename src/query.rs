@@ -80,17 +80,32 @@ pub struct NodeDetail {
 
 /// Returns the nodes whose key contains every word of `text`, best match first.
 ///
-/// Matching ignores case. The name decides the rank: the exact text (with `_`
-/// for spaces), then a name that starts with the first word and holds every
-/// word, then a name that holds every word, then a name that holds some words,
-/// then a key match only. In each rank, nodes outside tests come first, then
-/// callables before types, modules, and fields; the key breaks ties.
+/// Matching ignores case. Spaces, `::`, `:`, `.`, and `/` separate words, so a
+/// qualified name such as `Command::parse` or a path such as `flow/import`
+/// works. The name decides the rank: the exact name, then a name that starts
+/// with the first word and holds every word, then a name that holds every
+/// word, then a name that holds some words, then a key match only. The exact
+/// name is the words joined with `_`; for a qualified or path query it is the
+/// last word. A file module ranks by its file stem, not by its path. Nodes in
+/// tests come after all other nodes. In each rank, callables come before
+/// types, modules, and fields; the key breaks ties.
 #[must_use]
 pub fn search(graph: &ArtifactGraph, text: &str, kind: Option<&str>, limit: usize) -> SearchResult {
     let needle = text.trim().to_lowercase();
-    let words: Vec<&str> = needle.split_whitespace().collect();
-    let exact = words.join("_");
-    let mut matches: Vec<((u8, bool, u8), &ArtifactNode)> = graph
+    let words: Vec<&str> = needle
+        .split(|character: char| character.is_whitespace() || matches!(character, ':' | '.' | '/'))
+        .filter(|word| !word.is_empty())
+        .collect();
+    let qualified = needle.contains([':', '.', '/']);
+    let exact = if qualified {
+        words
+            .last()
+            .map(|word| (*word).to_owned())
+            .unwrap_or_default()
+    } else {
+        words.join("_")
+    };
+    let mut matches: Vec<((bool, u8, u8), &ArtifactNode)> = graph
         .nodes
         .iter()
         .filter(|node| kind.is_none_or(|kind| node.kind == kind))
@@ -99,7 +114,7 @@ pub fn search(graph: &ArtifactGraph, text: &str, kind: Option<&str>, limit: usiz
             if words.is_empty() || !words.iter().all(|word| key.contains(word)) {
                 return None;
             }
-            let name = node.name.to_lowercase();
+            let name = rank_name(node).to_lowercase();
             let held = words.iter().filter(|word| name.contains(**word)).count();
             let rank = if name == exact {
                 0
@@ -112,7 +127,7 @@ pub fn search(graph: &ArtifactGraph, text: &str, kind: Option<&str>, limit: usiz
             } else {
                 4
             };
-            Some(((rank, is_test(&key), kind_order(&node.kind)), node))
+            Some(((is_test(&key), rank, kind_order(&node.kind)), node))
         })
         .collect();
     matches.sort_by(|left, right| (left.0, &left.1.key).cmp(&(right.0, &right.1.key)));
@@ -132,13 +147,43 @@ pub fn search(graph: &ArtifactGraph, text: &str, kind: Option<&str>, limit: usiz
     }
 }
 
+/// Returns the name that a node ranks by.
+///
+/// A file module has its path as its name, so it ranks by its file stem, or by
+/// its folder for `mod.rs` and `__init__.py`.
+fn rank_name(node: &ArtifactNode) -> &str {
+    if node.kind != "module" || node.name != node.path {
+        return &node.name;
+    }
+    let mut parts = node.path.rsplit('/');
+    let file = parts.next().unwrap_or(&node.path);
+    let stem = file.rsplit_once('.').map_or(file, |(stem, _)| stem);
+    if matches!(stem, "mod" | "__init__") {
+        parts.next().unwrap_or(stem)
+    } else {
+        stem
+    }
+}
+
 /// True for a node in a test module or a test file.
+///
+/// A test module is an inline `tests` or `test` module. A test file is in a
+/// `tests`, `test`, or `__tests__` folder, or its stem is `conftest`, `test`,
+/// or `tests`, starts with `test_`, or ends with `_test` or `_tests`.
 fn is_test(key: &str) -> bool {
-    let path = key.split("::").next().unwrap_or(key);
+    let mut parts: Vec<&str> = key.split("::").next().unwrap_or(key).split('/').collect();
+    let file = parts.pop().unwrap_or_default();
+    let stem = file.rsplit_once('.').map_or(file, |(stem, _)| stem);
     key.contains("::module:tests")
-        || path
-            .split('/')
-            .any(|part| part.starts_with("test") || part.starts_with("conftest"))
+        || key.contains("::module:test::")
+        || key.ends_with("::module:test")
+        || parts
+            .iter()
+            .any(|part| matches!(*part, "tests" | "test" | "__tests__"))
+        || matches!(stem, "conftest" | "test" | "tests")
+        || stem.starts_with("test_")
+        || stem.ends_with("_test")
+        || stem.ends_with("_tests")
 }
 
 fn kind_order(kind: &str) -> u8 {
@@ -215,7 +260,7 @@ pub fn show(graph: &ArtifactGraph, key: &str) -> Option<NodeDetail> {
 
 #[cfg(test)]
 mod tests {
-    use super::{one_line, search, show};
+    use super::{is_test, one_line, search, show};
     use crate::store::graph::{ArtifactGraph, GraphArtifact};
 
     fn graph() -> ArtifactGraph {
@@ -239,7 +284,7 @@ mod tests {
             "graph": {
                 "languages": ["rust"],
                 "nodes": [
-                    node(0, "src/flow/import.rs", "import", "module"),
+                    node(0, "src/flow/import.rs", "src/flow/import.rs", "module"),
                     node(1, "src/cli/flow.rs::callable:import", "import", "callable"),
                     import,
                     node(3, "src/flow/lineage.rs::callable:write_current", "write_current", "callable"),
@@ -285,6 +330,49 @@ mod tests {
         );
         assert_eq!(search(&graph, "flow write", None, 10).total, 1);
         assert_eq!(search(&graph, "  ", None, 10).total, 0);
+    }
+
+    #[test]
+    fn splits_qualified_and_path_queries_and_ranks_modules_by_their_file_stem() {
+        let graph = graph();
+
+        let typed = search(&graph, "import::ImportRequest", None, 10);
+        assert_eq!(typed.nodes[0].key, "src/flow/import.rs::type:ImportRequest");
+        let path = search(&graph, "flow/import", None, 10);
+        assert_eq!(path.nodes[0].key, "src/cli/flow.rs::callable:import");
+        assert_eq!(path.nodes[1].key, "src/flow/import.rs");
+        let keys: Vec<_> = search(&graph, "import flow", None, 10)
+            .nodes
+            .into_iter()
+            .map(|node| node.key)
+            .collect();
+        assert_eq!(
+            keys[..2],
+            [
+                "src/flow/import.rs::callable:import_flow",
+                "src/cli/flow.rs::callable:import",
+            ]
+        );
+    }
+
+    #[test]
+    fn recognizes_test_files_and_modules_only() {
+        for key in [
+            "src/store/mod.rs::module:tests::callable:writes",
+            "tests/cli.rs::callable:runs",
+            "pkg/api_test.py::callable:test_get",
+            "pkg/test_api.py",
+            "pkg/conftest.py::callable:client",
+        ] {
+            assert!(is_test(key), "{key}");
+        }
+        for key in [
+            "src/testing.rs::callable:helper",
+            "src/contest.rs",
+            "src/attest/mod.rs::callable:sign",
+        ] {
+            assert!(!is_test(key), "{key}");
+        }
     }
 
     #[test]

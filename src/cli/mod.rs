@@ -4,6 +4,10 @@
 //! or `doctor`, and prints the usage for `help`. Command arguments and standard
 //! input are the input. The exit code is the output.
 //!
+//! Every command uses the same exit codes: 0 for success, 1 when a check finds
+//! a problem, and 2 for an error. In JSON mode, every result and every error is
+//! one document on standard output. Otherwise, errors go to standard error.
+//!
 //! # Sections
 //!
 //! `Routing` selects the command.
@@ -31,7 +35,13 @@ const SUMMARY: &str = "usage: tekdek <command>
   serve    Serve the Lift Deck for a store.
   doctor   Check the language servers.
   help     Print the usage of every command.
-  version  Print the version.";
+  version  Print the version.
+Exit codes: 0 success, 1 a check found a problem, 2 an error. With --json, the
+result or the error is one JSON document on standard output; otherwise errors
+go to standard error.";
+
+/// The exit code of every failed command.
+const ERROR_CODE: u8 = 2;
 
 /// Runs one command line and returns its exit code.
 pub fn run(arguments: Vec<String>, input: &mut impl Read) -> ExitCode {
@@ -41,15 +51,17 @@ pub fn run(arguments: Vec<String>, input: &mut impl Read) -> ExitCode {
         Some("index") => index::run(arguments),
         // Run one graph query; its output is one document on standard output.
         Some("graph") => {
-            let (code, output) = graph::run(arguments.collect());
-            println!("{output}");
-            ExitCode::from(code)
+            let arguments: Vec<String> = arguments.collect();
+            let json = arguments.iter().any(|argument| argument == "--json");
+            let (code, output) = graph::run(arguments);
+            emit(json, code, &output)
         }
         // Run one flow command; its output is one document on standard output.
         Some("flow") => {
-            let (code, output) = flow::run(arguments.collect(), input);
-            println!("{output}");
-            ExitCode::from(code)
+            let arguments: Vec<String> = arguments.collect();
+            let json = arguments.iter().any(|argument| argument == "--json");
+            let (code, output) = flow::run(arguments, input);
+            emit(json, code, &output)
         }
         // Serve the viewer until the process ends.
         Some("serve") => serve::run(arguments),
@@ -73,15 +85,13 @@ pub fn run(arguments: Vec<String>, input: &mut impl Read) -> ExitCode {
             ExitCode::SUCCESS
         }
         // Reject an unknown command.
-        Some(command) => {
-            eprintln!("error: unknown command: {command}\n{SUMMARY}");
-            ExitCode::FAILURE
-        }
+        Some(command) => emit(
+            false,
+            ERROR_CODE,
+            &format!("error: unknown command: {command}\n{SUMMARY}"),
+        ),
         // Print the command list.
-        None => {
-            eprintln!("{SUMMARY}");
-            ExitCode::FAILURE
-        }
+        None => emit(false, ERROR_CODE, SUMMARY),
     }
 }
 
@@ -181,10 +191,23 @@ fn render(json: bool, value: &impl Serialize, human: String) -> Result<String, s
     }
 }
 
+/// Prints one command output and returns its exit code.
+///
+/// The output of an error goes to standard error, except in JSON mode, where
+/// every output is one document on standard output.
+fn emit(json: bool, code: u8, output: &str) -> ExitCode {
+    if code == ERROR_CODE && !json {
+        eprintln!("{output}");
+    } else {
+        println!("{output}");
+    }
+    ExitCode::from(code)
+}
+
 /// Formats one failed command with exit code 2. JSON mode returns `{"error": message}`.
 fn failure(json: bool, message: &str) -> (u8, String) {
     (
-        2,
+        ERROR_CODE,
         if json {
             serde_json::json!({"error": message}).to_string()
         } else {

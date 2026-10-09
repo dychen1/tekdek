@@ -9,14 +9,10 @@
 //! `Detection` selects enabled profiles with matching sources.
 //! `Server programs` finds each server program on the search path.
 
-use std::{
-    env, fs,
-    path::{Path, PathBuf},
-};
-
 use super::{
     PipelineError,
     language::{Language, LanguageProfile},
+    program::find_program,
     source::{self, DocumentSnapshot},
 };
 
@@ -71,7 +67,10 @@ pub(super) fn profile(
         })
 }
 
-fn detect_languages(documents: &[DocumentSnapshot], profiles: &[LanguageProfile]) -> Vec<Language> {
+pub(super) fn detect_languages(
+    documents: &[DocumentSnapshot],
+    profiles: &[LanguageProfile],
+) -> Vec<Language> {
     let mut languages = profiles
         .iter()
         .filter(|profile| {
@@ -140,73 +139,6 @@ fn program_is_available(program: &str) -> bool {
     find_program(program).is_some()
 }
 
-/// Returns the first executable file for a program name or path.
-///
-/// A name with one component is looked up in each `PATH` folder in order. On
-/// Windows, a name without an extension also matches `<name>.exe`.
-#[must_use]
-pub fn find_program(program: &str) -> Option<PathBuf> {
-    let search_paths = env::var_os("PATH")
-        .map(|value| env::split_paths(&value).collect::<Vec<_>>())
-        .unwrap_or_default();
-    program_candidates(program, &search_paths, executable_suffix())
-        .into_iter()
-        .find(|candidate| is_executable_file(candidate))
-}
-
-fn program_candidates(
-    program: &str,
-    search_paths: &[PathBuf],
-    executable_suffix: &str,
-) -> Vec<PathBuf> {
-    let path = Path::new(program);
-    let base_candidates = if path.components().count() > 1 {
-        vec![path.to_path_buf()]
-    } else {
-        search_paths
-            .iter()
-            .map(|directory| directory.join(path))
-            .collect()
-    };
-
-    base_candidates
-        .into_iter()
-        .flat_map(|candidate| {
-            let suffixed =
-                (!executable_suffix.is_empty() && candidate.extension().is_none()).then(|| {
-                    let mut path = candidate.as_os_str().to_os_string();
-                    path.push(executable_suffix);
-                    PathBuf::from(path)
-                });
-            std::iter::once(candidate).chain(suffixed)
-        })
-        .collect()
-}
-
-const fn executable_suffix() -> &'static str {
-    if cfg!(windows) { ".exe" } else { "" }
-}
-
-fn is_executable_file(path: &Path) -> bool {
-    let Ok(metadata) = fs::metadata(path) else {
-        return false;
-    };
-    if !metadata.is_file() {
-        return false;
-    }
-
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-
-        metadata.permissions().mode() & 0o111 != 0
-    }
-    #[cfg(not(unix))]
-    {
-        true
-    }
-}
-
 // -----------------------------------------------------------------------------
 // Tests
 // -----------------------------------------------------------------------------
@@ -219,7 +151,7 @@ mod tests {
     use super::enabled_extensions;
     #[cfg(all(feature = "python", feature = "rust"))]
     use super::preflight_server_programs_with;
-    use super::{detect_languages, detect_required_languages, program_candidates};
+    use super::{detect_languages, detect_required_languages};
     #[cfg(all(feature = "python", feature = "rust"))]
     use crate::analysis::language::LanguageProfile;
     use crate::analysis::{
@@ -341,36 +273,6 @@ mod tests {
         .expect("the detected server should exist");
 
         assert_eq!(checked, ["pyright-langserver"]);
-    }
-
-    #[test]
-    fn builds_path_candidates_with_an_executable_suffix() {
-        let search_paths = [PathBuf::from("first"), PathBuf::from("second")];
-
-        let candidates = program_candidates("server", &search_paths, ".exe");
-
-        assert_eq!(
-            candidates,
-            [
-                PathBuf::from("first/server"),
-                PathBuf::from("first/server.exe"),
-                PathBuf::from("second/server"),
-                PathBuf::from("second/server.exe"),
-            ]
-        );
-    }
-
-    #[test]
-    fn builds_explicit_path_candidates_with_an_executable_suffix() {
-        let candidates = program_candidates("tools/server", &[PathBuf::from("ignored")], ".exe");
-
-        assert_eq!(
-            candidates,
-            [
-                PathBuf::from("tools/server"),
-                PathBuf::from("tools/server.exe"),
-            ]
-        );
     }
 
     fn snapshot(path: &str, content: &str) -> DocumentSnapshot {

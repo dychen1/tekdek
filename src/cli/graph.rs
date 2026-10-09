@@ -12,6 +12,7 @@
 
 use std::{error::Error, path::PathBuf};
 
+use serde::Serialize;
 use tekdek::{
     catalog,
     query::{self, NODE_KINDS, NodeDetail, NodeRef, SearchResult},
@@ -31,7 +32,7 @@ pub(super) const USAGE: &str =
 search lists the node keys that contain every word of the text, best match
 first. show prints one node with its signature, container, members, callers,
 and callees. The default store is the nearest .tekdek folder, and the default
-graph is the default of its index.";
+graph is the default graph of the store. JSON output names the graph file.";
 
 const VALUE_OPTIONS: &[&str] = &["--store", "--graph", "--kind", "--limit"];
 const DEFAULT_LIMIT: usize = 20;
@@ -138,7 +139,7 @@ fn execute(command: Command) -> Result<(u8, String), Box<dyn Error>> {
         Action::Search { text, kind, limit } => {
             let result = query::search(&graph, &text, kind.as_deref(), limit);
             let human = describe_search(&result, &file);
-            Ok((0, render(command.json, &result, human)?))
+            Ok((0, render(command.json, &in_graph(&file, &result), human)?))
         }
         // Describe one node, or suggest keys that share its last segment.
         Action::Show { key } => {
@@ -146,9 +147,21 @@ fn execute(command: Command) -> Result<(u8, String), Box<dyn Error>> {
                 return Err(missing_key(&graph, &file, &key).into());
             };
             let human = describe_node(&detail);
-            Ok((0, render(command.json, &detail, human)?))
+            Ok((0, render(command.json, &in_graph(&file, &detail), human)?))
         }
     }
+}
+
+/// One query result with the graph file that answered it.
+#[derive(Serialize)]
+struct InGraph<'a, T: Serialize> {
+    graph: &'a str,
+    #[serde(flatten)]
+    result: &'a T,
+}
+
+fn in_graph<'a, T: Serialize>(graph: &'a str, result: &'a T) -> InGraph<'a, T> {
+    InGraph { graph, result }
 }
 
 /// Explains a missing key and names up to five keys that the agent likely meant.
@@ -290,6 +303,7 @@ mod tests {
         fixture(directory.path());
 
         let found = execute(directory.path(), &["search", "start"], 0);
+        assert_eq!(found["graph"], "app.json");
         assert_eq!(found["total"], 1);
         assert_eq!(found["nodes"][0]["key"], "src/main.rs::callable:start");
         assert_eq!(found["nodes"][0]["signature"], "fn start()");
@@ -299,6 +313,7 @@ mod tests {
             &["show", "src/main.rs::callable:main", "--graph", "app.json"],
             0,
         );
+        assert_eq!(shown["graph"], "app.json");
         assert_eq!(shown["callees"][0]["key"], "src/main.rs::callable:start");
         assert_eq!(shown["callers"], serde_json::json!([]));
     }

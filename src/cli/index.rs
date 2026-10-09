@@ -15,6 +15,8 @@
 
 use std::process::ExitCode;
 
+use super::ERROR_CODE;
+
 #[cfg(any(feature = "python", feature = "rust"))]
 use std::{
     collections::BTreeMap,
@@ -55,14 +57,14 @@ pub(super) fn run(raw: impl Iterator<Item = String>) -> ExitCode {
         Err(message) => {
             eprintln!("error: {message}");
             eprintln!("{USAGE}");
-            return ExitCode::FAILURE;
+            return ExitCode::from(ERROR_CODE);
         }
     };
     let destination = match artifact_destination(&arguments) {
         Ok(destination) => destination,
         Err(message) => {
             eprintln!("error: {message}");
-            return ExitCode::FAILURE;
+            return ExitCode::from(ERROR_CODE);
         }
     };
     if destination.project_root {
@@ -72,14 +74,14 @@ pub(super) fn run(raw: impl Iterator<Item = String>) -> ExitCode {
         Ok(config) => config,
         Err(error) => {
             eprintln!("error: {error}");
-            return ExitCode::FAILURE;
+            return ExitCode::from(ERROR_CODE);
         }
     };
     let result = match analysis::run(&config) {
         Ok(result) => result,
         Err(error) => {
             eprintln!("error: {error}");
-            return ExitCode::FAILURE;
+            return ExitCode::from(ERROR_CODE);
         }
     };
     // Create a new store only after the analysis succeeds, so a failed first index leaves no store.
@@ -91,7 +93,7 @@ pub(super) fn run(raw: impl Iterator<Item = String>) -> ExitCode {
                 "error: cannot create the store {}: {error}",
                 store.display()
             );
-            return ExitCode::FAILURE;
+            return ExitCode::from(ERROR_CODE);
         }
         println!("created the store {}", store.display());
     }
@@ -100,7 +102,7 @@ pub(super) fn run(raw: impl Iterator<Item = String>) -> ExitCode {
             "error: cannot write {}: {error}",
             destination.output.display()
         );
-        return ExitCode::FAILURE;
+        return ExitCode::from(ERROR_CODE);
     }
 
     println!(
@@ -116,7 +118,7 @@ pub(super) fn run(raw: impl Iterator<Item = String>) -> ExitCode {
 #[cfg(not(any(feature = "python", feature = "rust")))]
 pub(super) fn run(_raw: impl Iterator<Item = String>) -> ExitCode {
     eprintln!("error: this build has no language adapters");
-    ExitCode::FAILURE
+    ExitCode::from(ERROR_CODE)
 }
 
 /// Builds pipeline configuration from files and command-line overrides.

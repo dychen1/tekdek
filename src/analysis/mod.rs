@@ -7,8 +7,9 @@
 //! # Modules
 //!
 //! `pipeline` runs the stages. `preflight` selects languages and checks their
-//! server programs. `source`, `language`, `lsp`, `fact`, and `graph` hold the
-//! stages, and `config` loads the language profiles.
+//! server programs, and `program` finds those programs. `source`, `language`,
+//! `lsp`, `fact`, and `graph` hold the stages, and `config` loads the language
+//! profiles.
 //!
 //! # Stages
 //!
@@ -26,11 +27,12 @@ pub mod lsp;
 mod pipeline;
 #[cfg(any(feature = "python", feature = "rust"))]
 mod preflight;
+pub mod program;
 pub mod source;
 
 #[cfg(any(feature = "python", feature = "rust"))]
 pub use pipeline::{
-    PipelineConfig, PipelineError, PipelineOutputError, PipelineResult, run, run_and_write,
+    PipelineConfig, PipelineError, PipelineOutputError, PipelineResult, detect_project_languages,
+    run, run_and_write,
 };
-#[cfg(any(feature = "python", feature = "rust"))]
-pub use preflight::find_program;
+pub use program::{find_program, find_sibling_program};
