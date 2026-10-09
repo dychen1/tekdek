@@ -389,7 +389,7 @@ mod tests {
             detail.callees[0].key,
             "src/flow/lineage.rs::callable:write_current"
         );
-        assert!(detail.members.is_empty());
+        assert_eq!(detail.members, Vec::new());
         let module = show(&graph, "src/flow/import.rs").expect("module");
         assert_eq!(module.members.len(), 2);
         assert!(show(&graph, "src/flow/import.rs::callable:missing").is_none());

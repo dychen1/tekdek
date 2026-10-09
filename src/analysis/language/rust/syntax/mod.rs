@@ -1143,9 +1143,9 @@ mod tests {
             count_data.signature.as_deref(),
             Some("pub fn count(&self) -> usize")
         );
-        assert!(count_data.parameters.is_empty());
+        assert_eq!(count_data.parameters, Vec::<String>::new());
         assert_eq!(count_data.return_type.as_deref(), Some("usize"));
-        assert!(count_method.evidence.type_inputs.is_empty());
+        assert_eq!(count_method.evidence.type_inputs, Vec::new());
         assert_eq!(
             range_text(REPRESENTATIVE_SOURCE, count_method.evidence.type_outputs[0]),
             "usize"
