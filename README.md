@@ -26,7 +26,7 @@
   powershell -ExecutionPolicy Bypass -c "irm https://github.com/dychen1/tekdek/releases/latest/download/tekdek-installer.ps1 | iex"
   ```
 
-- From source, with Rust and Node.js 22 or later:
+- From source, with rustup and Node.js 22 or later. rustup installs the Rust version that `rust-toolchain.toml` pins:
 
   ```sh
   git clone https://github.com/dychen1/tekdek && cd tekdek

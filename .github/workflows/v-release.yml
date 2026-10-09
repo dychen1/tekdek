@@ -136,6 +136,9 @@ jobs:
             exit 1
           fi
         shell: "bash"
+      - name: "Install the Rust toolchain from rust-toolchain.toml"
+        run: "rustup toolchain install"
+        shell: "bash"
       - name: "Install Node.js"
         uses: "actions/setup-node@v7"
         with:
