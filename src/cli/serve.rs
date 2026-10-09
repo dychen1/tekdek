@@ -11,7 +11,7 @@ use std::{
 
 use tekdek::{catalog::build_catalog, serve::ViewerServer};
 
-use super::{split_arguments, store_directory};
+use super::{ERROR_CODE, split_arguments, store_directory};
 
 pub(super) const USAGE: &str =
     "usage: tekdek serve [--store <directory>] [--port <n>] [--flow <name>] [--open]
@@ -34,21 +34,21 @@ pub(super) fn run(raw: impl Iterator<Item = String>) -> ExitCode {
         Ok(arguments) => arguments,
         Err(message) => {
             eprintln!("error: {message}\n{USAGE}");
-            return ExitCode::FAILURE;
+            return ExitCode::from(ERROR_CODE);
         }
     };
     let store = match store_directory(arguments.store) {
         Ok(store) => store,
         Err(message) => {
             eprintln!("error: {message}");
-            return ExitCode::FAILURE;
+            return ExitCode::from(ERROR_CODE);
         }
     };
     let server = match ViewerServer::bind(&store, arguments.port) {
         Ok(server) => server,
         Err(error) => {
             eprintln!("error: {error}");
-            return ExitCode::FAILURE;
+            return ExitCode::from(ERROR_CODE);
         }
     };
     let url = match &arguments.flow {
@@ -56,7 +56,7 @@ pub(super) fn run(raw: impl Iterator<Item = String>) -> ExitCode {
             Ok(url) => url,
             Err(message) => {
                 eprintln!("error: {message}");
-                return ExitCode::FAILURE;
+                return ExitCode::from(ERROR_CODE);
             }
         },
         None => server.url(),

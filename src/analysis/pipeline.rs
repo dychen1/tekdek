@@ -24,7 +24,8 @@ use super::{
     graph::{Graph, build::build_graph},
     language::{Language, LanguageProfile, builtin_profiles},
     preflight::{
-        detect_required_languages, enabled_extensions, preflight_server_programs, profile,
+        detect_languages, detect_required_languages, enabled_extensions, preflight_server_programs,
+        profile,
     },
     source::{self, DEFAULT_EXCLUDED_DIRECTORIES},
 };
@@ -40,13 +41,7 @@ use crate::store::graph::GraphArtifact;
 ///
 /// Returns an error if loading, fact production, or graph construction fails.
 pub fn run(config: &PipelineConfig) -> Result<PipelineResult, PipelineError> {
-    let excluded = config
-        .excluded_directories
-        .iter()
-        .map(String::as_str)
-        .collect::<Vec<_>>();
-    let extensions = enabled_extensions(&config.profiles);
-    let documents = source::load_documents(&config.root, &extensions, &excluded)?;
+    let documents = load_documents(config)?;
     let languages = detect_required_languages(&documents, &config.profiles)?;
     preflight_server_programs(&config.profiles, &languages)?;
 
@@ -58,6 +53,32 @@ pub fn run(config: &PipelineConfig) -> Result<PipelineResult, PipelineError> {
 
     let graph = build_graph(fact_sets, &documents).map_err(PipelineError::Graph)?;
     Ok(PipelineResult { graph, languages })
+}
+
+/// Returns the enabled languages that have source files under the root, in stable order.
+///
+/// The list can be empty. This function starts no language server.
+///
+/// # Errors
+///
+/// Returns an error if the source files cannot be read.
+pub fn detect_project_languages(config: &PipelineConfig) -> Result<Vec<Language>, PipelineError> {
+    let documents = load_documents(config)?;
+    Ok(detect_languages(&documents, &config.profiles))
+}
+
+fn load_documents(config: &PipelineConfig) -> Result<Vec<source::DocumentSnapshot>, PipelineError> {
+    let excluded = config
+        .excluded_directories
+        .iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>();
+    let extensions = enabled_extensions(&config.profiles);
+    Ok(source::load_documents(
+        &config.root,
+        &extensions,
+        &excluded,
+    )?)
 }
 
 /// Analyzes one codebase and writes its graph artifact.

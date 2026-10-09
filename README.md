@@ -56,7 +56,8 @@ The plugin adds `/tekdek:flow` and `/tekdek:flow-view`, which call the `tekdek` 
 | TypeScript and JavaScript | Not yet | `typescript-language-server` | `npm install -g typescript-language-server typescript@6` |
 | Go | Not yet | `gopls` | `go install golang.org/x/tools/gopls@latest` |
 
-- `tekdek doctor` prints the path and version of each server, or the install command of a missing server.
+- `tekdek doctor` prints the path and version of each server, or the install command of a missing server. It runs the version command of each server, so a server that cannot run, such as a rustup proxy without the component, is `broken`. pyright reports its version through the `pyright` program next to `pyright-langserver`; without it, the version is unverified.
+- `tekdek doctor <root>` checks only the languages that have source files in the root. A Rust project then does not need pyright.
 - Pass a server that is not on `PATH` with `--server`, for example `tekdek index --server python=.venv/bin/pyright-langserver`.
 - `tekdek index` skips the files of a language that it does not index yet. Request a language in [issue #4](https://github.com/dychen1/tekdek/issues/4).
 - `/tekdek:flow` looks for a local server first and asks before it installs one, for example `pyright needed for project acme-api - ~20 MB. y or n to download and install?`.
@@ -159,23 +160,33 @@ tekdek flow verify <name>
 tekdek flow agent-contract
 
 tekdek serve [--store <directory>] [--port <n>] [--flow <name>] [--open]
-tekdek doctor [--config <path>] [--json]
+tekdek doctor [<root>] [--config <path>] [--json]
 tekdek help
 tekdek version
 ```
 
-The `graph` and `flow` commands accept `--store <directory>` and `--json`. `--graph` takes a file name inside the store. JSON mode returns one document, also for errors. Write `--option=value` for a value that starts with a hyphen.
+The `graph` and `flow` commands accept `--store <directory>` and `--json`. `--graph` takes a file name inside the store. Write `--option=value` for a value that starts with a hyphen.
+
+Every command uses the same exit codes:
+
+| Code | Meaning |
+| --- | --- |
+| 0 | The command succeeded. |
+| 1 | A check found a problem: `flow verify` found an issue, `flow import` got a `no_flow` answer, or `doctor` found a needed server that is missing or broken. |
+| 2 | An error: an invalid command line, a missing store or graph, a rejected agent output, or a failed analysis. |
+
+With `--json`, the result or the error is one JSON document on standard output. Without it, results go to standard output and errors go to standard error.
 
 | Command | Notes |
 | --- | --- |
-| `index` | The default root is the working directory, and the default name is the root folder name. `--output` writes one graph and changes no index. `--server` replaces a server program, and each `--server-arg` replaces the server arguments in order. |
-| `graph search` | Lists the keys that contain every word, best name match first. The default limit is 20. |
+| `index` | The default root is the working directory, or the project root when a store exists. The default name is the root folder name. A root inside a project with a store needs `--name`. `--output` writes one graph and changes no store. `--server` replaces a server program, and each `--server-arg` replaces the server arguments in order. |
+| `graph search` | Lists the keys that contain every word, best name match first. Spaces, `::`, `:`, `.`, and `/` separate words, so `Command::parse` and `flow/import` work. The default limit is 20. JSON output names the graph file. |
 | `graph show` | Shows the signature, documentation summary, container, members, callers, and callees. A missing key names close keys. |
 | `flow list` | Lists the current generation of each flow, with its freshness. |
-| `flow import` | Returns 1 for a `no_flow` answer and 2 for a rejected output. `--author-name` alone records an agent author. |
-| `flow verify` | Returns 1 when it finds an issue. |
+| `flow import` | `--author-name` alone records an agent author. |
+| `flow verify` | Recomputes the derived layers and digests of the current generation. |
 | `serve` | Serves on `127.0.0.1:8000` by default. Port 0 selects a free port. `--flow` prints the URL of one flow, and `--open` opens it. |
-| `doctor` | Returns 1 when an enabled language has no server. |
+| `doctor` | With a root, checks only the languages of the root. Statuses: `ok`, `broken`, `missing`, `disabled`, and `not used`. |
 
 ## Configuration
 
@@ -209,7 +220,7 @@ cachePriming.enable = false
 |   |-- main.rs                # Binary entry
 |   |-- lib.rs                 # Library modules
 |   |-- cli/                   # Command routing and the index, graph, flow, serve, and doctor commands
-|   |-- analysis/              # Indexer: pipeline, preflight, configuration, sources
+|   |-- analysis/              # Indexer: pipeline, preflight, program lookup, configuration, sources
 |   |   |-- fact/              # Syntax and semantic fact models
 |   |   |-- graph/             # Graph models and construction
 |   |   |-- language/          # Python and Rust adapters and their profiles
@@ -217,7 +228,7 @@ cachePriming.enable = false
 |   |-- store/                 # Store folder, project store, atomic writes, graph artifact
 |   |-- flow/                  # Frozen flows: models, import, verify, lineage, rules
 |   |   `-- schema/            # Agent output and flow artifact JSON Schemas
-|   |-- catalog.rs             # catalog of graphs and flows for the viewer
+|   |-- catalog.rs             # Catalog of graphs and flows for the viewer
 |   |-- query.rs               # Graph search and node neighbors for agents
 |   `-- serve.rs               # Viewer server with the embedded viewer
 |-- tools/build-viewer.ts      # esbuild script that build.rs runs

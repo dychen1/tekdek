@@ -34,6 +34,7 @@ use serde_json::{Value, json};
 use url::Url;
 
 use super::LspError;
+use crate::analysis::program::find_program;
 
 // -----------------------------------------------------------------------------
 // Client
@@ -54,7 +55,9 @@ impl LspClient {
     ///
     /// Returns an error if the process or reader thread fails to start.
     pub fn start(program: &str, arguments: &[String]) -> Result<Self, LspError> {
-        let mut process = Command::new(program)
+        // Start the resolved file, so a Windows `.cmd` wrapper on PATH also starts.
+        let executable = find_program(program).unwrap_or_else(|| PathBuf::from(program));
+        let mut process = Command::new(executable)
             .args(arguments)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
