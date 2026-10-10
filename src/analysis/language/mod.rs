@@ -8,7 +8,8 @@
 //!
 //! # Modules
 //!
-//! `python` analyzes Python with Pyright.
+//! `python` analyzes Python with Pyright. `rust` analyzes Rust with
+//! rust-analyzer. `profile` names each language and its built-in settings.
 //!
 //! # Sections
 //!
@@ -21,7 +22,6 @@ pub mod python;
 #[cfg(feature = "rust")]
 pub mod rust;
 
-#[cfg(any(feature = "python", feature = "rust"))]
 use std::path::Component;
 
 use crate::analysis::{
@@ -109,7 +109,6 @@ pub trait LanguageAdapter {
 ///
 /// Returns an error if the path is absolute, has a part that is not a normal
 /// name, or is not valid UTF-8.
-#[cfg(any(feature = "python", feature = "rust"))]
 fn document_path(document: &DocumentSnapshot) -> Result<&str, AnalysisError> {
     if document.path.is_absolute() {
         return Err(AnalysisError::new(format!(
