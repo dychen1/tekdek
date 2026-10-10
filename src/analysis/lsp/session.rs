@@ -22,7 +22,7 @@ use serde_json::{Value, json};
 
 use crate::analysis::{
     fact::SemanticFact,
-    language::{CapabilityPolicy, Language, RequiredCapability, ServerCommand},
+    language::{Language, ServerCommand},
     source::Sources,
 };
 
@@ -33,7 +33,6 @@ pub struct SessionConfig<'a> {
     pub language: Language,
     pub language_id: &'a str,
     pub server: &'a ServerCommand,
-    pub required_capabilities: CapabilityPolicy,
     pub fallback: FallbackPolicy,
     pub readiness: ServerReadiness,
 }
@@ -61,8 +60,8 @@ pub enum ServerReadiness {
 
 /// Produces semantic facts during one language-server session.
 ///
-/// The session validates all required server capabilities before it opens a
-/// document or sends a document request.
+/// The session validates the server capabilities that capture uses before it
+/// opens a document or sends a document request.
 ///
 /// # Errors
 ///
@@ -94,11 +93,10 @@ pub fn produce_semantic_facts(
         ),
         INITIALIZE_TIMEOUT,
     )?;
-    let captured = validate_capabilities(&result.capabilities, config.required_capabilities)
-        .and_then(|()| {
-            await_readiness(&mut client, config)?;
-            capture::capture_document_semantics(&mut client, config, &root, sources)
-        });
+    let captured = validate_capabilities(&result.capabilities).and_then(|()| {
+        await_readiness(&mut client, config)?;
+        capture::capture_document_semantics(&mut client, config, &root, sources)
+    });
     let shutdown = client.shutdown();
 
     let captured = captured?;
@@ -201,52 +199,41 @@ fn await_readiness(client: &mut LspClient, config: &SessionConfig<'_>) -> Result
     }
 }
 
-fn validate_capabilities(
-    capabilities: &ServerCapabilities,
-    policy: CapabilityPolicy,
-) -> Result<(), LspError> {
-    if policy.requires(RequiredCapability::DocumentSymbols)
-        && !matches!(
-            capabilities.document_symbol_provider,
-            Some(OneOf::Left(true) | OneOf::Right(_))
-        )
-    {
+/// Requires the four capabilities that capture uses for every symbol.
+fn validate_capabilities(capabilities: &ServerCapabilities) -> Result<(), LspError> {
+    if !matches!(
+        capabilities.document_symbol_provider,
+        Some(OneOf::Left(true) | OneOf::Right(_))
+    ) {
         return Err(LspError::new(
             "the language server does not support document symbols",
         ));
     }
-    if policy.requires(RequiredCapability::CallHierarchy)
-        && !matches!(
-            capabilities.call_hierarchy_provider,
-            Some(
-                CallHierarchyServerCapability::Simple(true)
-                    | CallHierarchyServerCapability::Options(_)
-            )
+    if !matches!(
+        capabilities.call_hierarchy_provider,
+        Some(
+            CallHierarchyServerCapability::Simple(true) | CallHierarchyServerCapability::Options(_)
         )
-    {
+    ) {
         return Err(LspError::new(
             "the language server does not support call hierarchy",
         ));
     }
-    if policy.requires(RequiredCapability::References)
-        && !matches!(
-            capabilities.references_provider,
-            Some(OneOf::Left(true) | OneOf::Right(_))
-        )
-    {
+    if !matches!(
+        capabilities.references_provider,
+        Some(OneOf::Left(true) | OneOf::Right(_))
+    ) {
         return Err(LspError::new(
             "the language server does not support references",
         ));
     }
-    if policy.requires(RequiredCapability::TypeDefinitions)
-        && !matches!(
-            capabilities.type_definition_provider,
-            Some(
-                TypeDefinitionProviderCapability::Simple(true)
-                    | TypeDefinitionProviderCapability::Options(_)
-            )
+    if !matches!(
+        capabilities.type_definition_provider,
+        Some(
+            TypeDefinitionProviderCapability::Simple(true)
+                | TypeDefinitionProviderCapability::Options(_)
         )
-    {
+    ) {
         return Err(LspError::new(
             "the language server does not support type definitions",
         ));
@@ -277,7 +264,7 @@ mod tests {
     };
     use crate::analysis::{
         fact::{ResolutionFallback, SemanticFact},
-        language::{CapabilityPolicy, Language},
+        language::Language,
         lsp::{LspError, ProtocolSymbolSite, fake_server::FakeServer},
         source::{DocumentSnapshot, Sources},
     };
@@ -333,23 +320,13 @@ mod tests {
             ..ServerCapabilities::default()
         };
 
-        let error = validate_capabilities(&capabilities, CapabilityPolicy::SEMANTIC_GRAPH)
-            .expect_err("call hierarchy should be required");
+        let error =
+            validate_capabilities(&capabilities).expect_err("call hierarchy should be required");
 
         assert_eq!(
             error.to_string(),
             "the language server does not support call hierarchy"
         );
-    }
-
-    #[test]
-    fn validates_only_capabilities_required_by_the_supplied_policy() {
-        let capabilities = ServerCapabilities::default();
-
-        validate_capabilities(&capabilities, CapabilityPolicy::NONE)
-            .expect("the policy should not require server capabilities");
-        validate_capabilities(&capabilities, CapabilityPolicy::SEMANTIC_GRAPH)
-            .expect_err("the semantic graph policy should require capabilities");
     }
 
     #[test]
@@ -570,7 +547,6 @@ mod tests {
             language,
             language_id: language.as_str(),
             server: &command,
-            required_capabilities: CapabilityPolicy::SEMANTIC_GRAPH,
             fallback,
             readiness,
         };

@@ -89,7 +89,7 @@ mod tests {
     use serde_json::Value;
 
     use crate::analysis::{
-        language::{CapabilityPolicy, Language, LanguageAdapter, LanguageProfile, ServerCommand},
+        language::{Language, LanguageAdapter, LanguageProfile, ServerCommand},
         source::DocumentSnapshot,
     };
 
@@ -109,7 +109,6 @@ mod tests {
                     arguments: vec!["--stdio".to_owned()],
                     initialization_options: Value::Null,
                 },
-                required_capabilities: CapabilityPolicy::SEMANTIC_GRAPH,
             },
         );
         let documents = [DocumentSnapshot {

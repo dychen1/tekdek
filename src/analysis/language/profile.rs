@@ -100,7 +100,6 @@ pub struct LanguageProfile {
     pub extensions: Vec<String>,
     pub language_id: String,
     pub server: ServerCommand,
-    pub required_capabilities: CapabilityPolicy,
 }
 
 /// Returns profiles for the adapters in this build.
@@ -124,7 +123,6 @@ pub fn builtin_profiles() -> Vec<LanguageProfile> {
             arguments: vec!["--stdio".to_owned()],
             initialization_options: Value::Null,
         },
-        required_capabilities: CapabilityPolicy::SEMANTIC_GRAPH,
     });
 
     #[cfg(feature = "rust")]
@@ -143,7 +141,6 @@ pub fn builtin_profiles() -> Vec<LanguageProfile> {
                 "cachePriming": {"enable": false},
             }),
         },
-        required_capabilities: CapabilityPolicy::SEMANTIC_GRAPH,
     });
 
     profiles
@@ -151,7 +148,7 @@ pub fn builtin_profiles() -> Vec<LanguageProfile> {
 
 #[cfg(test)]
 mod tests {
-    use super::{CapabilityPolicy, Language, builtin_profiles};
+    use super::{Language, builtin_profiles};
 
     #[test]
     fn includes_only_profiles_for_compiled_adapters() {
@@ -168,15 +165,6 @@ mod tests {
         .collect::<Vec<_>>();
 
         assert_eq!(languages, expected);
-    }
-
-    #[test]
-    fn requires_semantic_graph_capabilities_for_each_profile() {
-        assert!(
-            builtin_profiles()
-                .iter()
-                .all(|profile| profile.required_capabilities == CapabilityPolicy::SEMANTIC_GRAPH)
-        );
     }
 
     #[cfg(all(feature = "python", feature = "rust"))]

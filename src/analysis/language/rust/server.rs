@@ -33,7 +33,6 @@ fn session_config<'a>(root: &'a Path, profile: &'a LanguageProfile) -> SessionCo
         language: Language::Rust,
         language_id: &profile.language_id,
         server: &profile.server,
-        required_capabilities: profile.required_capabilities,
         fallback: resolution_fallback,
         // rust-analyzer answers semantic requests with empty results until
         // the workspace loads, so the session waits for a quiescent status.
@@ -67,7 +66,7 @@ mod tests {
     use super::{resolution_fallback, session_config};
     use crate::analysis::{
         fact::ResolutionFallback,
-        language::{CapabilityPolicy, Language, LanguageProfile, ServerCommand},
+        language::{Language, LanguageProfile, ServerCommand},
         lsp::ProtocolSymbolSite,
     };
 
@@ -84,7 +83,6 @@ mod tests {
                 arguments: Vec::new(),
                 initialization_options: Value::Null,
             },
-            required_capabilities: CapabilityPolicy::SEMANTIC_GRAPH,
         };
 
         let config = session_config(root, &profile);
