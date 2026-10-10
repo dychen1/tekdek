@@ -168,7 +168,12 @@ impl LineIndex {
     fn new(source: &str) -> Result<Self, AnalysisError> {
         u32::try_from(source.len())
             .map_err(|_| AnalysisError::new("the Rust source is too large"))?;
-        let mut starts = vec![0];
+        // The parser removes a byte order mark before it counts line-1 columns.
+        let mut starts = vec![if source.starts_with('\u{feff}') {
+            '\u{feff}'.len_utf8()
+        } else {
+            0
+        }];
         starts.extend(
             source
                 .bytes()
@@ -1232,6 +1237,20 @@ mod tests {
         assert_eq!(
             declaration.evidence.declarations[0],
             expected_range(source, "Café")
+        );
+    }
+
+    #[test]
+    fn keeps_line_one_ranges_exact_after_a_byte_order_mark() {
+        let source = "\u{feff}pub struct Alpha;\n";
+        let facts = facts_for("bom.rs", source).expect("the source must produce facts");
+
+        let alpha = typed_entity(&facts, "Alpha", &TypeKind::Struct);
+
+        assert_eq!(declaration_text(source, alpha), "Alpha");
+        assert_eq!(
+            range_text(source, alpha.evidence.scope.expect("the scope must exist")),
+            "pub struct Alpha;"
         );
     }
 
