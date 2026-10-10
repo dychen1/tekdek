@@ -12,6 +12,7 @@
 //! `Requests` checks the headers and the method of one request.
 //! `Routes` maps a request path onto an embedded asset or a store file.
 //! `Catalog allowlist` decides which store files the viewer can read.
+//! `Source route` serves the function source of one flow.
 //! `Safe reads` reads one store file without following a link.
 
 use std::{
@@ -23,8 +24,15 @@ use std::{
 
 use crate::{
     catalog::{build_catalog, readable_files},
-    flow::models::is_flow_id,
-    store::{graph::check_graph_name, reject_symlink},
+    flow::{
+        lineage::read_current,
+        models::{FlowId, is_flow_id},
+    },
+    source_view::{SourceDocument, flow_sources},
+    store::{
+        graph::{check_graph_name, read_graph},
+        reject_symlink,
+    },
 };
 
 // -----------------------------------------------------------------------------
@@ -219,7 +227,8 @@ fn answer(
     if method != "GET" && method != "HEAD" {
         return Reply::failure(405, "Use GET or HEAD.");
     }
-    match route_parts(url).and_then(|parts| route(store, &parts)) {
+    let query = url.split_once('?').map(|(_, query)| query);
+    match route_parts(url).and_then(|parts| route(store, &parts, query)) {
         Ok(reply) | Err(reply) => reply,
     }
 }
@@ -231,7 +240,7 @@ fn answer(
 const JSON: &str = "application/json; charset=utf-8";
 
 /// Returns the embedded asset or the store file of an allowed path. Any other path is a 404.
-fn route(store: &Path, parts: &[String]) -> Result<Reply, Reply> {
+fn route(store: &Path, parts: &[String], query: Option<&str>) -> Result<Reply, Reply> {
     let words: Vec<&str> = parts.iter().map(String::as_str).collect();
     match words.as_slice() {
         // Send the root to the viewer page.
@@ -274,6 +283,13 @@ fn route(store: &Path, parts: &[String]) -> Result<Reply, Reply> {
                 location: None,
             })
         }
+        // Serve the source of every step function of one flow.
+        ["source"] => Ok(Reply {
+            status: 200,
+            content_type: JSON,
+            body: Cow::Owned(source_document(store, query)?),
+            location: None,
+        }),
         // Reject every other path.
         _ => Err(not_found()),
     }
@@ -387,6 +403,131 @@ fn generation_file(path: &str) -> bool {
 }
 
 // -----------------------------------------------------------------------------
+// Source route
+// -----------------------------------------------------------------------------
+
+/// The largest project file that the source route reads.
+const MAX_SOURCE_BYTES: u64 = 2 * 1024 * 1024;
+
+/// Returns the source JSON of every step function of one flow.
+///
+/// The flow must be in the catalog under the named graph. File paths come
+/// from the graph, never from the query, and stay inside the project folder
+/// that holds the store.
+fn source_document(store: &Path, query: Option<&str>) -> Result<Vec<u8>, Reply> {
+    let (artifact, flow) = source_query(query)?;
+    check_link(store)?;
+    let catalog = build_catalog(store).map_err(|error| catalog_failure(&error))?;
+    if catalog.graph_of_flow(&flow) != Some(artifact.as_str()) {
+        return Err(not_found());
+    }
+    let (graph, _) = read_graph(store, &artifact).map_err(|error| read_failure(&error))?;
+    let flow_id = FlowId::try_from(flow.as_str()).map_err(|_| not_found())?;
+    let current = read_current(store, &flow_id)
+        .map_err(|_| Reply::failure(500, "Cannot read the flow."))?
+        .ok_or_else(not_found)?;
+    let store = fs::canonicalize(store).map_err(|error| read_failure(&error))?;
+    let root = store
+        .parent()
+        .ok_or_else(|| Reply::failure(500, "The store has no project folder."))?;
+    let functions = flow_sources(&graph, &current.artifact, |path| read_project(root, path));
+    serde_json::to_vec(&SourceDocument {
+        artifact,
+        flow,
+        functions,
+    })
+    .map_err(|_| Reply::failure(500, "Cannot build the source document."))
+}
+
+/// Reads `artifact` and `flow`, each exactly once. Any other parameter is a 400.
+fn source_query(query: Option<&str>) -> Result<(String, String), Reply> {
+    let invalid = || Reply::failure(400, "Use /source?artifact=<graph file>&flow=<flow name>.");
+    let (mut artifact, mut flow) = (None, None);
+    for pair in query
+        .unwrap_or_default()
+        .split('&')
+        .filter(|pair| !pair.is_empty())
+    {
+        let (name, value) = pair.split_once('=').ok_or_else(invalid)?;
+        let value = percent_decode(value).ok_or_else(invalid)?;
+        let slot = match name {
+            "artifact" => &mut artifact,
+            "flow" => &mut flow,
+            _ => return Err(invalid()),
+        };
+        if slot.replace(value).is_some() {
+            return Err(invalid());
+        }
+    }
+    let (Some(artifact), Some(flow)) = (artifact, flow) else {
+        return Err(invalid());
+    };
+    if !graph_name(&artifact) || !is_flow_id(&flow) {
+        return Err(not_found());
+    }
+    Ok((artifact, flow))
+}
+
+/// Reads one project file as UTF-8 text, or returns why it cannot.
+///
+/// No component of the path can be a symbolic link.
+fn read_project(root: &Path, relative: &str) -> Result<String, String> {
+    let cannot = |what: &str| format!("the file cannot be {what}");
+    if !project_path(relative) {
+        return Err("the path leaves the project".to_owned());
+    }
+    let mut path = root.to_path_buf();
+    for part in relative.split('/') {
+        path.push(part);
+        match fs::symlink_metadata(&path) {
+            // Refuse a symbolic link at any component.
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                return Err("the path holds a symbolic link".to_owned());
+            }
+            // Keep walking when the component exists.
+            Ok(_) => {}
+            // Report a component that does not exist.
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                return Err("the file is missing".to_owned());
+            }
+            // Report any other failure.
+            Err(_) => return Err(cannot("opened")),
+        }
+    }
+    let mut options = fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+    }
+    let file = options.open(&path).map_err(|_| cannot("opened"))?;
+    let metadata = file.metadata().map_err(|_| cannot("opened"))?;
+    if !metadata.is_file() {
+        return Err("the path is not a regular file".to_owned());
+    }
+    if metadata.len() > MAX_SOURCE_BYTES {
+        return Err("the file is larger than 2 MiB".to_owned());
+    }
+    let mut bytes = Vec::new();
+    file.take(MAX_SOURCE_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|_| cannot("read"))?;
+    String::from_utf8(bytes).map_err(|_| "the file is not UTF-8 text".to_owned())
+}
+
+/// Accepts a relative path with no empty, `.`, or `..` component, no backslash, and no colon.
+fn project_path(path: &str) -> bool {
+    !path.is_empty()
+        && !path.starts_with('/')
+        && !path.contains(['\\', ':'])
+        && path
+            .split('/')
+            .all(|part| !part.is_empty() && part != "." && part != "..")
+}
+
+// -----------------------------------------------------------------------------
 // Safe reads
 // -----------------------------------------------------------------------------
 
@@ -456,7 +597,7 @@ mod tests {
         path::Path,
     };
 
-    use super::{PAGE, Reply, ViewerServer, answer};
+    use super::{JSON, PAGE, Reply, ViewerServer, answer};
     use crate::flow::fixtures::{self, frozen, import, output};
 
     const HOST: &str = "127.0.0.1:9";
@@ -723,5 +864,156 @@ mod tests {
         let linked = root.path().join("linked");
         std::os::unix::fs::symlink(root.path(), &linked).expect("link store");
         assert!(ViewerServer::bind(&linked, 0).is_err());
+    }
+
+    /// Sets the declaration, scope, body, and content hash of a node from its source text.
+    fn set_ranges(node: &mut crate::store::graph::ArtifactNode, text: &str) {
+        use crate::{analysis::source::ContentHash, store::graph::ArtifactRange};
+        let offset = |index: usize| u32::try_from(index).expect("offset");
+        let name = text.find(&node.name).expect("name");
+        let open = text.find('{').expect("body");
+        let close = text.rfind('}').expect("body end") + 1;
+        node.declarations = vec![ArtifactRange {
+            start: offset(name),
+            end: offset(name + node.name.len()),
+        }];
+        node.scope = Some(ArtifactRange {
+            start: offset(text.find("fn ").expect("fn")),
+            end: offset(close),
+        });
+        node.body = Some(ArtifactRange {
+            start: offset(open),
+            end: offset(close),
+        });
+        node.content_hash = Some(ContentHash::of(&text[name..close]).to_string());
+    }
+
+    /// A project folder with a store, one frozen flow, a graph with source ranges, and source files.
+    ///
+    /// Step functions: `main` and `parse_args` are readable, `read_input` is not in the graph,
+    /// `write_result` leaves the project, and `lock_store` changed after the index.
+    fn source_fixture() -> tempfile::TempDir {
+        let project = tempfile::tempdir().expect("project");
+        let store = project.path().join(".tekdek");
+        fs::create_dir(&store).expect("store");
+        let mut graph = fixtures::write_graph(&store, "src/extra.rs::callable:helper");
+        frozen(import(&store, "demo-flow", &output()));
+        let main = "fn main() {\n    parse_args();\n}\n";
+        let parse = "/// Parses the flags.\nfn parse_args() -> Args {\n    Args\n}\n";
+        let lock = "fn lock_store() {}\n";
+        fs::create_dir(project.path().join("src")).expect("src");
+        fs::write(project.path().join("src/main.rs"), main).expect("main");
+        fs::write(project.path().join("src/parse.rs"), parse).expect("parse");
+        fs::write(
+            project.path().join("src/store.rs"),
+            "fn lock_store() { changed(); }\n",
+        )
+        .expect("store");
+        let nodes = &mut graph.graph.nodes;
+        set_ranges(&mut nodes[0], main);
+        set_ranges(&mut nodes[1], parse);
+        nodes[2].key = "src/parse.rs::callable:renamed".to_owned();
+        nodes[3].path = "../outside.rs".to_owned();
+        set_ranges(&mut nodes[4], lock);
+        graph.write(&store.join("graph.json")).expect("graph");
+        project
+    }
+
+    #[test]
+    fn serves_the_source_of_each_step_function_once_in_step_order() {
+        let project = source_fixture();
+        let reply = get(
+            &project.path().join(".tekdek"),
+            "/source?artifact=graph.json&flow=demo-flow",
+        );
+        assert_eq!((reply.status, reply.content_type), (200, JSON));
+        let body: serde_json::Value = serde_json::from_slice(&reply.body).expect("source JSON");
+        assert_eq!(
+            (body["artifact"].as_str(), body["flow"].as_str()),
+            (Some("graph.json"), Some("demo-flow"))
+        );
+        let functions = body["functions"].as_array().expect("functions");
+        let statuses: Vec<(&str, &str)> = functions
+            .iter()
+            .map(|function| {
+                (
+                    function["key"].as_str().unwrap_or_default(),
+                    function["status"].as_str().unwrap_or_default(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            statuses,
+            [
+                ("src/main.rs::callable:main", "ok"),
+                ("src/parse.rs::callable:parse_args", "ok"),
+                ("src/parse.rs::callable:read_input", "missing"),
+                ("src/store.rs::callable:write_result", "unreadable"),
+                ("src/store.rs::callable:lock_store", "changed"),
+            ]
+        );
+        assert_eq!(
+            functions[1]["lines"],
+            serde_json::json!([
+                "/// Parses the flags.",
+                "fn parse_args() -> Args {",
+                "    Args",
+                "}"
+            ])
+        );
+        assert_eq!(functions[1]["docLines"], serde_json::json!([1, 1]));
+        assert_eq!(
+            (
+                functions[1]["firstLine"].as_u64(),
+                functions[1]["declarationLine"].as_u64()
+            ),
+            (Some(1), Some(2))
+        );
+        assert_eq!(functions[3]["reason"], "the path leaves the project");
+        assert!(functions[4].get("lines").is_none());
+    }
+
+    #[test]
+    fn rejects_source_requests_outside_the_catalog() {
+        let project = source_fixture();
+        let store = project.path().join(".tekdek");
+        for (url, code) in [
+            ("/source", 400),
+            ("/source?flow=demo-flow", 400),
+            (
+                "/source?artifact=graph.json&flow=demo-flow&path=src/main.rs",
+                400,
+            ),
+            (
+                "/source?artifact=graph.json&artifact=graph.json&flow=demo-flow",
+                400,
+            ),
+            ("/source?artifact=graph.json&flow=demo-flow&flow", 400),
+            ("/source?artifact=graph.json&flow=other-flow", 404),
+            ("/source?artifact=other.json&flow=demo-flow", 404),
+            ("/source?artifact=..%2Fgraph.json&flow=demo-flow", 404),
+            ("/source?artifact=graph.json&flow=Demo", 404),
+        ] {
+            assert_error(&get(&store, url), code);
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn refuses_source_behind_a_symbolic_link() {
+        let project = source_fixture();
+        let source = project.path().join("src");
+        fs::rename(&source, project.path().join("real")).expect("move");
+        std::os::unix::fs::symlink(project.path().join("real"), &source).expect("link");
+        let reply = get(
+            &project.path().join(".tekdek"),
+            "/source?artifact=graph.json&flow=demo-flow",
+        );
+        let body: serde_json::Value = serde_json::from_slice(&reply.body).expect("source JSON");
+        assert_eq!(body["functions"][0]["status"], "unreadable");
+        assert_eq!(
+            body["functions"][0]["reason"],
+            "the path holds a symbolic link"
+        );
     }
 }
