@@ -24,6 +24,19 @@ test("Python decorators, definitions, comments, and triple-quoted strings take t
   assert.ok(comment.endsWith('<span class="t-com"># done</span>'));
 });
 
+test("prefixed triple-quoted Python strings open, carry, and close like plain ones", () => {
+  const [open, mid, close, code] = highlight(['    r"""Raw', "    more", '    done"""', "    x = 1"], "python");
+  assert.ok(open.includes('<span class="t-str">r&quot;&quot;&quot;Raw</span>'));
+  assert.equal(mid, '<span class="t-str">    more</span>');
+  assert.equal(close, '<span class="t-str">    done&quot;&quot;&quot;</span>');
+  assert.ok(!code.includes('class="t-str"'));
+  assert.ok(code.includes('<span class="t-num">1</span>'));
+  const [fOpen, fMid, fClose] = highlight(["    f'''Fmt", "    x", "    end'''"], "python");
+  assert.ok(fOpen.includes('<span class="t-str">f&#39;&#39;&#39;Fmt</span>'));
+  assert.equal(fMid, '<span class="t-str">    x</span>');
+  assert.equal(fClose, '<span class="t-str">    end&#39;&#39;&#39;</span>');
+});
+
 test("another language shows escaped plain text", () => {
   assert.deepEqual(highlight(["a < b"], "typescript"), ["a &lt; b"]);
   assert.deepEqual(highlight(["a < b"], undefined), ["a &lt; b"]);

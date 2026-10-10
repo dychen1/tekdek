@@ -84,13 +84,13 @@ function pythonLines(lines: readonly string[]): string[] {
 
 /** Returns the colored HTML of one Python line and the triple quote that stays open at its end. */
 function pythonLine(src: string): { html: string; open: string | null } {
-  const re = /(#.*$)|("""|''')|([rbfu]{0,2}"(?:[^"\\]|\\.)*"|[rbfu]{0,2}'(?:[^'\\]|\\.)*')|(@[A-Za-z_][\w.]*)|([A-Za-z_]\w*)|(\d+(?:\.\d+)?)|(\s+)|([\s\S])/g;
+  const re = /(#.*$)|([rbfu]{0,2}(?:"""|'''))|([rbfu]{0,2}"(?:[^"\\]|\\.)*"|[rbfu]{0,2}'(?:[^'\\]|\\.)*')|(@[A-Za-z_][\w.]*)|([A-Za-z_]\w*)|(\d+(?:\.\d+)?)|(\s+)|([\s\S])/g;
   let out = "", m: RegExpExecArray | null, prev = "";
   while ((m = re.exec(src))) {
     if (m[1]) { out += span("t-com", m[1]); break; }
     if (m[2]) {
-      const end = src.indexOf(m[2], re.lastIndex);
-      if (end < 0) { out += span("t-str", src.slice(m.index)); return { html: out, open: m[2] }; }
+      const q = m[2].slice(-3), end = src.indexOf(q, re.lastIndex);
+      if (end < 0) { out += span("t-str", src.slice(m.index)); return { html: out, open: q }; }
       out += span("t-str", src.slice(m.index, end + 3)); re.lastIndex = end + 3; prev = ""; continue;
     }
     if (m[3]) { out += span("t-str", m[3]); prev = ""; continue; }
