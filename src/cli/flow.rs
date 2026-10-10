@@ -17,12 +17,14 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use tekdek::flow::{
-    AGENT_OUTPUT_SCHEMA, FlowError,
-    import::{self, ImportOutcome, ImportRequest},
-    lineage,
-    models::{Author, FlowArtifact, FlowId, FlowIssue, IssueCode, wire_name},
-    verify,
+use tekdek::{
+    catalog,
+    flow::{
+        AGENT_OUTPUT_SCHEMA, current_flow,
+        import::{self, ImportOutcome, ImportRequest},
+        models::{Author, FlowArtifact, FlowIssue, wire_name},
+        verify,
+    },
 };
 
 use super::{failure, render, required, split_arguments, store_directory};
@@ -192,7 +194,7 @@ fn execute(command: Command, input: &mut impl Read) -> Result<(u8, String), Box<
 
 /// Lists flows with their freshness.
 fn list(directory: &Path, json: bool, graph: Option<&str>) -> Result<(u8, String), Box<dyn Error>> {
-    let listings = lineage::list_flows(directory, graph)?;
+    let listings = catalog::list_flows(directory, graph)?;
     let lines: Vec<_> = listings
         .iter()
         .map(|item| {
@@ -217,16 +219,7 @@ fn list(directory: &Path, json: bool, graph: Option<&str>) -> Result<(u8, String
 
 /// Shows the current generation of one flow. JSON output is the frozen artifact.
 fn show(directory: &Path, json: bool, name: &str) -> Result<(u8, String), Box<dyn Error>> {
-    let flow_id = FlowId::try_from(name).map_err(|error| {
-        FlowError::Rejected(vec![FlowIssue::error(
-            IssueCode::InvalidKey,
-            error.to_string(),
-        )])
-    })?;
-    let current =
-        lineage::read_current(directory, &flow_id)?.ok_or_else(|| FlowError::NoLineage {
-            name: name.to_owned(),
-        })?;
+    let current = current_flow(directory, name)?;
     let artifact = &current.artifact;
     Ok((
         0,

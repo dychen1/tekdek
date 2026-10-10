@@ -22,7 +22,7 @@ use super::models::Sha256Digest;
 ///
 /// # Errors
 /// Returns an error when the value holds a non-integer number or cannot serialize.
-pub fn canonical_bytes(value: &impl Serialize) -> Result<Vec<u8>, CanonicalError> {
+fn canonical_bytes(value: &impl Serialize) -> Result<Vec<u8>, CanonicalError> {
     let value = serde_json::to_value(value).map_err(CanonicalError::Json)?;
     let mut output = Vec::new();
     write_value(&value, &mut output)?;

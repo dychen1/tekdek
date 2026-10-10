@@ -11,7 +11,8 @@
 //!
 //! `Schema` defines the catalog document.
 //! `Building` builds the catalog and selects the default graph.
-//! `Scanning` lists graph files and flow lineages.
+//! `Scanning` lists graph files.
+//! `Flow listings` lists the current generation of every flow and decides its freshness.
 
 use std::{
     collections::BTreeMap,
@@ -23,8 +24,11 @@ use std::{
 use serde::Serialize;
 
 use crate::{
-    flow::lineage::{FlowListing, lineage_listings},
-    store::{digest_of, reject_symlink},
+    flow::{
+        lineage::{lineage_ids, read_current},
+        models::FLOW_ARTIFACT_SCHEMA_VERSION,
+    },
+    store::{digest_of, graph::check_graph_name, reject_symlink},
 };
 
 // -----------------------------------------------------------------------------
@@ -76,7 +80,7 @@ pub fn build_catalog(directory: &Path) -> io::Result<ArtifactIndex> {
 pub fn readable_files(directory: &Path) -> io::Result<Vec<String>> {
     let mut files = artifact_files(directory)?;
     for lineage in lineage_listings(directory)? {
-        files.push(format!("flows/{}", lineage.listing.file));
+        files.push(format!("flows/{}", lineage.file));
     }
     Ok(files)
 }
@@ -97,7 +101,7 @@ pub fn default_artifact(directory: &Path) -> io::Result<String> {
 
 /// Returns the graph file named after the project folder of the store, if the folder has a UTF-8 name.
 #[must_use]
-pub fn project_graph_file(directory: &Path) -> Option<String> {
+fn project_graph_file(directory: &Path) -> Option<String> {
     let directory = fs::canonicalize(directory).unwrap_or_else(|_| PathBuf::from(directory));
     let name = directory.parent()?.file_name()?.to_str()?;
     Some(format!("{name}.json"))
@@ -128,10 +132,16 @@ fn select_default(directory: &Path, files: &[String]) -> io::Result<String> {
 /// # Errors
 ///
 /// Returns an error if the store is a symbolic link or cannot be listed.
-pub fn artifact_files(directory: &Path) -> io::Result<Vec<String>> {
+fn artifact_files(directory: &Path) -> io::Result<Vec<String>> {
     reject_symlink(directory)?;
     let mut files = Vec::new();
-    for entry in fs::read_dir(directory)? {
+    let entries = fs::read_dir(directory).map_err(|error| {
+        io::Error::new(
+            error.kind(),
+            format!("cannot read {}: {error}", directory.display()),
+        )
+    })?;
+    for entry in entries {
         let entry = entry?;
         let name = entry.file_name();
         if !entry.file_type()?.is_file() || Path::new(&name).extension() != Some(OsStr::new("json"))
@@ -150,52 +160,37 @@ pub fn artifact_files(directory: &Path) -> io::Result<Vec<String>> {
     Ok(files)
 }
 
-/// Builds the catalog document. A flow is stale when its graph digest differs from the file.
+/// Builds the catalog document.
 fn artifact_index(
     directory: &Path,
     files: &[String],
     default_artifact: String,
 ) -> io::Result<ArtifactIndex> {
-    let mut listings: BTreeMap<String, Vec<(String, FlowListing)>> = BTreeMap::new();
+    let digests = graph_digests(directory, files)?;
+    let mut listings: BTreeMap<String, Vec<FlowListing>> = BTreeMap::new();
     for lineage in lineage_listings(directory)? {
         listings
-            .entry(lineage.graph_artifact)
+            .entry(lineage.graph_artifact.clone())
             .or_default()
-            .push((lineage.graph_digest, lineage.listing));
+            .push(lineage.into_listing(&digests));
     }
 
     let mut artifacts = Vec::new();
-    for file in files {
-        let Some(label) = file.strip_suffix(".json") else {
+    for (file, digest) in digests {
+        let Some(label) = file.strip_suffix(".json").map(str::to_owned) else {
             continue;
         };
-        let path = directory.join(file);
-        let bytes = fs::read(&path).map_err(|error| {
-            io::Error::new(
-                error.kind(),
-                format!("cannot read {}: {error}", path.display()),
-            )
-        })?;
-        let digest = digest_of(&bytes);
-        let mut flows: Vec<FlowListing> = listings
-            .remove(file.as_str())
-            .unwrap_or_default()
-            .into_iter()
-            .map(|(bound, listing)| FlowListing {
-                stale: bound != digest,
-                ..listing
-            })
-            .collect();
+        let mut flows = listings.remove(&file).unwrap_or_default();
         flows.sort_by(|left, right| left.name.cmp(&right.name));
         artifacts.push(ArtifactIndexEntry {
-            label: label.to_owned(),
-            file: file.clone(),
+            label,
+            file,
             digest,
             flows,
         });
     }
     for (graph_artifact, flows) in listings {
-        for (_, flow) in flows {
+        for flow in flows {
             eprintln!(
                 "warning: the flow {} names the missing artifact {graph_artifact}",
                 flow.name
@@ -211,6 +206,115 @@ fn artifact_index(
 }
 
 // -----------------------------------------------------------------------------
+// Flow listings
+// -----------------------------------------------------------------------------
+
+/// One flow listing. `file` is relative to `flows/`.
+///
+/// A flow is stale when its bound graph file is missing or its byte digest
+/// differs from the bound digest.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FlowListing {
+    pub name: String,
+    pub file: String,
+    pub schema_version: u32,
+    pub behavior: String,
+    pub step_count: usize,
+    pub cluster_count: usize,
+    pub stale: bool,
+}
+
+/// Lists flows in name order, with an optional graph filter.
+///
+/// # Errors
+/// Returns an error for an invalid graph name, a link, or a directory failure.
+pub fn list_flows(directory: &Path, graph_file: Option<&str>) -> io::Result<Vec<FlowListing>> {
+    if let Some(file) = graph_file {
+        check_graph_name(file)?;
+    }
+    let digests = graph_digests(directory, &artifact_files(directory)?)?;
+    let mut result: Vec<FlowListing> = lineage_listings(directory)?
+        .into_iter()
+        .filter(|lineage| graph_file.is_none_or(|file| file == lineage.graph_artifact))
+        .map(|lineage| lineage.into_listing(&digests))
+        .collect();
+    result.sort_by(|left, right| left.name.cmp(&right.name));
+    Ok(result)
+}
+
+/// The current generation of one flow and the graph binding that decides its freshness.
+struct LineageListing {
+    name: String,
+    file: String,
+    behavior: String,
+    step_count: usize,
+    cluster_count: usize,
+    graph_artifact: String,
+    graph_digest: String,
+}
+
+impl LineageListing {
+    /// Applies the staleness rule with the byte digests of the graph files.
+    fn into_listing(self, digests: &BTreeMap<String, String>) -> FlowListing {
+        FlowListing {
+            stale: digests.get(&self.graph_artifact) != Some(&self.graph_digest),
+            name: self.name,
+            file: self.file,
+            schema_version: FLOW_ARTIFACT_SCHEMA_VERSION,
+            behavior: self.behavior,
+            step_count: self.step_count,
+            cluster_count: self.cluster_count,
+        }
+    }
+}
+
+/// Lists the current generation of every lineage. An invalid lineage produces a warning.
+///
+/// # Errors
+/// Returns an error for a link or a directory failure.
+fn lineage_listings(directory: &Path) -> io::Result<Vec<LineageListing>> {
+    let mut listings = Vec::new();
+    for id in lineage_ids(directory)? {
+        let current = match read_current(directory, &id) {
+            Ok(Some(current)) => current,
+            Ok(None) => continue,
+            Err(error) => {
+                eprintln!("warning: skipping the flow {id}: {error}");
+                continue;
+            }
+        };
+        let artifact = current.artifact;
+        listings.push(LineageListing {
+            name: id.to_string(),
+            file: current.file,
+            behavior: artifact.intent.behavior,
+            step_count: artifact.intent.steps.len(),
+            cluster_count: artifact.intent.clusters.len(),
+            graph_artifact: artifact.facts.binding.graph_artifact,
+            graph_digest: artifact.facts.binding.graph_digest.to_string(),
+        });
+    }
+    Ok(listings)
+}
+
+/// Hashes each graph file once and returns the byte digest of each file by name.
+fn graph_digests(directory: &Path, files: &[String]) -> io::Result<BTreeMap<String, String>> {
+    let mut digests = BTreeMap::new();
+    for file in files {
+        let path = directory.join(file);
+        let bytes = fs::read(&path).map_err(|error| {
+            io::Error::new(
+                error.kind(),
+                format!("cannot read {}: {error}", path.display()),
+            )
+        })?;
+        digests.insert(file.clone(), digest_of(&bytes));
+    }
+    Ok(digests)
+}
+
+// -----------------------------------------------------------------------------
 // Tests
 // -----------------------------------------------------------------------------
 
@@ -220,7 +324,7 @@ mod tests {
 
     use serde_json::Value;
 
-    use super::{build_catalog, default_artifact, readable_files};
+    use super::{build_catalog, default_artifact, list_flows, readable_files};
     use crate::{
         flow::fixtures::{self, frozen, import, output},
         store::digest_of,
@@ -302,5 +406,42 @@ mod tests {
         let error = build_catalog(directory.path()).err().expect("no graph");
 
         assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+    }
+
+    #[test]
+    fn flow_list_and_the_catalog_agree_on_freshness() {
+        let directory = fixtures::store();
+        let path = directory.path();
+        frozen(import(path, "demo-flow", &output()));
+        let listed = |path: &std::path::Path| {
+            serde_json::to_value(list_flows(path, None).expect("list")).expect("list JSON")
+        };
+
+        assert_eq!(listed(path), catalog(path)["artifacts"][0]["flows"]);
+        assert_eq!(listed(path)[0]["stale"], false);
+        fixtures::write_graph(path, "src/extra.rs::callable:another");
+        assert_eq!(listed(path), catalog(path)["artifacts"][0]["flows"]);
+        assert_eq!(listed(path)[0]["stale"], true);
+        fs::remove_file(path.join("graph.json")).expect("remove the graph");
+        assert_eq!(listed(path)[0]["stale"], true);
+        assert!(
+            list_flows(path, Some("other.json"))
+                .expect("list")
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn flow_list_names_a_store_folder_that_does_not_exist() {
+        let directory = tempfile::tempdir().expect("project");
+        let missing = directory.path().join("no-store");
+
+        let error = list_flows(&missing, None).expect_err("missing store");
+
+        assert_eq!(error.kind(), std::io::ErrorKind::NotFound);
+        assert!(
+            error.to_string().contains(&missing.display().to_string()),
+            "{error}"
+        );
     }
 }
