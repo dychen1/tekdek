@@ -38,14 +38,14 @@ test("callers and callees are distinct keys in graph order", () => {
   assert.deepEqual(otherVisits([3, 7, 12], 7), [3, 12]);
 });
 
-test("a missing, changed, or unreadable source becomes one note in place of code", () => {
+test("a missing, changed, unreadable, or rangeless source becomes one note in place of code", () => {
   assert.equal(sourceNote({ key: "k", status: "ok", lines: ["fn a() {}"] }), null);
   assert.equal(sourceNote({ key: "k", status: "missing" }), "This function is not in the current graph.");
   assert.equal(sourceNote({ key: "k", status: "changed", path: "src/a.rs" }), "This file changed after the last index. Run `tekdek index` to see this function.");
   assert.equal(sourceNote({ key: "k", status: "unreadable", reason: "the file is missing" }), "This file cannot be read: the file is missing.");
   assert.equal(sourceNote({ key: "k", status: "unreadable" }), "This file cannot be read: unknown reason.");
   assert.equal(
-    sourceNote({ key: "k", status: "unreadable", reason: "the graph has no source range for this function" }),
+    sourceNote({ key: "k", status: "no_range", path: "src/a.rs" }),
     "This function cannot be shown: the graph has no source range for it.",
   );
   assert.equal(sourceNote(undefined), "This file cannot be read: the viewer server did not send it.");

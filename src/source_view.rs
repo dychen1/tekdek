@@ -60,6 +60,8 @@ pub enum SourceStatus {
     Missing,
     Changed,
     Unreadable,
+    /// The graph node has no source range, so the function cannot be cut.
+    NoRange,
 }
 
 /// The lines of one function. Line numbers are one-based.
@@ -138,10 +140,7 @@ pub fn flow_sources(
                     ..FunctionSource::at(node, SourceStatus::Ok)
                 },
                 Err(CutError::Changed) => FunctionSource::at(node, SourceStatus::Changed),
-                Err(CutError::NoSpan) => FunctionSource {
-                    reason: Some("the graph has no source range for this function".to_owned()),
-                    ..FunctionSource::at(node, SourceStatus::Unreadable)
-                },
+                Err(CutError::NoSpan) => FunctionSource::at(node, SourceStatus::NoRange),
             },
         });
     }
@@ -518,7 +517,7 @@ mod tests {
             [
                 (MAIN, SourceStatus::Ok),
                 (PARSE, SourceStatus::Missing),
-                (READ, SourceStatus::Unreadable),
+                (READ, SourceStatus::NoRange),
                 (WRITE, SourceStatus::Unreadable),
                 (LOCK, SourceStatus::Unreadable),
             ]
@@ -527,8 +526,10 @@ mod tests {
         reads.sort();
         assert_eq!(reads, ["src/main.rs", "src/parse.rs", "src/store.rs"]);
         assert_eq!(
-            functions[2].reason.as_deref(),
-            Some("the graph has no source range for this function")
+            serde_json::to_value(&functions[2]).expect("json"),
+            json!({
+                "key": READ, "status": "no_range", "path": "src/parse.rs", "language": "rust"
+            })
         );
         assert_eq!(functions[3].reason.as_deref(), Some("the file is missing"));
         assert_eq!(functions[4].reason, functions[3].reason);

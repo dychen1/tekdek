@@ -78,7 +78,7 @@ export interface DeckFlow { name: string; generation: number; stale: boolean; st
 
 /** The source of one step function, as the `/source` route answers it. Line numbers are one-based. */
 export interface SourceView {
-  key: string; status: "ok" | "missing" | "changed" | "unreadable";
+  key: string; status: "ok" | "missing" | "changed" | "unreadable" | "no_range";
   path?: string; language?: string; reason?: string;
   firstLine?: number; declarationLine?: number; docLines?: [number, number] | null; signatureLines?: [number, number];
   lines?: string[]; more?: number;

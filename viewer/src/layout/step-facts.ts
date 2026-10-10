@@ -42,9 +42,6 @@ export const calleesOf = (key: string, calls: readonly DeckCall[]) => distinct(c
 /** The visits of the function other than the current step. */
 export const otherVisits = (visits: readonly number[], current: number) => visits.filter(i => i !== current);
 
-/** The reason that the server sends for a function whose graph node has no source range. */
-const NO_SOURCE_RANGE = "the graph has no source range for this function";
-
 /** The note that replaces code, or null when the source can show. The text may hold `code` spans. */
 export function sourceNote(view: SourceView | undefined): string | null {
   if (!view) return "This file cannot be read: the viewer server did not send it.";
@@ -52,10 +49,9 @@ export function sourceNote(view: SourceView | undefined): string | null {
     case "ok": return null;
     case "missing": return "This function is not in the current graph.";
     case "changed": return "This file changed after the last index. Run `tekdek index` to see this function.";
-    default:
-      // The file may be readable here, so the note names the function and not the file.
-      if (view.reason === NO_SOURCE_RANGE) return "This function cannot be shown: the graph has no source range for it.";
-      return `This file cannot be read: ${view.reason ?? "unknown reason"}.`;
+    // The file may be readable here, so the note names the function and not the file.
+    case "no_range": return "This function cannot be shown: the graph has no source range for it.";
+    default: return `This file cannot be read: ${view.reason ?? "unknown reason"}.`;
   }
 }
 
