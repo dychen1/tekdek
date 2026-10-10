@@ -28,3 +28,36 @@ test("the arrow leaves the lid past the deck edge, curves into the code header, 
   assert.equal(arrow.head, "M1010.0,280.0 L1001.0,275.5 L1001.0,284.5 z");
   assert.equal(arrowPath({ x: 1000, y: 240 }, 1005, { x: 1010, y: 280 }).ok, false);
 });
+
+test("the guide elbow at 60% zoom places its gutter 8.4 px left of the box", () => {
+  assert.equal(
+    guidePath(200, 300, { left: 330, top: 190, height: 20 }, 0.6),
+    "M200.0,300.0 L317.6,300.0 Q321.6,300.0 321.6,296.0 L321.6,204.0 Q321.6,200.0 325.6,200.0 L330.0,200.0",
+  );
+});
+
+test("a tether whose lid is close to the rows bends at the lid margin", () => {
+  assert.equal(tetherPath({ x: 400, y: 300 }, 450, { x: 480, y: 240 }), "M400.0,300.0 L440.0,300.0 C462.0,300.0 458.0,240.0 480.0,240.0");
+});
+
+test("a tether whose lid is left of the slot curves back from the slot", () => {
+  assert.equal(tetherPath({ x: 400, y: 300 }, 450, { x: 350, y: 240 }), "M400.0,300.0 L400.0,300.0 C372.5,300.0 377.5,240.0 350.0,240.0");
+});
+
+test("an arrow whose header is close to the deck turns 60 px before the header", () => {
+  const arrow = arrowPath({ x: 800, y: 240 }, 900, { x: 950, y: 280 });
+  assert.equal(arrow.d, "M800.0,240.0 L890.0,240.0 C923.0,240.0 917.0,280.0 950.0,280.0");
+  assert.equal(arrow.head, "M950.0,280.0 L941.0,275.5 L941.0,284.5 z");
+  assert.equal(arrow.ok, true);
+});
+
+test("an arrow whose header is near the slot starts its curve at the slot", () => {
+  const arrow = arrowPath({ x: 800, y: 240 }, 900, { x: 830, y: 280 });
+  assert.equal(arrow.d, "M800.0,240.0 L800.0,240.0 C816.5,240.0 813.5,280.0 830.0,280.0");
+  assert.equal(arrow.ok, true);
+});
+
+test("an arrow needs more than 24 px of room to show", () => {
+  assert.equal(arrowPath({ x: 800, y: 240 }, 900, { x: 824, y: 280 }).ok, false);
+  assert.equal(arrowPath({ x: 800, y: 240 }, 900, { x: 825, y: 280 }).ok, true);
+});
