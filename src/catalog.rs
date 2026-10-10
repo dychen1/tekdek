@@ -146,7 +146,13 @@ fn select_default(directory: &Path, files: &[String]) -> io::Result<String> {
 fn artifact_files(directory: &Path) -> io::Result<Vec<String>> {
     reject_symlink(directory)?;
     let mut files = Vec::new();
-    for entry in fs::read_dir(directory)? {
+    let entries = fs::read_dir(directory).map_err(|error| {
+        io::Error::new(
+            error.kind(),
+            format!("cannot read {}: {error}", directory.display()),
+        )
+    })?;
+    for entry in entries {
         let entry = entry?;
         let name = entry.file_name();
         if !entry.file_type()?.is_file() || Path::new(&name).extension() != Some(OsStr::new("json"))
@@ -439,6 +445,20 @@ mod tests {
             list_flows(path, Some("other.json"))
                 .expect("list")
                 .is_empty()
+        );
+    }
+
+    #[test]
+    fn flow_list_names_a_store_folder_that_does_not_exist() {
+        let directory = tempfile::tempdir().expect("project");
+        let missing = directory.path().join("no-store");
+
+        let error = list_flows(&missing, None).expect_err("missing store");
+
+        assert_eq!(error.kind(), std::io::ErrorKind::NotFound);
+        assert!(
+            error.to_string().contains(&missing.display().to_string()),
+            "{error}"
         );
     }
 }
