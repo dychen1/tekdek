@@ -12,7 +12,7 @@ export const FILE_TOP = 28;
 
 export interface FileRow {
   key: string; name: string; short: string; steps: number[]; cluster: string | null;
-  /** slot: a member of the current cluster. named: a flow row of another cluster, or any row when compact is off. stub: off the flow while compact is on. */
+  /** slot: a visited member of the current cluster. named: a flow row of another cluster, or any row when compact is off. stub: off the flow while compact is on. */
   mode: "slot" | "named" | "stub";
   flow: boolean; current: boolean; y: number; h: number; w: number;
   /** The right edge of the row and its step pills, from the box's left edge. */
