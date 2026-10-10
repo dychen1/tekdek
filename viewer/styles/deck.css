@@ -1,11 +1,10 @@
 /* ==========================================================================
-   Lift Deck. One vertical file staircase, a raised cluster deck seen at a straight pitch,
-   a callout and an extracted stack at right, one monospace family, Tokyo Night colors.
+   Deck and code column. The explorer, the current file's box, the pinned cluster deck at a straight pitch,
+   the code column, and the bottom bar. One monospace family, Tokyo Night colors.
    # Sections
-   fonts, tokens, variants, base, stage and camera, frame, base plane rows,
-   lifted boxes, deck, connectors, arrow, sidebar, shared controls, map tools and key,
-   right column, popovers, flow controls, help line, load and motion rules,
-   pickers and states
+   fonts, tokens, base, canvas frame, file box, deck, lifted boxes, connectors, sidebar,
+   shared controls, map tools and pickers, top band, code column, bottom bar,
+   full screen code, load and motion rules
    ========================================================================== */
 
 /* ============ fonts: JetBrains Mono (SIL OFL 1.1, see ../fonts/OFL.txt), latin subset ============ */
@@ -16,112 +15,79 @@
 /* The --tn-* palette holds the raw Tokyo Night colors. Every other token derives from it,
    so a variant swaps the palette only. */
 :root{
-  /* palette: Night, the default variant */
   --tn-bg:#1a1b26; --tn-pane:#16161e; --tn-raised:#1f2335;
   --tn-sel:#283457; --tn-sel-2:#2e3c64; --tn-border:#29354f; --tn-border-2:#3b4261;
-  --tn-fg:#c0caf5; --tn-fg-dark:#a9b1d6;
-  --tn-dim:#8d95bc;         /* tertiary text: 4.5:1 or more on every surface it sits on, hover and current rows included */
-  --tn-comment:#565f89;     /* rules and separators only, never text */
-  --tn-black:#0c0e14;       /* shadow ink */
+  --tn-fg:#c0caf5; --tn-fg-dark:#a9b1d6; --tn-dim:#8d95bc; --tn-comment:#565f89; --tn-black:#0c0e14;
   --tn-blue:#7aa2f7; --tn-cyan:#7dcfff; --tn-green:#9ece6a; --tn-yellow:#e0af68;
   --tn-orange:#ff9e64; --tn-red:#f7768e; --tn-magenta:#bb9af7; --tn-purple:#9d7cd8;
 
-  /* color: theme */
   --bg:var(--tn-bg);
   --ink:var(--tn-fg); --ink-2:var(--tn-fg-dark); --dim:var(--tn-dim);
-  --dir:var(--tn-blue);     /* directory names */
-  --pick:var(--tn-blue);    /* static call edges and the no-cluster accent */
-  --line:color-mix(in srgb,var(--tn-comment) 72%,transparent);            /* tree elbows */
-  --line-strong:color-mix(in srgb,var(--tn-comment) 55%,var(--tn-border-2)); /* file box, pane edge */
+  --dir:var(--tn-blue); --pick:var(--tn-blue);
+  --line:color-mix(in srgb,var(--tn-comment) 72%,transparent);
+  --line-strong:color-mix(in srgb,var(--tn-comment) 55%,var(--tn-border-2));
   --line-soft:var(--tn-border-2);
   --line-faint:var(--tn-border);
   --frame-line:color-mix(in srgb,var(--tn-comment) 62%,transparent);
   --grid-dot:color-mix(in srgb,var(--tn-comment) 34%,transparent);
-  /* color: terminal roles. Each role has one job. */
-  --accent:var(--tn-blue);  /* the cursor, focus, selection state, and title badges */
-  --step:var(--tn-orange);  /* the current step number */
-  --keyword:var(--tn-magenta); /* a key you can press, in the help line */
-  --on-accent:var(--tn-pane);  /* text on a bright badge */
-  --key-bg:var(--tn-sel);
-  --selection:var(--tn-sel-2);
-  /* surfaces */
+  --accent:var(--tn-blue); --step:var(--tn-orange); --keyword:var(--tn-magenta);
+  --on-accent:var(--tn-pane); --key-bg:var(--tn-sel); --selection:var(--tn-sel-2);
   --surface-file:color-mix(in srgb,var(--tn-raised) 86%,transparent);
-  --surface-file-recede:color-mix(in srgb,var(--tn-raised) 38%,transparent);
   --surface-fn:color-mix(in srgb,var(--tn-fg-dark) 5%,transparent);
   --surface-named:color-mix(in srgb,var(--tn-pane) 76%,transparent);
   --surface-stub:color-mix(in srgb,var(--tn-comment) 62%,transparent);
-  --surface-stub-recede:color-mix(in srgb,var(--tn-comment) 32%,transparent);
   --surface-recess:color-mix(in srgb,var(--tn-black) 72%,transparent);
-  --surface-panel:var(--tn-pane);
-  --surface-pop:var(--tn-pane);
+  --surface-panel:var(--tn-pane); --surface-pop:var(--tn-pane);
   --surface-hover:color-mix(in srgb,var(--tn-sel) 72%,transparent);
   --surface-press:var(--tn-sel-2);
   --deck-ground:color-mix(in srgb,var(--tn-pane) 90%,transparent);
   --card-face:linear-gradient(180deg,color-mix(in srgb,var(--tn-raised) 90%,var(--tn-fg-dark)) 0%,var(--tn-raised) 100%);
-  --light:var(--tn-fg);     /* top-face light, focus box edge */
-  --shade:color-mix(in srgb,var(--tn-black) 92%,transparent); /* cast shadow */
-  --halo:var(--tn-bg);      /* text halo under the transparent sidebar */
+  --light:var(--tn-fg);
+  --shade:color-mix(in srgb,var(--tn-black) 92%,transparent);
+  --halo:var(--tn-bg);
   --focus:var(--accent);
-  --edge:var(--pick);
-  --edge-air:color-mix(in srgb,var(--tn-fg) 62%,transparent);
-  --edge-air-hot:var(--tn-fg);
-  --mask-under:rgb(0 0 0 / .3);
-  --mask-full:rgb(0 0 0);
-  /* color: flow clusters, from the palette */
   --cl-cyan:var(--tn-cyan); --cl-red:var(--tn-red); --cl-yellow:var(--tn-yellow); --cl-magenta:var(--tn-magenta); --cl-lime:var(--tn-green);
   --cl-orange:var(--tn-orange); --cl-blue:var(--tn-blue); --cl-violet:var(--tn-purple);
   --cl-accent:var(--accent);  /* a cluster whose frozen color is unknown */
-  /* color: states */
-  --warn:var(--tn-yellow);  /* a stale flow */
-  --danger:var(--tn-red);   /* a load error */
-  --cc:var(--pick);         /* active cluster, set by the script */
-  /* type: one monospace family, two weights */
+  --warn:var(--tn-yellow);    /* a stale flow */
+  --danger:var(--tn-red);     /* a load error */
+  --cc:var(--pick);
   --font-code:"JetBrains Mono",ui-monospace,"SF Mono",SFMono-Regular,Menlo,monospace;
   --fs-code-s:10.5px; --fs-code:11px; --fs-code-l:11.5px;
   --fs-ui-s:10.5px; --fs-ui:12px; --fs-title:14px;
   --fw-bold:700;
-  /* radius: rounded box corners */
   --r-xs:2px; --r-s:3px; --r-m:6px; --r-l:9px; --r-pill:999px;
-  /* shadow and light: only what lifts off the map casts a shadow */
   --face-light:inset 1px 1px 0 color-mix(in srgb,var(--tn-fg) 10%,transparent),inset -1px -1px 0 color-mix(in srgb,var(--tn-black) 40%,transparent);
   --face-light-hot:inset 1px 1px 0 color-mix(in srgb,var(--tn-fg) 20%,transparent),inset -1px -1px 0 color-mix(in srgb,var(--tn-black) 40%,transparent);
   --slot-recess:inset 1px 2px 4px color-mix(in srgb,var(--tn-black) 70%,transparent);
   --text-halo:0 0 2px var(--halo),0 0 5px var(--halo),0 0 11px var(--halo);
   --badge-shadow:0 2px 5px color-mix(in srgb,var(--tn-black) 55%,transparent);
   --key-lift-shadow:0 5px 6px color-mix(in srgb,var(--tn-black) 85%,transparent);
-  --front-mix:44%;          /* front face: cluster color in shadow ink */
+  --front-mix:44%;
   --icon-stroke:1.5;
-  /* geometry, read by the script: a straight pitch, no yaw */
-  --tilt:15;                /* camera pitch in degrees while a cluster is up */
-  --deck-z:170px;           /* deck height above the tree plane */
-  --deck-t:30px;            /* deck thickness: the front face */
-  --box-h:28px;             /* box height above the deck: the box front face */
-  --focus-dz:30px;          /* extra rise of the focus box */
-  --shadow-dy:28px;         /* the deck shadow falls a little toward the viewer */
-  /* motion: the lift is the one authored moment; the rest is terminal-snappy */
+  /* geometry: a straight 15 degree pitch, no yaw; the script reads the same numbers */
+  --deck-z:170px; --deck-t:30px; --box-h:28px; --focus-dz:30px; --shadow-dy:28px; --bh:32px;
   --ease-lift:cubic-bezier(.45,.05,.25,1);
   --ease-rise:cubic-bezier(.22,1.22,.42,1);
   --ease-sink:cubic-bezier(.55,0,.85,.35);
   --ease-slab:cubic-bezier(.2,1.12,.35,1);
   --ease-out:cubic-bezier(.16,1,.3,1);
-  --dur-hover:110ms; --dur-pop:140ms; --dur-drawer:200ms;
-  --dur-state:240ms; --dur-layout:520ms; --dur-camera:780ms;
+  --dur-hover:110ms; --dur-pop:140ms; --dur-drawer:200ms; --dur-state:240ms; --dur-layout:520ms;
   --blink:1060ms;
-  /* layout */
-  --sb:262px; --rc:320px; --gap:12px;
-  --controls-w:520px; --ann-h:18px; --ann-h-open:90px; --controls-bottom:34px;
-  --controls-x:max(12px,min(calc(var(--sb) + (100vw - var(--sb) - var(--rc) - 28px) / 2 - var(--controls-w) / 2),calc(100vw - var(--rc) - 40px - var(--controls-w))));
+  /* layout: explorer at left, the code column at right, the canvas frame and the bottom bar between them */
+  --sb:262px; --rc:clamp(440px,36vw,580px); --gap:12px; --lab:66px;
+  --bar-h:126px; --bar-bottom:34px; --top-band:112px;
+  --frame-l:calc(var(--sb) + 16px);
+  --frame-r:calc(var(--rc) + var(--gap) + 16px);
 }
-/* variants: the Key popover sets data-variant on the root. Storm and Moon override the palette only. */
 :root[data-variant="storm"]{--tn-bg:#24283b; --tn-pane:#1f2335; --tn-raised:#292e42; --tn-dim:#979ec6}
 :root[data-variant="moon"]{--tn-bg:#222436; --tn-pane:#1e2030; --tn-raised:#2f334d; --tn-dim:#959ed0;
   --tn-fg:#c8d3f5; --tn-blue:#82aaff; --tn-cyan:#86e1fc; --tn-red:#ff757f; --tn-yellow:#ffc777; --tn-magenta:#c099ff; --tn-green:#c3e88d; --tn-purple:#fca7ea}
-@media (max-width:1200px){:root{--sb:228px;--rc:282px}}
+@media (max-width:1300px){:root{--sb:228px}}
 
 /* ============ base ============ */
 *{box-sizing:border-box}
-/* every layer is fixed to the viewport, so the page itself never scrolls */
-html,body{margin:0;height:100%;overscroll-behavior:none}
+html,body{margin:0;height:100%;overflow:hidden;overscroll-behavior:none}
 body{background:var(--bg);color:var(--ink);font:var(--fs-ui) var(--font-code);-webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums;
   caret-color:var(--accent);accent-color:var(--accent);scrollbar-color:var(--line-soft) transparent}
 button{font:inherit;color:inherit}
@@ -130,45 +96,26 @@ button{font:inherit;color:inherit}
 .ic{width:16px;height:16px;flex:0 0 auto;fill:none;stroke:currentColor;stroke-width:var(--icon-stroke);stroke-linecap:round;stroke-linejoin:round}
 .vh{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
 .ptr{width:12px;height:12px;color:var(--accent);pointer-events:none}
+code{font:inherit;color:var(--keyword)}
 
-/* ============ stage and camera ============ */
-/* Parallel projection: the stage sets no perspective, and the camera pitches with rotateX only.
-   Every vertical line of the tree stays vertical on screen at any pitch. */
-.stage{position:fixed;inset:0;overflow:hidden;cursor:grab;touch-action:none;
-  -webkit-mask-image:linear-gradient(90deg,var(--mask-under) 0,var(--mask-under) calc(var(--sb) - 34px),var(--mask-full) calc(var(--sb) + 36px));
-          mask-image:linear-gradient(90deg,var(--mask-under) 0,var(--mask-under) calc(var(--sb) - 34px),var(--mask-full) calc(var(--sb) + 36px));
-  /* a second mask fades the map under the help line */
-  -webkit-mask-image:linear-gradient(90deg,var(--mask-under) 0,var(--mask-under) calc(var(--sb) - 34px),var(--mask-full) calc(var(--sb) + 36px)),linear-gradient(0deg,var(--mask-under) 0,var(--mask-under) 26px,var(--mask-full) 58px);
-          mask-image:linear-gradient(90deg,var(--mask-under) 0,var(--mask-under) calc(var(--sb) - 34px),var(--mask-full) calc(var(--sb) + 36px)),linear-gradient(0deg,var(--mask-under) 0,var(--mask-under) 26px,var(--mask-full) 58px);
-  -webkit-mask-composite:source-in;mask-composite:intersect}
-.stage.dragging{cursor:grabbing}
-.camera{position:absolute;left:0;top:0;width:0;height:0;transform-style:preserve-3d;transform-origin:0 0;
-  transition:transform var(--dur-camera) cubic-bezier(.45,.05,.2,1)}
-.world{position:absolute;left:0;top:0;transform-style:preserve-3d}
-.world.boot *{transition:none !important}
+/* ============ canvas frame: the dot grid ============ */
+.frame{position:fixed;z-index:1;left:var(--frame-l);right:var(--frame-r);top:var(--top-band);bottom:calc(var(--bar-bottom) + var(--bar-h) + 10px);
+  border:1px dashed var(--frame-line);border-radius:var(--r-l);pointer-events:none;
+  background-image:radial-gradient(circle,var(--grid-dot) 0 .8px,transparent 1.2px);background-size:18px 18px;background-position:9px 9px}
+/* the canvas world: a zero-size layer in screen coordinates. Zoom scales it around the current slot. */
+.cv{position:fixed;z-index:2;left:0;top:0;width:0;height:0;pointer-events:none;transition:transform 260ms var(--ease-out)}
 
-/* ============ frame ============ */
-.frame{position:absolute;left:0;top:0;border:1px dashed var(--frame-line);border-radius:var(--r-l);pointer-events:none;
-  background-image:radial-gradient(circle,var(--grid-dot) 0 .8px,transparent 1.2px);background-size:18px 18px;background-position:9px 9px;
-  transition:border-color var(--dur-state)}
-.frame-title{position:absolute;left:0;top:-24px;display:flex;align-items:baseline;gap:10px;white-space:nowrap;
-  font:var(--fw-bold) var(--fs-code) var(--font-code);color:var(--ink);transform:scale(var(--ls,1));transform-origin:0 100%}
-.frame-title span{font-weight:400;font-size:var(--fs-ui-s);color:var(--dim)}
-
-/* ============ base plane rows (the flat staircase) ============ */
-.row{position:absolute;left:0;top:0;transition:transform var(--dur-layout) var(--ease-lift)}
-.row .node{position:absolute;left:0;top:0;display:flex;align-items:center;white-space:nowrap;overflow:visible;
-  transition:top var(--dur-layout) var(--ease-lift),height var(--dur-layout) var(--ease-lift),width var(--dur-layout) var(--ease-lift),background-color var(--dur-state),border-color var(--dur-state),color var(--dur-state),opacity var(--dur-state)}
-.elbow{position:absolute;border-left:1px solid var(--line);border-bottom:1px solid var(--line);border-bottom-left-radius:4px;
-  pointer-events:none;transition:top var(--dur-layout) var(--ease-lift),height var(--dur-layout) var(--ease-lift),border-color var(--dur-state)}
-.lbl{display:inline-block;transform:scale(var(--ls,1));transform-origin:0 50%}
-.row.dir .node{gap:5px;font:var(--fs-ui-s) var(--font-code);color:var(--dir)}
-.row.dir .ic{width:12px;height:12px}
-/* A file box width follows its label scale at once, so the box never lags behind the label. */
-.row.file .node{transition:top var(--dur-layout) var(--ease-lift),height var(--dur-layout) var(--ease-lift),background-color var(--dur-state),border-color var(--dur-state),color var(--dur-state),opacity var(--dur-state)}
-.row.file .node{gap:2px;padding:0 8px 0 2px;border:1px solid var(--line-strong);border-radius:var(--r-s);background:var(--surface-file);
+/* ============ file box and its rows ============ */
+/* the file box never moves on screen: each step sets its place and its rows at once, then the connectors are drawn */
+.fileblk{position:absolute;left:0;top:0}
+.fileblk[hidden]{display:none}
+@keyframes swap{from{opacity:.15;transform:translateY(4px)}to{opacity:1;transform:none}}
+.row{position:absolute;left:0;top:0}
+.rowin{position:absolute;left:0;top:0;display:flex;align-items:center;gap:6px}
+.row .node{position:relative;display:flex;align-items:center;height:100%;margin:0;white-space:nowrap;text-align:left;pointer-events:auto}
+.elbow{position:absolute;left:-17px;width:14px;border-left:1px solid var(--line);border-bottom:1px solid var(--line);border-bottom-left-radius:4px;pointer-events:none}
+.row.file .node{gap:2px;height:20px;padding:0 9px 0 2px;border:1px solid var(--line-strong);border-radius:var(--r-s);background:var(--surface-file);
   font:var(--fw-bold) var(--fs-code) var(--font-code);color:var(--ink)}
-/* current file: a double rule, the terminal way to say "this one" */
 .row.file.curfile .node{border-color:var(--cc);outline:1px solid color-mix(in srgb,var(--cc) 55%,transparent);outline-offset:1.5px}
 .fold{flex:0 0 16px;width:16px;height:16px;padding:0;display:grid;place-items:center;border:0;border-radius:var(--r-xs);background:transparent;color:var(--dim);cursor:pointer;
   transition:transform var(--dur-drawer) var(--ease-out),background-color var(--dur-hover),color var(--dur-hover)}
@@ -177,86 +124,28 @@ button{font:inherit;color:inherit}
 .row.folded .fold{transform:rotate(-90deg)}
 .fnote{font:400 var(--fs-ui-s) var(--font-code);color:var(--dim);margin-left:8px}
 .fnote:empty{display:none}
-/* closed directory: one row with a quiet count. A flow-opened directory tints its chevron. */
-.dnote{margin-left:8px;color:var(--dim)}
-.dnote:empty{display:none}
-.row.dir.flowopen .fold{color:var(--cc)}
-.row.dir.flowopen .fold:hover{color:var(--ink)}
 .row.fn .node{padding:0 7px;border:1px solid var(--line-soft);border-radius:var(--r-xs);background:var(--surface-fn);font:var(--fs-code-s) var(--font-code);color:var(--ink-2);cursor:default}
-.row.fn.visited .node{cursor:pointer}
-.row.fn:not(.stub):not(.ghost) .node:hover{border-color:var(--line-strong);color:var(--ink)}
-/* member marker: a small square in the cluster color, the same mark as the sidebar */
-.row.fn.m .node::before{content:"";flex:0 0 auto;width:6px;height:6px;margin-right:6px;border-radius:var(--r-xs);background:var(--c);transition:opacity var(--dur-hover)}
-.nm{min-width:0;overflow:hidden;text-overflow:ellipsis;transition:opacity var(--dur-hover)}
+.row.fn button.node{cursor:pointer}
+.row.fn.m .node::before{content:"";flex:0 0 auto;width:6px;height:6px;margin-right:6px;border-radius:var(--r-xs);background:var(--c)}
+.nm{min-width:0;overflow:hidden;text-overflow:ellipsis}
 .row.fn.stub .node{padding:0;border:0;background:var(--surface-stub)}
-.row.fn.m.stub .node{background:color-mix(in srgb,var(--c) 50%,transparent)}
-.row.fn.stub .node::before,.row.fn.ghost .node::before{display:none}
 .row.fn.stub .nm{opacity:0}
-/* named row: a flow row (with its cluster marker) or a row that a flow row calls or is called by */
+.row.fn.stub .node::before,.row.fn.ghost .node::before{display:none}
 .row.fn.named .node{background:var(--surface-named);border-color:var(--line-soft);color:var(--ink-2)}
-.row.fn.nbfocus .node{border-color:var(--edge);color:var(--ink)}
-.row.hidden .node{opacity:0;pointer-events:none}
-.row.hidden .elbow{border-bottom-color:transparent}
-/* a row inside a closed directory draws no elbow; the next shown sibling joins the one above */
-.row.buried .elbow{border-color:transparent}
-/* ghost slot: where a lifted box lives in the tree. A dashed recess of the same size as the named row.
-   The tether socket is drawn on its right border by the connector layer. */
+.row.fn.named button.node:hover{border-color:var(--line-strong);color:var(--ink)}
+/* ghost slot: where a lifted box lives in the file, named; its step pill keys it to its box. */
 .row.fn.ghost .node{padding:0 8px 0 10px;border:1px dashed color-mix(in srgb,var(--c) 85%,transparent);background:var(--surface-recess);box-shadow:var(--slot-recess);
   color:color-mix(in srgb,var(--c) 58%,var(--ink-2));font-size:var(--fs-code)}
 .row.fn.ghost.focus .node{border-color:var(--light);color:var(--ink)}
-.world.far .row.fn .nm,.world.far .row.dir .lbl{opacity:0}
-.row .node.pulse{animation:pulse 700ms var(--ease-out) 300ms both}
-@keyframes pulse{from{outline:1.5px solid var(--accent);outline-offset:2px}to{outline:1.5px solid transparent;outline-offset:6px}}
-/* the tree recedes while a cluster is up: color only, never blur */
-body.lifted .frame{border-color:var(--line-faint)}
-body.lifted .row.dir .node{color:var(--dim)}
-body.lifted .row.file:not(.hasm) .node{border-color:var(--line-faint);background:var(--surface-file-recede);color:var(--dim)}
-body.lifted .row.file.hasm:not(.curfile) .node{border-color:color-mix(in srgb,var(--cc) 60%,var(--line-strong))}
-body.lifted .row.fn.stub:not(.m) .node{background:var(--surface-stub-recede)}
-body.lifted .elbow{border-color:var(--line-faint)}
-
-/* ============ lifted boxes ============ */
-/* .lift travels from the slot to the deck along one straight line. The tether is drawn in screen space.
-   A box shows two faces: the lid (top) and the front face. There are no side faces. */
-.row.m{transform-style:preserve-3d}
-.lift{position:absolute;left:0;top:0;width:var(--lw);height:32px;transform-style:preserve-3d;pointer-events:none;
-  transition:transform 440ms var(--ease-sink) var(--dly,0ms),width 320ms var(--ease-lift)}
-.row.up .lift{transition:transform 720ms var(--ease-rise) var(--dly,0ms),width 320ms var(--ease-lift)}
-.row.closed .lift{width:44px}
-.riser{position:absolute;inset:0;transform-style:preserve-3d;transform:translateZ(0);transition:transform 420ms cubic-bezier(.3,1.4,.5,1)}
-.row.focus .riser{transform:translateZ(var(--focus-dz))}
-.lift .face{position:absolute;opacity:0;transition:opacity 160ms linear calc(var(--dly,0ms) + 320ms)}
-.row.up .lift .face{opacity:1;transition:opacity 140ms linear var(--dly,0ms)}
-.lift .lid{left:0;top:0;width:100%;height:100%;transform:translateZ(var(--box-h));display:flex;align-items:center;gap:2px;padding:0 5px 0 0;
-  border:1px solid var(--c);border-radius:var(--r-s);background:var(--card-face);box-shadow:var(--face-light);transition:opacity 140ms linear var(--dly,0ms),border-color var(--dur-hover)}
-.row.up .lift .lid{pointer-events:auto}
-.row.up .lift .lid:hover,.row.peek .lift .lid{border-color:color-mix(in srgb,var(--c) 55%,var(--light))}
-.lift .front{left:0;top:100%;width:100%;height:var(--box-h);transform-origin:50% 0;transform:translateZ(var(--box-h)) rotateX(-90deg);
-  border-radius:0 0 var(--r-s) var(--r-s);background:color-mix(in srgb,var(--c) var(--front-mix),var(--tn-black))}
-/* the focus box floats higher; its shadow stays on the deck */
-.lift .fshadow{left:3px;top:6px;right:3px;bottom:-4px;border-radius:var(--r-m);background:var(--shade);filter:blur(6px);transform:translateZ(.5px);opacity:0 !important}
-.row.up.focus .lift .fshadow{opacity:.9 !important}
-.lid .ptr{position:absolute;left:1px;top:50%;margin-top:-6px;opacity:0;transition:opacity var(--dur-hover)}
-.row.focus .lid .ptr{opacity:1}
-.tmain{flex:1 1 auto;min-width:0;height:100%;padding:0 4px 0 13px;display:flex;align-items:center;border:0;border-radius:var(--r-s);background:transparent;cursor:pointer;text-align:left}
-.tmain:focus-visible{outline-offset:-3px}
-.ln{min-width:0;font:var(--fw-bold) var(--fs-code-l)/15px var(--font-code);color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:opacity var(--dur-pop)}
-.row.closed .ln,.row.closed .lid .ptr{opacity:0}
-.cfold{flex:0 0 18px;width:18px;height:18px;padding:0;display:grid;place-items:center;border:0;border-radius:var(--r-xs);background:transparent;color:var(--c);cursor:pointer;
-  opacity:0;transition:opacity var(--dur-hover),background-color var(--dur-hover)}
-.cfold .ic{width:13px;height:13px}
-.lid:hover .cfold,.lid:focus-within .cfold,.row.closed .cfold,.row.focus .cfold{opacity:1}
-.cfold:hover{background:var(--surface-hover)}
-.stepno{position:absolute;right:-9px;top:-10px;display:none;height:16px;padding:0 5px;border-radius:var(--r-s);background:var(--step);color:var(--on-accent);
-  box-shadow:var(--badge-shadow);font:var(--fw-bold) var(--fs-code-s)/16px var(--font-code);white-space:nowrap}
-.row.focus .stepno{display:block}
-/* focus box: a double border, fg inside and cluster color outside, plus the blue pointer */
-.row.focus .lift .lid{border-color:var(--light);box-shadow:var(--face-light-hot);outline:1px solid var(--c);outline-offset:2px}
+.spill{min-width:22px;height:18px;padding:0 5px;border:1px solid color-mix(in srgb,var(--c) 70%,transparent);border-radius:var(--r-s);background:transparent;
+  font:var(--fs-ui-s)/16px var(--font-code);color:var(--ink);cursor:pointer;pointer-events:auto;transition:border-color var(--dur-hover),background-color var(--dur-hover)}
+.spill:hover{border-color:var(--c);background:color-mix(in srgb,var(--c) 16%,transparent)}
 
 /* ============ deck (one per cluster) ============ */
-.slab{position:absolute;left:0;top:0;transform-style:preserve-3d;pointer-events:none;
+.deckcam{position:absolute;left:0;top:0;width:0;height:0;transform-style:preserve-3d;transform-origin:0 0;pointer-events:none;
   transition:transform var(--dur-layout) var(--ease-lift)}
-.slab.noanim,.slab.noanim *{transition:none !important}
+.noanim,.noanim *{transition:none !important}
+.slab{position:absolute;left:0;top:0;transform-style:preserve-3d;pointer-events:none}
 .slab .shadow{position:absolute;inset:0;border-radius:var(--r-l);background:var(--shade);filter:blur(16px);
   transform:translate3d(0,var(--shadow-dy),.3px) scale(.97);opacity:0;transition:opacity 420ms linear}
 .slab.up .shadow{opacity:1;transition:opacity 620ms linear 140ms}
@@ -264,7 +153,6 @@ body.lifted .elbow{border-color:var(--line-faint)}
 .slab.up .deck{transform:translateZ(var(--deck-z));transition:transform 700ms var(--ease-slab)}
 .deck>div{position:absolute;opacity:0;transition:opacity 260ms linear 220ms}
 .slab.up .deck>div{opacity:1;transition:opacity 220ms linear}
-/* the deck is a pane: a title band with the cluster badge, then the body */
 .dtop{inset:0;border:1px solid var(--c);border-radius:var(--r-m);
   background:
     linear-gradient(color-mix(in srgb,var(--c) 34%,var(--deck-ground)),color-mix(in srgb,var(--c) 34%,var(--deck-ground))) top left / 100% 36px no-repeat,
@@ -275,58 +163,69 @@ body.lifted .elbow{border-color:var(--line-faint)}
 .dlabel{position:absolute;left:9px;top:8px;max-width:calc(100% - 18px);height:20px;padding:0 8px;display:flex;align-items:center;gap:9px;
   border-radius:var(--r-s);background:var(--c);white-space:nowrap;font:var(--fw-bold) var(--fs-ui) var(--font-code);color:var(--on-accent)}
 .dlabel .dname{min-width:0;overflow:hidden;text-overflow:ellipsis}
-.dlabel .dcount{flex:0 0 auto;font-weight:400;font-size:var(--fs-ui-s)}
 
-/* ============ connectors ============ */
-/* One screen-space layer over the map, inside the stage, so the sidebar reading mask applies.
-   The script draws every connector each frame from the on-screen rects of its two nodes. --lk is the camera scale. */
-.links{position:absolute;left:0;top:0;width:100%;height:100%;overflow:visible;pointer-events:none;--lk:1}
-.links>.base,.links>.int{opacity:0;transition:opacity var(--dur-state)}
-.links>.base.show,.links>.int.show{opacity:1}
-.e{fill:none;stroke-linecap:butt}
-.e.int{stroke:var(--edge-air);stroke-width:calc(1.4px * var(--lk))}
-.e.int.hot{stroke:var(--edge-air-hot);stroke-width:calc(2.2px * var(--lk))}
-.e.ext{stroke:var(--edge);stroke-width:calc(1.5px * var(--lk))}
-.enode{fill:var(--edge);r:calc(2.5px * var(--lk))}
-.ah-edge{fill:var(--edge)}
-.ah-air{fill:var(--edge-air-hot)}
-/* tether: slot socket to box, in the cluster color; the focus tether is light and thicker */
-.tether{display:none}
-.tether path{fill:none;stroke:color-mix(in srgb,var(--c) 80%,var(--light));stroke-width:calc(2px * var(--lk));stroke-linecap:butt}
-.tether circle{fill:var(--c);r:calc(3px * var(--lk))}
-.tether.focus path{stroke:var(--light);stroke-width:calc(3px * var(--lk))}
+/* ============ lifted boxes: a lid and a front face ============ */
+.mbox{position:absolute;left:0;top:0;width:var(--lw);height:var(--bh);transform-style:preserve-3d;pointer-events:none;
+  transition:transform 440ms var(--ease-sink) var(--dly,0ms),width 320ms var(--ease-lift)}
+.mbox.up{transition:transform 720ms var(--ease-rise) var(--dly,0ms),width 320ms var(--ease-lift)}
+.riser{position:absolute;inset:0;transform-style:preserve-3d;transform:translateZ(0);transition:transform 420ms cubic-bezier(.3,1.4,.5,1)}
+.mbox.focus .riser{transform:translateZ(var(--focus-dz))}
+.mbox .face{position:absolute;opacity:0;transition:opacity 160ms linear calc(var(--dly,0ms) + 320ms)}
+.mbox.up .face{opacity:1;transition:opacity 140ms linear var(--dly,0ms)}
+.mbox .lid{left:0;top:0;width:100%;height:100%;transform:translateZ(var(--box-h));display:flex;align-items:center;gap:2px;padding:0 7px 0 0;
+  border:1px solid var(--c);border-radius:var(--r-s);background:var(--card-face);box-shadow:var(--face-light);transition:opacity 140ms linear var(--dly,0ms),border-color var(--dur-hover)}
+.mbox.up .lid{pointer-events:auto}
+.mbox.up .lid:hover{border-color:color-mix(in srgb,var(--c) 55%,var(--light))}
+.mbox .front{left:0;top:100%;width:100%;height:var(--box-h);transform-origin:50% 0;transform:translateZ(var(--box-h)) rotateX(-90deg);
+  border-radius:0 0 var(--r-s) var(--r-s);background:color-mix(in srgb,var(--c) var(--front-mix),var(--tn-black))}
+.mbox .fshadow{left:3px;top:6px;right:3px;bottom:-4px;border-radius:var(--r-m);background:var(--shade);filter:blur(6px);transform:translateZ(.5px);opacity:0 !important}
+.mbox.up.focus .fshadow{opacity:.9 !important}
+.lid .ptr{position:absolute;left:1px;top:50%;margin-top:-6px;opacity:0;transition:opacity var(--dur-hover)}
+.mbox.focus .lid .ptr{opacity:1}
+.tmain{flex:1 1 auto;min-width:0;height:100%;padding:0 4px 0 13px;display:flex;flex-direction:column;justify-content:center;align-items:flex-start;
+  border:0;border-radius:var(--r-s);background:transparent;cursor:pointer;text-align:left}
+.tmain:focus-visible{outline-offset:-3px}
+.lp{display:none;max-width:100%;font:var(--fs-ui-s)/13px var(--font-code);color:var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mbox.away .lp{display:block}
+.ln{max-width:100%;min-width:0;font:var(--fw-bold) var(--fs-code-l)/15px var(--font-code);color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sn{flex:0 0 auto;font:var(--fs-ui-s)/16px var(--font-code);color:var(--dim)}
+.mbox.focus .sn{visibility:hidden}
+.stepno{position:absolute;right:-9px;top:-10px;display:none;height:16px;padding:0 5px;border-radius:var(--r-s);background:var(--step);color:var(--on-accent);
+  box-shadow:var(--badge-shadow);font:var(--fw-bold) var(--fs-code-s)/16px var(--font-code);white-space:nowrap}
+.mbox.focus .stepno{display:block}
+.mbox.focus .lid{border-color:var(--light);box-shadow:var(--face-light-hot);outline:1px solid var(--c);outline-offset:2px}
 
-/* ============ arrow: focus box to stack ============ */
-/* Over the right column, so the head reaches the stack box. Screen space, drawn each frame. */
-.arrow-layer{position:fixed;left:0;top:0;width:100vw;height:100vh;pointer-events:none;z-index:7;overflow:visible;transition:opacity 120ms linear}
-.arrow-layer.away{opacity:0}
-.arrow-layer .arr{fill:none;stroke:var(--cc);stroke-width:1.5;stroke-linecap:butt;stroke-dasharray:1 1;stroke-dashoffset:1;opacity:0;
-  transition:stroke-dashoffset 640ms var(--ease-lift),opacity 180ms}
-.arrow-layer .head,.arrow-layer .dot{fill:var(--cc);opacity:0;transition:opacity 180ms}
-.arrow-layer.on .arr{stroke-dashoffset:0;opacity:1}
-.arrow-layer.on .head{opacity:1;transition-delay:480ms}
-.arrow-layer.on .dot{opacity:1}
+/* ============ connectors: three at most, in screen space, from the rects they join ============ */
+.links{position:fixed;inset:0;width:100vw;height:100vh;z-index:7;pointer-events:none;overflow:visible;--lk:1}
+/* (a) guide: the explorer row's tree guide, continued straight into the file box */
+.guide{display:none}
+.guide path{fill:none;stroke:var(--line);stroke-width:1px;stroke-linecap:butt;stroke-linejoin:round}
+/* (b) tether: the current slot to the current box, the arrow's curve and stroke in the cluster color */
+.tether{display:none;--c:var(--cc)}
+.tether .tp{fill:none;stroke:var(--c);stroke-width:1.5;stroke-linecap:butt}
+.tether .td{fill:var(--c)}
+/* (c) stack arrow: the current box to the code header, in the accent. Connectors never animate: drawn at their final shape. */
+.arrowg.away{display:none}
+.arrowg .arr{fill:none;stroke:var(--accent);stroke-width:1.5;stroke-linecap:butt}
+.arrowg .head,.arrowg .dot{fill:var(--accent)}
 
-/* ============ sidebar (transparent: no panel, no blur) ============ */
+/* ============ sidebar: the transparent code explorer ============ */
 .sidebar{position:fixed;left:0;top:0;bottom:0;width:var(--sb);padding:14px 8px 16px 12px;z-index:5;pointer-events:none;display:flex;flex-direction:column;background:transparent}
 .sidebar,.sidebar *{text-shadow:var(--text-halo)}
-.sb-head{margin:0 0 10px 12px;display:flex}
-/* the list title badge of terminal list views */
-.sb-title{display:inline-flex;align-items:center;height:20px;padding:0 8px;border-radius:var(--r-s);background:var(--accent);
-  font:var(--fw-bold) var(--fs-code) var(--font-code);color:var(--on-accent);text-shadow:none}
+.sb-head{margin:0 0 10px 12px;display:flex;pointer-events:auto}
+.sb-title{display:inline-flex;align-items:center;gap:6px;height:20px;padding:0 8px;border:0;border-radius:var(--r-s);background:var(--accent);cursor:pointer;
+  font:var(--fw-bold) var(--fs-code) var(--font-code);color:var(--on-accent);text-shadow:none;transition:filter var(--dur-hover)}
+.sb-title:hover{filter:brightness(1.12)}
+.sb-title .ic{width:12px;height:12px}
 .sb-tree{position:relative;overflow:auto;pointer-events:auto;max-height:calc(100vh - 60px);padding:2px 4px 4px 0;scrollbar-width:thin;scrollbar-color:var(--line-soft) transparent}
-@media (max-width:1080px){
-  .sb-tree{max-height:calc(100vh - 60px - 107px - var(--controls-bottom) - 16px)}
-  body.ann-open .sb-tree{max-height:calc(100vh - 60px - 179px - var(--controls-bottom) - 16px)}
-}
 .sl{position:relative;display:flex;align-items:center;width:100%;height:18px;padding:0 4px 0 12px;border:0;border-radius:var(--r-xs);background:transparent;
   white-space:nowrap;text-align:left;font:var(--fs-code) var(--font-code);color:var(--dim);cursor:pointer;transition:color var(--dur-state)}
+.sl[hidden]{display:none}
 .sl.dir{color:var(--dir)}
 .sl.file{color:var(--ink)}
 .sl:focus-visible{outline-offset:-1px}
 .sl .ptr{position:absolute;left:0;top:3px;opacity:0}
 .sl.cur .ptr{opacity:1}
-/* tree guides, drawn as box rules: pipe, tee, and rounded end */
 .gds{display:flex;align-self:stretch;flex:0 0 auto}
 .gd{position:relative;width:14px;flex:0 0 14px}
 .gd::before,.gd::after{content:"";position:absolute;left:4px;border-color:var(--line);border-style:solid;border-width:0}
@@ -336,21 +235,16 @@ body.lifted .elbow{border-color:var(--line-faint)}
 .snm{overflow:hidden;text-overflow:ellipsis;flex:0 0 auto;max-width:100%;margin-left:3px}
 .sl:hover .snm{text-decoration:underline;text-decoration-color:var(--line-strong);text-underline-offset:3px}
 .meta{display:inline-flex;align-items:center;gap:6px;flex:0 0 auto;margin-left:6px}
-.cnt{font:var(--fs-ui-s) var(--font-code);color:var(--dim);display:none}
 .dots{display:inline-flex;gap:3px}
-.dots i{width:6px;height:6px;border-radius:var(--r-xs);background:var(--c);display:none}
-.dots i.on{order:-1;display:block}
-.sl:hover .cnt,.sl:focus-visible .cnt{display:inline}
-.sl:hover .dots i,.sl:focus-visible .dots i{display:block}
-.sfn{flex:0 1 auto;min-width:0;margin-left:7px;overflow:hidden;text-overflow:ellipsis;font-size:var(--fs-code-s);color:var(--cc)}
+.dots i{width:6px;height:6px;border-radius:var(--r-xs);background:var(--c);opacity:.42}
+.dots i.on{order:-1;opacity:1}
+.dnote{margin-left:8px;font-size:var(--fs-ui-s);color:var(--dim)}
+.dnote:empty{display:none}
 body.flow .sl.inact{color:var(--dim)}
 body.flow .sl.inc{color:var(--ink)}
 .sl.cur .snm{color:var(--cc);font-weight:var(--fw-bold)}
-/* viewport bracket: the part of the tree the map shows now */
-.vp{position:absolute;left:5px;top:0;width:1px;height:1px;background:color-mix(in srgb,var(--accent) 60%,transparent);pointer-events:none;
-  transform-origin:0 0;transform:scaleY(0);transition:transform 420ms var(--ease-lift),opacity var(--dur-state)}
 
-/* ============ shared controls: buttons, badges ============ */
+/* ============ shared controls ============ */
 .tbtn{height:26px;min-width:30px;padding:0 10px;display:inline-grid;place-items:center;border:0;border-radius:0;background:transparent;
   font:var(--fs-ui) var(--font-code);color:var(--ink-2);cursor:pointer;transition:background-color var(--dur-hover),color var(--dur-hover)}
 .tbtn.icon{padding:0}
@@ -360,6 +254,8 @@ body.flow .sl.inc{color:var(--ink)}
 .tbtn:hover{background:var(--surface-hover);color:var(--ink)}
 .tbtn:active{background:var(--surface-press)}
 .tbtn[aria-expanded="true"]{background:var(--accent);color:var(--on-accent);box-shadow:none}
+.tbtn[aria-pressed="true"]{background:color-mix(in srgb,var(--accent) 16%,transparent);color:var(--accent)}
+.tbtn:disabled{opacity:.42;cursor:default;background:transparent;color:var(--ink-2)}
 .tbtn:focus-visible{outline-offset:-2px}
 .cbtn{flex:0 0 28px;width:28px;height:28px;padding:0;display:grid;place-items:center;border:1px solid var(--line-soft);border-radius:var(--r-m);background:transparent;cursor:pointer;
   color:var(--ink);transition:border-color var(--dur-hover),background-color var(--dur-hover),color var(--dur-hover),opacity var(--dur-hover)}
@@ -368,14 +264,14 @@ body.flow .sl.inc{color:var(--ink)}
 .cbtn:disabled{opacity:.42;cursor:default;border-color:var(--line-faint);background:transparent}
 .cbtn.quiet{border-color:transparent;color:var(--ink-2)}
 .cbtn.quiet:hover{border-color:var(--line-soft);color:var(--ink)}
-/* title badge: the pane title of terminal list views */
-.pbadge{display:inline-flex;align-items:center;max-width:100%;height:20px;padding:0 8px;border-radius:var(--r-s);background:var(--c,var(--accent));
-  font:var(--fw-bold) var(--fs-code) var(--font-code);color:var(--on-accent);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.pbadge span{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.pbadge{display:inline-flex;align-items:center;gap:6px;max-width:100%;height:20px;padding:0 8px;border:0;border-radius:var(--r-s);background:var(--c,var(--accent));
+  font:var(--fw-bold) var(--fs-code) var(--font-code);color:var(--on-accent);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;transition:filter var(--dur-hover)}
+.pbadge:hover{filter:brightness(1.12)}
+.pbadge .ic{width:12px;height:12px}
+.pane{position:relative;border:1px solid var(--line-strong);border-radius:var(--r-l);background:var(--surface-panel)}
 
-/* ============ map tools and key ============ */
-/* one segmented bar: fit, zoom out, zoom level, zoom in, key */
-.maptools{position:fixed;z-index:8;top:var(--gap);left:calc(var(--sb) + 14px);display:flex;align-items:center;
+/* ============ map tools and pickers: the key popover and the list popovers ============ */
+.maptools{position:fixed;z-index:9;top:var(--gap);left:var(--frame-l);display:flex;align-items:center;
   border:1px solid var(--line-soft);border-radius:var(--r-m);background:var(--surface-panel)}
 .zl{min-width:46px;height:26px;display:grid;place-items:center;box-shadow:inset 1px 0 0 var(--line-faint);font:var(--fs-ui-s) var(--font-code);color:var(--dim)}
 .pop{position:fixed;left:0;top:0;z-index:20;pointer-events:none;opacity:0;visibility:hidden;
@@ -396,147 +292,25 @@ body.flow .sl.inc{color:var(--ink)}
 .kp-c:hover .rng,.kp-c.on .rng{color:var(--ink-2)}
 .kp-list{margin:10px 0 0;padding:10px 0 0;border-top:1px solid var(--line-faint);list-style:none;display:grid;gap:8px}
 .kp-list li{display:grid;grid-template-columns:30px 1fr;gap:10px;align-items:start;font:var(--fs-ui-s)/1.5 var(--font-code);color:var(--ink-2)}
-.kp-edge{margin-top:4px}
-.kp-edge path{stroke:var(--edge);stroke-width:1.5;fill:none}
-.kp-edge .ah-edge{stroke:none}
 .kp-slot{width:26px;height:12px;margin-top:3px;border:1px dashed var(--line-strong);border-radius:var(--r-xs);background:var(--surface-recess);box-shadow:var(--slot-recess)}
 .kp-lift{position:relative;width:24px;height:10px;margin-top:2px;border-radius:var(--r-xs);border:1px solid var(--ink-2);background:var(--card-face);box-shadow:var(--key-lift-shadow)}
 .kp-lift::after{content:"";position:absolute;left:-1px;right:-1px;top:100%;height:4px;border-radius:0 0 var(--r-xs) var(--r-xs);background:color-mix(in srgb,var(--ink-2) 40%,var(--tn-black))}
+.kp-g{margin-top:5px;overflow:visible}
+.kp-g .g1{stroke:var(--line);stroke-width:1;fill:none}
+.kp-g .g2{stroke:color-mix(in srgb,var(--ink-2) 80%,var(--light));stroke-width:2;fill:none}
+.kp-g .g3{stroke:var(--accent);stroke-width:1.5;fill:none}
+.kp-g circle{fill:var(--ink-2)} .kp-g .h3{fill:var(--accent)}
 .kp-keys{margin:10px 0 0;padding:10px 0 0;border-top:1px solid var(--line-faint);display:grid;grid-template-columns:48px 1fr;gap:3px 10px;font:var(--fs-ui-s)/18px var(--font-code);color:var(--ink-2)}
 .kp-keys dt{display:flex;align-items:center;gap:1px}
 .kp-keys dd{margin:0}
 kbd{display:inline-flex;align-items:center;gap:1px;height:16px;padding:0 4px;border-radius:var(--r-xs);background:var(--key-bg);font:var(--fw-bold) var(--fs-ui-s) var(--font-code);color:var(--accent)}
-kbd .ic{width:12px;height:12px}
-/* theme switch: an inset segmented row; the pressed variant is filled */
 .kp-theme{margin:10px 0 0;padding:10px 0 0;border-top:1px solid var(--line-faint);display:grid;grid-template-columns:48px 1fr;gap:0 10px;align-items:center;
   font:var(--fs-ui-s)/18px var(--font-code);color:var(--ink-2)}
 .seg{display:flex;gap:2px;width:max-content;padding:3px;border:1px solid var(--line-soft);border-radius:var(--r-m)}
 .seg-b{height:20px;padding:0 9px;border:0;border-radius:var(--r-s);background:transparent;font:var(--fs-ui-s) var(--font-code);color:var(--ink-2);cursor:pointer;
   transition:background-color var(--dur-hover),color var(--dur-hover)}
 .seg-b:hover{background:var(--surface-hover);color:var(--ink)}
-.seg-b:active{background:var(--surface-press)}
 .seg-b[aria-pressed="true"]{background:var(--accent);color:var(--on-accent);font-weight:var(--fw-bold)}
-.seg-b:focus-visible{outline-offset:1px}
-
-/* ============ right column: callout and extracted stack ============ */
-.rcol{position:fixed;z-index:6;top:var(--gap);right:var(--gap);bottom:var(--gap);width:var(--rc);display:flex;flex-direction:column;gap:12px;pointer-events:none}
-.rcol>*{pointer-events:auto}
-.pane{position:relative;border:1px solid var(--line-strong);border-radius:var(--r-l);background:var(--surface-panel)}
-.callout{flex:0 0 auto;padding:10px 14px 12px;border-color:color-mix(in srgb,var(--cc) 60%,var(--line-strong));transition:border-color var(--dur-state)}
-/* a notch that points back to the map */
-.callout::before{content:"";position:absolute;left:-6px;top:17px;width:10px;height:10px;background:var(--surface-panel);
-  border:solid color-mix(in srgb,var(--cc) 60%,var(--line-strong));border-width:0 0 1px 1px;transform:rotate(45deg);transition:border-color var(--dur-state)}
-.co-desc{margin:9px 0 0;font:var(--fs-ui)/1.55 var(--font-code);color:var(--ink)}
-.co-meta{margin:8px 0 0;font:var(--fs-ui-s)/1.45 var(--font-code);color:var(--dim)}
-.swap{animation:swap 240ms var(--ease-out)}
-@keyframes swap{from{opacity:.2;transform:translateY(3px)}to{opacity:1;transform:none}}
-.dock{flex:1 1 auto;min-height:120px;display:flex;flex-direction:column;padding:10px 12px 6px}
-.dk-head{flex:0 0 auto;display:flex;justify-content:space-between;align-items:center;gap:10px}
-.dk-head .pbadge{flex:0 0 auto}
-.dk-span{min-width:0;overflow:hidden;text-overflow:ellipsis;font:var(--fs-ui-s) var(--font-code);color:var(--dim);white-space:nowrap}
-@media (max-width:1200px){.dk-long{display:none}}
-.dk-list{flex:1 1 auto;min-height:0;margin:6px -6px 0;padding:8px 6px 4px;overflow:auto;list-style:none;scrollbar-width:thin;scrollbar-color:var(--line-soft) transparent}
-.dk-empty{margin:10px 0 0;font:var(--fs-ui)/1.55 var(--font-code);color:var(--dim)}
-.ditem{display:grid;grid-template-columns:minmax(0,188px) minmax(0,1fr);gap:12px;align-items:center;padding:0 0 14px}
-/* a stack box: the same two faces as the map boxes, the lid and the front face */
-.dbox{position:relative;width:100%;height:36px;margin:0;padding:0 8px 0 14px;display:flex;flex-direction:column;justify-content:center;align-items:flex-start;
-  border:1px solid var(--c);border-radius:var(--r-s);background:var(--card-face);box-shadow:var(--face-light);text-align:left;cursor:pointer;
-  transition:transform var(--dur-state) var(--ease-out),border-color var(--dur-hover)}
-.dbox::after{content:"";position:absolute;left:-1px;right:-1px;top:calc(100% + 1px);height:9px;border-radius:0 0 var(--r-s) var(--r-s);
-  background:color-mix(in srgb,var(--c) var(--front-mix),var(--tn-black));transform-origin:50% 0;transform:scaleY(.67);transition:transform var(--dur-state) var(--ease-out)}
-.dbox:hover{border-color:color-mix(in srgb,var(--c) 55%,var(--light))}
-.dbox:focus-visible{outline-offset:3px}
-.dbox .ptr{position:absolute;left:1px;top:50%;margin-top:-6px;opacity:0}
-.dbox .lp{max-width:100%;font:var(--fs-ui-s)/13px var(--font-code);color:var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.dbox .ln{max-width:100%}
-.ditem.later .dbox{border-color:color-mix(in srgb,var(--c) 45%,var(--line-soft))}
-.ditem.later .dbox .ln{color:var(--ink-2)}
-.ditem.focus .dbox{transform:translateY(-3px);border-color:var(--light);box-shadow:var(--face-light-hot);outline:1px solid var(--c);outline-offset:2px}
-.ditem.focus .dbox::after{transform:scaleY(1)}
-.ditem.focus .dbox .ptr{opacity:1}
-.pills{display:flex;flex-wrap:wrap;gap:4px}
-.pill{min-width:24px;height:18px;padding:0 5px;border:1px solid var(--line-soft);border-radius:var(--r-s);background:transparent;
-  font:var(--fs-ui-s)/16px var(--font-code);color:var(--dim);cursor:pointer;transition:border-color var(--dur-hover),color var(--dur-hover),background-color var(--dur-hover)}
-.pill:hover{border-color:var(--line-strong);color:var(--ink)}
-.pill.run{border-color:color-mix(in srgb,var(--c) 70%,transparent);color:var(--ink)}
-.pill.now{border-color:var(--step);background:var(--step);color:var(--on-accent);font-weight:var(--fw-bold)}
-
-/* ============ popovers: box details and step tips ============ */
-.fn-pop{max-width:360px;padding:6px 10px 7px}
-.fn-pop::after{content:"";position:absolute;width:8px;height:8px;background:var(--surface-pop);border:1px solid var(--line-strong);transform:rotate(45deg)}
-.fn-pop.at-left::after{right:-5px;top:50%;margin-top:-4px;border-left:0;border-bottom:0}
-.fn-pop.at-top::after{bottom:-5px;left:14px;border-top:0;border-left:0}
-.fn-pop.at-bottom::after{top:-5px;left:14px;border-right:0;border-bottom:0}
-.fp-name{font:var(--fw-bold) var(--fs-code) var(--font-code);color:var(--ink)}
-.fp-path{font:var(--fs-code-s)/16px var(--font-code);color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.fp-meta{margin-top:1px;font:var(--fs-ui-s)/16px var(--font-code);color:var(--ink-2);white-space:nowrap}
-.fp-meta b{color:var(--step);font-weight:var(--fw-bold)}
-.fp-sep{display:inline-block;width:1px;height:10px;margin:0 8px;background:var(--line-strong);vertical-align:-1px}
-.tip{position:fixed;left:0;top:0;z-index:21;max-width:380px;padding:3px 8px;display:flex;align-items:center;gap:7px;white-space:nowrap;
-  font:var(--fs-ui-s)/16px var(--font-code);color:var(--ink)}
-.tip .sw{width:8px;height:8px;flex:0 0 auto;border-radius:var(--r-xs);background:var(--c)}
-.tip b{color:var(--step)}
-.tip span{overflow:hidden;text-overflow:ellipsis}
-
-/* ============ flow controls (fixed size per state) ============ */
-.controls{position:fixed;z-index:7;bottom:var(--controls-bottom);left:var(--controls-x);
-  width:var(--controls-w);padding:10px 14px 8px;overflow:hidden;border:1px solid var(--line-strong);border-radius:var(--r-l);
-  background:var(--surface-panel);display:grid;grid-template-rows:28px 20px var(--ann-h) 12px;row-gap:3px;
-  transition:grid-template-rows var(--dur-drawer) var(--ease-out)}
-.controls.ann-open{grid-template-rows:28px 20px var(--ann-h-open) 12px}
-.c1{display:flex;align-items:center;gap:5px;min-width:0}
-.counter{flex:0 0 133px;margin-left:8px;font:var(--fs-ui) var(--font-code);color:var(--ink-2);white-space:nowrap}
-/* active cluster: a status badge in the cluster color */
-.chip{flex:1 1 auto;min-width:0;display:flex;align-items:center;white-space:nowrap;font:var(--fw-bold) var(--fs-ui-s) var(--font-code)}
-.chip span{min-width:0;max-width:100%;height:19px;padding:0 7px;display:block;overflow:hidden;text-overflow:ellipsis;line-height:19px;border-radius:var(--r-s);background:var(--c);color:var(--on-accent)}
-.chip.none span{padding:0 6px;background:transparent;border:1px dashed var(--line-strong);line-height:17px;color:var(--dim);font-weight:400}
-.c-title{display:flex;align-items:center;min-width:0;font:var(--fw-bold) var(--fs-title)/20px var(--font-code)}
-.c-title .ctt{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-/* the cursor: a blue block after the step title. It blinks, and the blink restarts on each step. */
-.cursor{flex:0 0 auto;width:8px;height:15px;margin-left:3px;border-radius:1px;background:var(--accent);animation:blink var(--blink) steps(1,end) infinite}
-@keyframes blink{50%{opacity:0}}
-.c-ann-row{display:grid;grid-template-columns:minmax(0,1fr) auto;column-gap:6px;align-items:start;min-height:0}
-.c-ann-box{min-width:0;overflow:hidden}
-.c-node{display:none;font:var(--fs-code-s)/16px var(--font-code);color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.c-node b{font-weight:var(--fw-bold);color:var(--ink)}
-.c-ann{margin:0;font:var(--fs-ui)/18px var(--font-code);color:var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.controls.ann-open .c-node{display:block}
-.controls.ann-open .c-ann{white-space:normal;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical}
-#annBtn{flex:none;width:22px;height:20px;margin-top:-1px}
-#annBtn .ic{transition:transform var(--dur-drawer) var(--ease-out)}
-#annBtn[aria-expanded="true"] .ic{transform:rotate(180deg)}
-/* step strip: one cell per step */
-.ticks{display:flex;gap:2px;height:12px;align-items:center}
-.tick{flex:1 1 0;min-width:0;height:12px;padding:0;border:0;background:transparent;cursor:pointer;position:relative}
-.tick::before{content:"";position:absolute;left:0;right:0;top:2px;height:8px;border-radius:1px;background:color-mix(in srgb,var(--c) 26%,transparent);
-  transform:scaleY(.5);transition:background-color var(--dur-hover),transform var(--dur-hover) var(--ease-out)}
-.tick.past::before{background:color-mix(in srgb,var(--c) 64%,transparent)}
-.tick:hover::before{transform:scaleY(.75);background:var(--c)}
-.tick.now::before{transform:none;background:var(--c)}
-.tick:focus-visible{outline-offset:1px}
-
-/* ============ help line ============ */
-.help{position:fixed;z-index:7;bottom:11px;left:calc(var(--controls-x) + 15px);width:calc(var(--controls-w) - 30px);margin:0;display:flex;align-items:center;white-space:nowrap;overflow:hidden;
-  font:var(--fs-ui-s)/16px var(--font-code);color:var(--dim);text-shadow:var(--text-halo)}
-.help .hk{display:inline-flex;align-items:center;margin-right:.6ch;color:var(--keyword)}
-.help .hk .ic{width:11px;height:11px}
-.help .hsep{width:3px;height:3px;margin:0 1.2ch;border-radius:var(--r-pill);background:var(--line-strong)}
-
-/* ============ load and motion rules ============ */
-/* restored state appears in place on load: no slide, no grow */
-body.booting .controls,body.booting .controls *{transition:none !important}
-@media (prefers-reduced-motion:reduce){
-  *,*::before,*::after{transition-duration:0ms !important;transition-delay:0ms !important;animation-duration:0ms !important;animation-delay:0ms !important}
-  .cursor{animation:none}
-}
-
-/* ============ pickers and states ============ */
-/* A badge that opens a list: the codebase badge in the sidebar, the flow badge in the callout. */
-.sb-head{pointer-events:auto}
-button.sb-title,button.pbadge{gap:6px;border:0;cursor:pointer;transition:filter var(--dur-hover)}
-button.sb-title:hover,button.pbadge:hover{filter:brightness(1.12)}
-button.sb-title:focus-visible,button.pbadge:focus-visible{outline-offset:2px}
-.sb-title .ic,.pbadge .ic{width:12px;height:12px;flex:0 0 auto}
 .pickpop{width:320px;max-height:min(420px,calc(100vh - 80px));overflow:auto;padding:6px;pointer-events:auto;scrollbar-width:thin;scrollbar-color:var(--line-soft) transparent}
 .pk-hd{margin:0 0 4px;padding:2px 6px 0;font:var(--fs-ui-s)/16px var(--font-code);color:var(--dim)}
 .pk-list{margin:0;padding:0;list-style:none;display:grid;gap:1px}
@@ -547,14 +321,112 @@ button.sb-title:focus-visible,button.pbadge:focus-visible{outline-offset:2px}
 .pk-item[aria-current="true"] .pk-name{color:var(--accent);font-weight:var(--fw-bold)}
 .pk-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:var(--fs-code)}
 .pk-meta{grid-column:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dim)}
+/* A stale flow carries a flag at the right of its row. */
 .pk-flag{grid-column:2;grid-row:1 / span 2;font-size:var(--fs-ui-s);color:var(--warn)}
-/* Stale flows and flows with no clusters say so in the callout. */
-.co-warn{margin:8px 0 0;font:var(--fs-ui-s)/1.45 var(--font-code);color:var(--warn)}
-.co-meta code{font:inherit;color:var(--keyword)}
-/* Loading: one terminal line in the map area. Errors and empty states use the callout. */
-.status{position:fixed;z-index:4;left:calc(var(--sb) + 24px);right:calc(var(--rc) + 36px);top:40%;display:grid;justify-items:center;
-  pointer-events:none;text-align:center;font:var(--fs-ui)/1.6 var(--font-code);color:var(--ink-2);text-shadow:var(--text-halo)}
+.tip{position:fixed;left:0;top:0;z-index:21;max-width:380px;padding:3px 8px;display:flex;align-items:center;gap:7px;white-space:nowrap;
+  font:var(--fs-ui-s)/16px var(--font-code);color:var(--ink)}
+.tip .sw{width:8px;height:8px;flex:0 0 auto;border-radius:var(--r-xs);background:var(--c)}
+.tip b{color:var(--step)}
+.tip span{overflow:hidden;text-overflow:ellipsis}
+
+/* ============ top band: the flow picker and freshness beside the map tools ============ */
+.fh-top{position:fixed;z-index:8;top:var(--gap);left:var(--fh-l,560px);right:var(--frame-r);height:28px;display:flex;align-items:center;gap:12px;min-width:0}
+.fh-top .pbadge{flex:0 1 auto}
+/* The flow badge slot shrinks, so a long flow name ends in an ellipsis. */
+.fh-top #flowPick{flex:0 1 auto;min-width:0;display:flex}
+.fh-meta{flex:0 0 auto;font:var(--fs-ui-s) var(--font-code);color:var(--dim);white-space:nowrap}
+.fh-meta b{font-weight:400;color:var(--ink-2)}
+.fh-meta .fresh::before{content:"";display:inline-block;width:6px;height:6px;margin-right:6px;border-radius:var(--r-pill);background:var(--tn-green);vertical-align:1px}
+
+/* ============ code column: the step header over the code viewer ============ */
+.card{position:fixed;z-index:6;top:var(--gap);right:var(--gap);bottom:var(--gap);width:var(--rc);display:flex;flex-direction:column;overflow:hidden}
+.cd-head{flex:0 0 auto;display:flex;align-items:flex-start;gap:9px;padding:13px 16px 0}
+.cd-no{flex:0 0 auto;min-width:22px;height:20px;padding:0 6px;border-radius:var(--r-s);background:var(--step);color:var(--on-accent);box-shadow:var(--badge-shadow);
+  font:var(--fw-bold) var(--fs-code)/20px var(--font-code);text-align:center}
+.cd-title{flex:1 1 auto;min-width:0;margin:0;display:flex;align-items:center;font:var(--fw-bold) var(--fs-title)/20px var(--font-code);color:var(--ink)}
+.cd-title .ctt{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cursor{flex:0 0 auto;width:8px;height:15px;margin-left:3px;border-radius:1px;background:var(--accent);animation:blink var(--blink) steps(1,end) infinite}
+@keyframes blink{50%{opacity:0}}
+.cd-step{flex:0 0 auto;padding:8px 16px 12px}
+.cd-step.swap,.code.swap{animation:swap 240ms var(--ease-out)}
+.cd-ann{margin:0;font:var(--fs-ui)/1.6 var(--font-code);color:var(--ink)}
+.cd-facts{margin:10px 0 0;display:grid;grid-template-columns:var(--lab) minmax(0,1fr);gap:2px 0;font:var(--fs-ui-s)/1.6 var(--font-code)}
+.cd-facts dt{color:var(--dim)}
+.cd-facts dd{margin:0;min-width:0;color:var(--ink-2);overflow-wrap:anywhere}
+.ref{color:var(--ink-2)}
+.ref i{font-style:normal;color:var(--dim)}
+.ref.hit{color:var(--cc)}
+button.ref{padding:0;border:0;background:none;font:inherit;cursor:pointer;text-align:left}
+button.ref:hover{text-decoration:underline;text-underline-offset:3px}
+.sep,.none{color:var(--dim)}
+.tag{display:inline-flex;align-items:center;height:16px;margin-right:7px;padding:0 5px;border:1px solid var(--line-strong);border-radius:var(--r-s);
+  font:var(--fs-ui-s)/14px var(--font-code);color:var(--ink-2);vertical-align:1px}
+.tag.gap{border-color:var(--warn);color:var(--warn)}
+.cd-empty{margin:0;font:var(--fs-ui)/1.6 var(--font-code);color:var(--ink-2)}
+/* Loading: one terminal line at the top of the code column. */
+.status{flex:0 0 auto;display:grid;justify-items:start;padding:13px 16px 0;text-align:left;font:var(--fs-ui)/1.6 var(--font-code);color:var(--ink-2)}
+.status[hidden]{display:none}
 .status .st-line{display:flex;align-items:center;max-width:100%}
 .status .st-line span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.status .cursor{animation:blink var(--blink) steps(1,end) infinite}
-.co-desc,.co-meta{overflow-wrap:anywhere}
+/* The code viewer: the header names path:line. The gutter stays put while long lines scroll sideways. */
+.reader-head{flex:0 0 auto;height:36px;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:0 6px 0 14px;background:var(--tn-raised);border-top:1px solid var(--line-faint);border-bottom:1px solid var(--line-faint)}
+.cw-path{min-width:0;font:13px var(--font-code);color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-variant-ligatures:none}
+.cw-path .dir{color:var(--dim)}
+.cw-path .at{color:var(--tn-orange)}
+.code{--where:color-mix(in srgb,var(--tn-sel) 65%,var(--bg));flex:1 1 auto;min-height:0;position:relative;overflow:auto;padding:10px 0 28px;background:var(--bg);
+  font:13px/1.6 var(--font-code);font-variant-ligatures:none;scrollbar-width:thin;scrollbar-color:var(--line-soft) transparent}
+.code-in{position:relative;min-width:max-content}
+.gut{position:sticky;left:0;width:0;height:0;z-index:2}
+.cl{display:grid;grid-template-columns:40px 18px auto;white-space:pre}
+.cl .no,.cl .mk{position:sticky;z-index:1;background:var(--bg)}
+.cl .no{left:0;color:var(--tn-comment);text-align:right;user-select:none}
+.cl .mk{left:40px}
+.cl .tx{padding:0 12px 0 10px;color:var(--ink)}
+.cl.where,.cl.where .no,.cl.where .mk{background:var(--where)}
+.cl.where .no{color:var(--ink)}
+.cl.end .tx{color:var(--tn-comment);font-style:italic;font-size:12px}
+.mark{position:absolute;left:45px;width:4px;border:1px solid var(--tn-border-2);border-right:0;border-radius:3px 0 0 3px}
+.mark span{position:absolute;left:5px;top:50%;writing-mode:vertical-rl;transform:translateY(-50%) rotate(180deg);font-size:9.5px;line-height:1;color:var(--tn-comment);white-space:nowrap}
+.t-kw{color:var(--tn-magenta)}.t-type{color:var(--tn-cyan)}.t-fn{color:var(--tn-blue)}
+.t-com{color:var(--tn-comment);font-style:italic}.t-str{color:var(--tn-green)}
+.t-num,.t-const{color:var(--tn-orange)}.t-p,.t-attr{color:var(--dim)}
+
+/* ============ bottom bar: nav, the cluster explainer, and the strip (fixed size) ============ */
+.controls{position:fixed;z-index:7;left:var(--frame-l);right:var(--frame-r);bottom:var(--bar-bottom);height:var(--bar-h);padding:9px 14px 8px;
+  border:1px solid var(--line-strong);border-radius:var(--r-l);background:var(--surface-panel);display:grid;grid-template-rows:28px 54px 12px;row-gap:6px}
+.c1{display:flex;align-items:center;gap:5px;min-width:0}
+.counter{flex:0 0 auto;margin:0 6px 0 8px;font:var(--fs-ui) var(--font-code);color:var(--ink-2);white-space:nowrap}
+.cexpl{flex:1 1 auto;min-width:0;display:flex;align-items:center;gap:10px}
+.cexpl.swap,.c-desc.swap{animation:swap 240ms var(--ease-out)}
+.chip{flex:0 1 auto;min-width:0;display:flex;align-items:center;white-space:nowrap;font:var(--fw-bold) var(--fs-ui-s) var(--font-code)}
+.chip span{min-width:0;max-width:100%;height:19px;padding:0 7px;display:block;overflow:hidden;text-overflow:ellipsis;line-height:19px;border-radius:var(--r-s);background:var(--c);color:var(--on-accent)}
+.chip.none span{padding:0 6px;background:transparent;border:1px dashed var(--line-strong);line-height:17px;color:var(--dim);font-weight:400}
+.cmeta{flex:0 0 auto;font:var(--fs-ui-s) var(--font-code);color:var(--dim);white-space:nowrap}
+.c-desc{margin:0;min-width:0;font:var(--fs-ui)/18px var(--font-code);color:var(--ink-2);display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.ticks{display:flex;gap:2px;height:12px;align-items:center}
+.tick{flex:1 1 0;min-width:0;height:12px;padding:0;border:0;background:transparent;cursor:pointer;position:relative}
+.tick::before{content:"";position:absolute;left:0;right:0;top:2px;height:8px;border-radius:1px;background:color-mix(in srgb,var(--c) 26%,transparent);
+  transform:scaleY(.5);transition:background-color var(--dur-hover),transform var(--dur-hover) var(--ease-out)}
+.tick.past::before{background:color-mix(in srgb,var(--c) 64%,transparent)}
+.tick:hover::before{transform:scaleY(.75);background:var(--c)}
+.tick.now::before{transform:none;background:var(--c)}
+.tick:focus-visible{outline-offset:1px}
+.help{position:fixed;z-index:7;bottom:11px;left:calc(var(--frame-l) + 15px);right:var(--frame-r);margin:0;display:flex;align-items:center;white-space:nowrap;overflow:hidden;
+  font:var(--fs-ui-s)/16px var(--font-code);color:var(--dim);text-shadow:var(--text-halo)}
+.help .hk{display:inline-flex;align-items:center;margin-right:.6ch;color:var(--keyword)}
+.help .hk .ic{width:11px;height:11px}
+.help .hsep{width:3px;height:3px;margin:0 1.2ch;border-radius:var(--r-pill);background:var(--line-strong)}
+
+/* ============ full screen code: the code column takes the canvas; the explorer, the top band, and the bar stay ============ */
+.fsbtn{flex:0 0 26px;width:26px;height:26px}
+body.full .card{left:var(--frame-l);width:auto;top:var(--top-band);bottom:calc(var(--bar-bottom) + var(--bar-h) + 10px)}
+body.full .frame,body.full .cv,body.full .links{display:none}
+
+/* ============ load and motion rules ============ */
+/* Nothing on the canvas animates: every step sets the file box, the deck, and the boxes at their final place in one frame. */
+.cv,.cv *{transition:none !important;animation:none !important}
+body.booting *,body.booting *::before,body.booting *::after{transition:none !important;animation-duration:0ms !important}
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{transition-duration:0ms !important;transition-delay:0ms !important;animation-duration:0ms !important;animation-delay:0ms !important}
+  .cursor{animation:none}
+}
