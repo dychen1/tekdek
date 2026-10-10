@@ -39,7 +39,7 @@ pub fn find_sibling_program(program: &Path, name: &str) -> Option<PathBuf> {
         .find(|candidate| is_executable_file(candidate))
 }
 
-pub(super) fn program_candidates(
+fn program_candidates(
     program: &str,
     search_paths: &[PathBuf],
     extensions: &[&str],

@@ -9,7 +9,7 @@
 mod server;
 mod syntax;
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use crate::analysis::{
     fact::{AnalysisError, SemanticFact, SyntaxFacts},
@@ -32,16 +32,6 @@ impl PythonAdapter {
     #[must_use]
     pub fn new(root: PathBuf, profile: LanguageProfile) -> Self {
         Self { root, profile }
-    }
-
-    #[must_use]
-    pub fn root(&self) -> &Path {
-        &self.root
-    }
-
-    #[must_use]
-    pub fn profile(&self) -> &LanguageProfile {
-        &self.profile
     }
 }
 
