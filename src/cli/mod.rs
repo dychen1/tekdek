@@ -46,27 +46,22 @@ const ERROR_CODE: u8 = 2;
 /// Runs one command line and returns its exit code.
 pub fn run(arguments: Vec<String>, input: &mut impl Read) -> ExitCode {
     let mut arguments = arguments.into_iter();
-    match arguments.next().as_deref() {
+    let command = arguments.next();
+    let arguments: Vec<String> = arguments.collect();
+    // Detect JSON mode before parsing so invalid commands also return JSON.
+    let json = arguments.iter().any(|argument| argument == "--json");
+    let report = |(code, output): (u8, String)| emit(json, code, &output);
+    match command.as_deref() {
         // Index one codebase.
-        Some("index") => index::run(arguments),
+        Some("index") => finish(index::run(arguments.into_iter())),
         // Run one graph query; its output is one document on standard output.
-        Some("graph") => {
-            let arguments: Vec<String> = arguments.collect();
-            let json = arguments.iter().any(|argument| argument == "--json");
-            let (code, output) = graph::run(arguments);
-            emit(json, code, &output)
-        }
+        Some("graph") => report(graph::run(arguments, json)),
         // Run one flow command; its output is one document on standard output.
-        Some("flow") => {
-            let arguments: Vec<String> = arguments.collect();
-            let json = arguments.iter().any(|argument| argument == "--json");
-            let (code, output) = flow::run(arguments, input);
-            emit(json, code, &output)
-        }
+        Some("flow") => report(flow::run(arguments, json, input)),
         // Serve the viewer until the process ends.
-        Some("serve") => serve::run(arguments),
-        // Check the language servers.
-        Some("doctor") => doctor::run(arguments.collect()),
+        Some("serve") => finish(serve::run(arguments.into_iter())),
+        // Check the language servers; the report is one document on standard output.
+        Some("doctor") => report(doctor::run(arguments, json)),
         // Print every usage.
         Some("help" | "--help" | "-h") => {
             println!(
@@ -202,6 +197,14 @@ fn emit(json: bool, code: u8, output: &str) -> ExitCode {
         println!("{output}");
     }
     ExitCode::from(code)
+}
+
+/// Prints the error of a failed `index` or `serve` command and returns its exit code.
+fn finish(result: Result<(), String>) -> ExitCode {
+    match result {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(message) => emit(false, ERROR_CODE, &format!("error: {message}")),
+    }
 }
 
 /// Formats one failed command with exit code 2. JSON mode returns `{"error": message}`.

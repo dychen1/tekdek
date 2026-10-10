@@ -17,7 +17,6 @@ use std::{
     collections::BTreeMap,
     fs,
     path::{Path, PathBuf},
-    process::ExitCode,
 };
 
 use tekdek::{
@@ -28,8 +27,6 @@ use tekdek::{
     },
     store::{PROJECT_STORE, create_project_store, find_project_store, graph::GraphArtifact},
 };
-
-use super::ERROR_CODE;
 
 // -----------------------------------------------------------------------------
 // Entry
@@ -48,59 +45,26 @@ store, index creates <root>/.tekdek after the analysis succeeds. index writes
 <store>/<name>.json. --output writes one file and changes no store.";
 
 /// Analyzes one codebase and writes its graph into the store.
-pub(super) fn run(raw: impl Iterator<Item = String>) -> ExitCode {
-    let arguments = match Arguments::parse(raw) {
-        Ok(arguments) => arguments,
-        Err(message) => {
-            eprintln!("error: {message}");
-            eprintln!("{USAGE}");
-            return ExitCode::from(ERROR_CODE);
-        }
-    };
-    let destination = match artifact_destination(&arguments) {
-        Ok(destination) => destination,
-        Err(message) => {
-            eprintln!("error: {message}");
-            return ExitCode::from(ERROR_CODE);
-        }
-    };
+pub(super) fn run(raw: impl Iterator<Item = String>) -> Result<(), String> {
+    let arguments = Arguments::parse(raw).map_err(|message| format!("{message}\n{USAGE}"))?;
+    let destination = artifact_destination(&arguments)?;
     if destination.project_root {
         println!("indexing the project root {}", destination.root.display());
     }
-    let config = match pipeline_config(&arguments, &destination.root) {
-        Ok(config) => config,
-        Err(error) => {
-            eprintln!("error: {error}");
-            return ExitCode::from(ERROR_CODE);
-        }
-    };
-    let result = match analysis::run(&config) {
-        Ok(result) => result,
-        Err(error) => {
-            eprintln!("error: {error}");
-            return ExitCode::from(ERROR_CODE);
-        }
-    };
+    let config =
+        pipeline_config(&arguments, &destination.root).map_err(|error| error.to_string())?;
+    let result = analysis::run(&config).map_err(|error| error.to_string())?;
     // Create a new store only after the analysis succeeds, so a failed first index leaves no store.
     if destination.create_store
         && let Some((store, _)) = &destination.indexed
     {
-        if let Err(error) = create_project_store(store) {
-            eprintln!(
-                "error: cannot create the store {}: {error}",
-                store.display()
-            );
-            return ExitCode::from(ERROR_CODE);
-        }
+        create_project_store(store)
+            .map_err(|error| format!("cannot create the store {}: {error}", store.display()))?;
         println!("created the store {}", store.display());
     }
-    if let Err(error) = GraphArtifact::new(&result.graph).write(&destination.output) {
-        eprintln!(
-            "error: cannot write {}: {error}",
-            destination.output.display()
-        );
-        return ExitCode::from(ERROR_CODE);
-    }
+    GraphArtifact::new(&result.graph)
+        .write(&destination.output)
+        .map_err(|error| format!("cannot write {}: {error}", destination.output.display()))?;
 
     println!(
         "{} nodes, {} edges -> {}",
@@ -108,7 +72,7 @@ pub(super) fn run(raw: impl Iterator<Item = String>) -> ExitCode {
         result.graph.edges.len(),
         destination.output.display()
     );
-    ExitCode::SUCCESS
+    Ok(())
 }
 
 /// Builds pipeline configuration from files and command-line overrides.

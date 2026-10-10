@@ -15,7 +15,7 @@ use std::{
     ffi::OsStr,
     io::Read,
     path::{Path, PathBuf},
-    process::{Command, ExitCode, Stdio},
+    process::{Command, Stdio},
     thread,
     time::{Duration, Instant},
 };
@@ -28,7 +28,7 @@ use tekdek::analysis::{
     language::{Language, LanguageProfile},
 };
 
-use super::{emit, failure, render, split_arguments};
+use super::{failure, render, split_arguments};
 
 pub(super) const USAGE: &str = "usage: tekdek doctor [<root>] [--config <path>] [--json]
 doctor checks the language server of each language that this build indexes.
@@ -86,11 +86,9 @@ impl Status {
     }
 }
 
-/// Checks the language servers and prints one report.
-pub(super) fn run(arguments: Vec<String>) -> ExitCode {
-    let json = arguments.iter().any(|argument| argument == "--json");
-    let (code, output) = check(arguments).unwrap_or_else(|message| failure(json, &message));
-    emit(json, code, &output)
+/// Returns the exit code and one report of the language server checks.
+pub(super) fn run(arguments: Vec<String>, json: bool) -> (u8, String) {
+    check(arguments).unwrap_or_else(|message| failure(json, &message))
 }
 
 fn check(arguments: Vec<String>) -> Result<(u8, String), String> {
