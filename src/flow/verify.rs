@@ -168,6 +168,37 @@ mod tests {
     }
 
     #[test]
+    fn verify_reports_a_missing_parent_once_and_skips_the_view_check() {
+        let directory = fixtures::store();
+        let path = directory.path();
+        let first = frozen(import(path, "demo-flow", &output()));
+        let parent = fixtures::current(path, "demo-flow");
+        // A revision that drops the first cluster keeps the second cluster color.
+        let mut revised = output();
+        revised["flow"]["clusters"]
+            .as_array_mut()
+            .expect("clusters")
+            .remove(0);
+        revised["flow"]["revisionSummary"] = "Fold every step into one cluster.".into();
+        for (step, stored) in revised["flow"]["steps"]
+            .as_array_mut()
+            .expect("steps")
+            .iter_mut()
+            .zip(&parent.intent.steps)
+        {
+            step["priorStepId"] = stored.id.as_str().into();
+            step["clusterKey"] = "write-result".into();
+        }
+        frozen(import(path, "demo-flow", &revised));
+        std::fs::remove_file(path.join("flows").join(first.file)).expect("remove the parent");
+
+        let report = verify_flow(path, "demo-flow").expect("verify");
+
+        let codes: Vec<_> = report.issues.iter().map(|issue| issue.code).collect();
+        assert_eq!(codes, [IssueCode::UnknownGeneration], "{:?}", report.issues);
+    }
+
+    #[test]
     fn verify_names_a_flow_without_a_lineage() {
         let directory = fixtures::store();
 

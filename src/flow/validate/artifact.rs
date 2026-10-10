@@ -18,8 +18,10 @@ use crate::flow::{
 
 /// Verifies one stored generation by recomputing its derived layers and digests.
 ///
-/// `parent` must be the generation that `generation.parentDigest` names. A
-/// `revision` without its parent reports `unknown_generation`.
+/// `parent` must be the generation that `generation.parentDigest` names. It is
+/// `None` for an initial generation, and for a revision whose parent the caller
+/// could not read. The caller reports that fault. The checks that need the
+/// parent view or the parent intent do not run then.
 #[must_use]
 pub fn verify_artifact(artifact: &FlowArtifact, parent: Option<&FlowArtifact>) -> Vec<FlowIssue> {
     let mut issues = Vec::new();
@@ -45,7 +47,9 @@ pub fn verify_artifact(artifact: &FlowArtifact, parent: Option<&FlowArtifact>) -
         &artifact.assignment,
         parent.map(|parent| &parent.view),
     );
-    if view != artifact.view {
+    let parent_missing =
+        artifact.generation.purpose == GenerationPurpose::Revision && parent.is_none();
+    if !parent_missing && view != artifact.view {
         issues.push(
             FlowIssue::error(
                 IssueCode::DerivedMismatch,
@@ -140,13 +144,7 @@ fn generation_rules(artifact: &FlowArtifact, parent: Option<&FlowArtifact>) -> V
                         && parent.flow_id == artifact.flow_id
                         && parent.generation.ordinal + 1 == generation.ordinal => {}
                 Some(_) => issues.push(invalid("the parent generation does not match")),
-                None => issues.push(
-                    FlowIssue::error(
-                        IssueCode::UnknownGeneration,
-                        "the parent generation is not in the store",
-                    )
-                    .at("/generation/parentDigest"),
-                ),
+                None => {}
             }
         }
     }
