@@ -300,9 +300,12 @@ impl<'a> Lines<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::{CutError, MAX_LINES, cut};
+    use serde_json::json;
+
+    use super::{CutError, MAX_LINES, SourceStatus, cut, flow_sources};
     use crate::{
         analysis::source::ContentHash,
+        flow::fixtures::{current, frozen, import, output, write_graph},
         store::graph::{ArtifactNode, ArtifactRange},
     };
 
@@ -448,5 +451,94 @@ mod tests {
         )
         .expect("cut");
         assert_eq!((cut.lines.len(), cut.more), (MAX_LINES, 452 - MAX_LINES));
+    }
+
+    #[test]
+    fn cuts_each_distinct_step_function_once_and_reports_why_others_have_no_source() {
+        const MAIN: &str = "src/main.rs::callable:main";
+        const PARSE: &str = "src/parse.rs::callable:parse_args";
+        const READ: &str = "src/parse.rs::callable:read_input";
+        const WRITE: &str = "src/store.rs::callable:write_result";
+        const LOCK: &str = "src/store.rs::callable:lock_store";
+
+        let store = tempfile::tempdir().expect("store");
+        let mut artifact = write_graph(store.path(), "src/extra.rs::callable:helper");
+        frozen(import(store.path(), "demo-flow", &output()));
+        let flow = current(store.path(), "demo-flow");
+        // The flow visits main twice. The fixture nodes have no source range.
+        let cut_node = rust_node(RUST);
+        for node in &mut artifact.graph.nodes {
+            match node.key.as_str() {
+                // Gets a real range over the text that the reader returns.
+                MAIN => {
+                    node.declarations = cut_node.declarations.clone();
+                    node.scope = cut_node.scope.clone();
+                    node.body = cut_node.body.clone();
+                    node.content_hash = cut_node.content_hash.clone();
+                }
+                // Leaves the graph, while the flow keeps its key.
+                PARSE => node.key = "src/parse.rs::callable:renamed".to_owned(),
+                _ => {}
+            }
+        }
+
+        let mut reads = Vec::new();
+        let functions = flow_sources(&artifact.graph, &flow, |path| {
+            reads.push(path.to_owned());
+            match path {
+                "src/main.rs" => Ok(RUST.to_owned()),
+                "src/parse.rs" => Ok("fn read_input() {}\n".to_owned()),
+                _ => Err("the file is missing".to_owned()),
+            }
+        });
+
+        let steps: Vec<_> = functions
+            .iter()
+            .map(|function| (function.key.as_str(), function.status))
+            .collect();
+        assert_eq!(
+            steps,
+            [
+                (MAIN, SourceStatus::Ok),
+                (PARSE, SourceStatus::Missing),
+                (READ, SourceStatus::Unreadable),
+                (WRITE, SourceStatus::Unreadable),
+                (LOCK, SourceStatus::Unreadable),
+            ]
+        );
+        // Two functions share store.rs. A missing function reads no file.
+        reads.sort();
+        assert_eq!(reads, ["src/main.rs", "src/parse.rs", "src/store.rs"]);
+        assert_eq!(
+            functions[2].reason.as_deref(),
+            Some("the graph has no source range for this function")
+        );
+        assert_eq!(functions[3].reason.as_deref(), Some("the file is missing"));
+        assert_eq!(functions[4].reason, functions[3].reason);
+
+        assert_eq!(
+            serde_json::to_value(&functions[0]).expect("json"),
+            json!({
+                "key": MAIN, "status": "ok", "path": "src/main.rs", "language": "rust",
+                "firstLine": 3, "declarationLine": 6, "docLines": [3, 4],
+                "signatureLines": [6, 7], "more": 0,
+                "lines": [
+                    "/// Reads the file.", "/// Returns its text.", "#[must_use]",
+                    "pub fn read(path: &str)", "    -> String {",
+                    "    fs::read_to_string(path).unwrap()", "}"
+                ]
+            })
+        );
+        assert_eq!(
+            serde_json::to_value(&functions[1]).expect("json"),
+            json!({"key": PARSE, "status": "missing"})
+        );
+        assert_eq!(
+            serde_json::to_value(&functions[3]).expect("json"),
+            json!({
+                "key": WRITE, "status": "unreadable", "path": "src/store.rs",
+                "language": "rust", "reason": "the file is missing"
+            })
+        );
     }
 }
