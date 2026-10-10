@@ -83,10 +83,8 @@ pub(super) fn stored_text(issues: &mut Vec<FlowIssue>, value: &str, path: &str, 
     }
 }
 
-/// Checks unique keys, unique labels ignoring case, the phase note rule, and cluster use.
-///
-/// `used` holds the cluster key of every step.
-fn cluster_rules(clusters: &[ClusterIntent], used: &BTreeSet<&str>, path: &str) -> Vec<FlowIssue> {
+/// Checks unique keys, unique labels ignoring case, and the phase note rule.
+fn cluster_rules(clusters: &[ClusterIntent], path: &str) -> Vec<FlowIssue> {
     let mut issues = Vec::new();
     let mut keys = BTreeSet::new();
     let mut labels = BTreeSet::new();
@@ -134,18 +132,30 @@ fn cluster_rules(clusters: &[ClusterIntent], used: &BTreeSet<&str>, path: &str) 
             ),
             _ => {}
         }
-        if !used.contains(cluster.key.as_str()) {
-            issues.push(
-                FlowIssue::error(
-                    IssueCode::UnusedCluster,
-                    format!("no step uses the cluster {}", cluster.key),
-                )
-                .at(&at)
-                .cluster(cluster.key.as_str()),
-            );
-        }
     }
     issues
+}
+
+/// Reports each cluster that no step uses.
+///
+/// `keys` are the cluster keys in list order, so a path keeps the list index.
+/// `used` holds the cluster key of every step.
+fn unused_clusters<'a>(
+    keys: impl Iterator<Item = &'a str>,
+    used: &BTreeSet<&str>,
+    path: &str,
+) -> Vec<FlowIssue> {
+    keys.enumerate()
+        .filter(|(_, key)| !used.contains(key))
+        .map(|(index, key)| {
+            FlowIssue::error(
+                IssueCode::UnusedCluster,
+                format!("no step uses the cluster {key}"),
+            )
+            .at(format!("{path}/{index}"))
+            .cluster(key)
+        })
+        .collect()
 }
 
 /// Checks the author record that the CLI writes into provenance.

@@ -10,7 +10,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use super::{
     BEHAVIOR, BOUNDARIES, CLUSTER_COUNT, CLUSTER_DESCRIPTION, CLUSTER_LABEL, PHASE_NOTE,
     REVISION_SUMMARY, STEP_ANNOTATION, STEP_COUNT, STEP_TITLE, TextRule, cluster_rules,
-    stored_text,
+    stored_text, unused_clusters,
 };
 use crate::flow::{
     models::{
@@ -165,12 +165,7 @@ fn check_clusters(flow: &AgentFlow, issues: &mut Vec<FlowIssue>) -> Vec<ClusterI
             ),
         }
     }
-    let used: BTreeSet<&str> = flow
-        .steps
-        .iter()
-        .map(|step| step.cluster_key.as_str())
-        .collect();
-    issues.extend(cluster_rules(&clusters, &used, "/flow/clusters"));
+    issues.extend(cluster_rules(&clusters, "/flow/clusters"));
     if !CLUSTER_COUNT.contains(&flow.clusters.len()) {
         issues.push(
             FlowIssue::error(
@@ -184,6 +179,16 @@ fn check_clusters(flow: &AgentFlow, issues: &mut Vec<FlowIssue>) -> Vec<ClusterI
             .at("/flow/clusters"),
         );
     }
+    let used: BTreeSet<&str> = flow
+        .steps
+        .iter()
+        .map(|step| step.cluster_key.as_str())
+        .collect();
+    issues.extend(unused_clusters(
+        flow.clusters.iter().map(|cluster| cluster.key.as_str()),
+        &used,
+        "/flow/clusters",
+    ));
     clusters
 }
 

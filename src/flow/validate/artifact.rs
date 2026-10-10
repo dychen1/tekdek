@@ -10,7 +10,7 @@ use std::collections::BTreeSet;
 use super::{
     BEHAVIOR, BOUNDARIES, CLUSTER_COUNT, CLUSTER_DESCRIPTION, CLUSTER_LABEL, PHASE_NOTE,
     REVISION_SUMMARY, STEP_ANNOTATION, STEP_COUNT, STEP_TITLE, check_author, cluster_rules,
-    stored_text,
+    stored_text, unused_clusters,
 };
 use crate::flow::{
     assign, derive,
@@ -211,12 +211,7 @@ fn intent_rules(intent: &IntentLayer) -> Vec<FlowIssue> {
             STEP_ANNOTATION,
         );
     }
-    let used: BTreeSet<&str> = intent
-        .steps
-        .iter()
-        .map(|step| step.cluster_key.as_str())
-        .collect();
-    issues.extend(cluster_rules(&intent.clusters, &used, "/intent/clusters"));
+    issues.extend(cluster_rules(&intent.clusters, "/intent/clusters"));
     if !CLUSTER_COUNT.contains(&intent.clusters.len()) || !STEP_COUNT.contains(&intent.steps.len())
     {
         issues.push(
@@ -245,6 +240,16 @@ fn intent_rules(intent: &IntentLayer) -> Vec<FlowIssue> {
             );
         }
     }
+    let used: BTreeSet<&str> = intent
+        .steps
+        .iter()
+        .map(|step| step.cluster_key.as_str())
+        .collect();
+    issues.extend(unused_clusters(
+        intent.clusters.iter().map(|cluster| cluster.key.as_str()),
+        &used,
+        "/intent/clusters",
+    ));
     issues
 }
 

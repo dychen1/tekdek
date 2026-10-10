@@ -582,6 +582,37 @@ mod tests {
         assert_rejected(path, "Demo", &output(), IssueCode::InvalidKey);
     }
 
+    #[test]
+    fn unused_cluster_issues_keep_the_index_of_the_agent_output() {
+        let directory = fixtures::store();
+        let mut value = output();
+        let clusters = value["flow"]["clusters"].as_array_mut().expect("clusters");
+        let mut invalid = clusters[0].clone();
+        invalid["key"] = "Bad_Key".into();
+        invalid["label"] = "Invalid key cluster".into();
+        let mut spare = clusters[0].clone();
+        spare["key"] = "spare-cluster".into();
+        spare["label"] = "Spare cluster label".into();
+        clusters.insert(0, invalid);
+        clusters.push(spare);
+
+        let error = import(directory.path(), "demo-flow", &value).expect_err("rejected output");
+
+        let unused: Vec<_> = error
+            .issues()
+            .iter()
+            .filter(|issue| issue.code == IssueCode::UnusedCluster)
+            .map(|issue| (issue.path.as_deref(), issue.cluster_key.as_deref()))
+            .collect();
+        assert_eq!(
+            unused,
+            [
+                (Some("/flow/clusters/0"), Some("Bad_Key")),
+                (Some("/flow/clusters/3"), Some("spare-cluster"))
+            ]
+        );
+    }
+
     /// Builds a revision that moves the entry function into a new cluster and edits one annotation.
     fn revision(parent: &crate::flow::models::FlowArtifact) -> (Value, u32) {
         let mut value = output();
