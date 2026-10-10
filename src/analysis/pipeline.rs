@@ -206,7 +206,7 @@ mod tests {
     use crate::{
         analysis::{
             language::{Language, LanguageProfile},
-            lsp::session::tests::FakeServer,
+            lsp::fake_server::FakeServer,
         },
         store::graph::GraphArtifact,
     };

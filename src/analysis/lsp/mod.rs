@@ -14,6 +14,8 @@
 
 pub(crate) mod capture;
 mod client;
+#[cfg(test)]
+pub(crate) mod fake_server;
 mod normalize;
 pub(crate) mod session;
 

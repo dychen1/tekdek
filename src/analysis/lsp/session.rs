@@ -265,29 +265,20 @@ pub(super) const fn language_title(language: Language) -> &'static str {
 const INITIALIZE_TIMEOUT: Duration = Duration::from_mins(2);
 
 #[cfg(test)]
-pub(crate) mod tests {
-    use std::{
-        env,
-        ffi::OsString,
-        fs,
-        path::{Path, PathBuf},
-        process::{self, Command},
-        sync::atomic::{AtomicU64, Ordering},
-    };
+mod tests {
+    use std::{path::PathBuf, time::Duration};
 
     use lsp_types::{OneOf, ServerCapabilities, TypeDefinitionProviderCapability};
     use serde_json::json;
-
-    use std::time::Duration;
 
     use super::{
         ServerReadiness, SessionConfig, initialize_parameters, produce_semantic_facts,
         validate_capabilities,
     };
     use crate::analysis::{
-        fact::ResolutionFallback,
-        language::{CapabilityPolicy, Language, ServerCommand},
-        lsp::ProtocolSymbolSite,
+        fact::{ResolutionFallback, SemanticFact},
+        language::{CapabilityPolicy, Language},
+        lsp::{LspError, ProtocolSymbolSite, fake_server::FakeServer},
         source::{DocumentSnapshot, Sources},
     };
 
@@ -363,46 +354,28 @@ pub(crate) mod tests {
 
     #[test]
     fn captures_facts_with_a_shared_session() {
-        let server = FakeServer::new();
-        let command = server.command("serve");
-        let source = DocumentSnapshot {
-            path: PathBuf::from("app.py"),
-            content: "def run():\n    pass\n".to_owned(),
-        };
-        let sources = Sources::new(vec![&source]);
-        let config = SessionConfig {
-            root: server.root(),
-            language: Language::Python,
-            language_id: "python",
-            server: &command,
-            required_capabilities: CapabilityPolicy::SEMANTIC_GRAPH,
-            fallback,
-            readiness: ServerReadiness::Immediate,
-        };
-
-        let facts = produce_semantic_facts(&config, &sources)
-            .expect("the fake language server should complete");
+        let facts = run_session(
+            &FakeServer::new(),
+            "serve",
+            Language::Python,
+            IMMEDIATE,
+            true,
+        )
+        .expect("the fake language server should complete");
 
         assert_eq!(facts, Vec::new());
     }
 
     #[test]
     fn includes_server_standard_error_when_startup_fails() {
-        let server = FakeServer::new();
-        let command = server.command("fail");
-        let sources = Sources::new(Vec::new());
-        let config = SessionConfig {
-            root: server.root(),
-            language: Language::Python,
-            language_id: "python",
-            server: &command,
-            required_capabilities: CapabilityPolicy::SEMANTIC_GRAPH,
-            fallback,
-            readiness: ServerReadiness::Immediate,
-        };
-
-        let error = produce_semantic_facts(&config, &sources)
-            .expect_err("the fake language server should fail");
+        let error = run_session(
+            &FakeServer::new(),
+            "fail",
+            Language::Python,
+            IMMEDIATE,
+            false,
+        )
+        .expect_err("the fake language server should fail");
 
         assert!(
             error.to_string().contains("invalid project configuration"),
@@ -413,19 +386,8 @@ pub(crate) mod tests {
     #[test]
     fn does_not_request_shutdown_after_initialize_rejection() {
         let server = FakeServer::new();
-        let command = server.command("reject");
-        let sources = Sources::new(Vec::new());
-        let config = SessionConfig {
-            root: server.root(),
-            language: Language::Python,
-            language_id: "python",
-            server: &command,
-            required_capabilities: CapabilityPolicy::SEMANTIC_GRAPH,
-            fallback,
-            readiness: ServerReadiness::Immediate,
-        };
 
-        produce_semantic_facts(&config, &sources)
+        run_session(&server, "reject", Language::Python, IMMEDIATE, false)
             .expect_err("the fake language server should reject initialization");
 
         assert!(
@@ -436,21 +398,14 @@ pub(crate) mod tests {
 
     #[test]
     fn includes_server_standard_error_with_initialize_rejection() {
-        let server = FakeServer::new();
-        let command = server.command("reject");
-        let sources = Sources::new(Vec::new());
-        let config = SessionConfig {
-            root: server.root(),
-            language: Language::Python,
-            language_id: "python",
-            server: &command,
-            required_capabilities: CapabilityPolicy::SEMANTIC_GRAPH,
-            fallback,
-            readiness: ServerReadiness::Immediate,
-        };
-
-        let error = produce_semantic_facts(&config, &sources)
-            .expect_err("the fake language server should reject initialization");
+        let error = run_session(
+            &FakeServer::new(),
+            "reject",
+            Language::Python,
+            IMMEDIATE,
+            false,
+        )
+        .expect_err("the fake language server should reject initialization");
         let message = error.to_string();
 
         assert!(
@@ -470,25 +425,14 @@ pub(crate) mod tests {
 
     #[test]
     fn returns_shutdown_failure_after_successful_capture() {
-        let server = FakeServer::new();
-        let command = server.command("shutdown-error");
-        let source = DocumentSnapshot {
-            path: PathBuf::from("app.py"),
-            content: "def run():\n    pass\n".to_owned(),
-        };
-        let sources = Sources::new(vec![&source]);
-        let config = SessionConfig {
-            root: server.root(),
-            language: Language::Python,
-            language_id: "python",
-            server: &command,
-            required_capabilities: CapabilityPolicy::SEMANTIC_GRAPH,
-            fallback,
-            readiness: ServerReadiness::Immediate,
-        };
-
-        let error = produce_semantic_facts(&config, &sources)
-            .expect_err("the fake language server should reject shutdown");
+        let error = run_session(
+            &FakeServer::new(),
+            "shutdown-error",
+            Language::Python,
+            IMMEDIATE,
+            true,
+        )
+        .expect_err("the fake language server should reject shutdown");
 
         assert_eq!(
             error.to_string(),
@@ -498,25 +442,14 @@ pub(crate) mod tests {
 
     #[test]
     fn preserves_capture_failure_when_shutdown_also_fails() {
-        let server = FakeServer::new();
-        let command = server.command("capture-and-shutdown-error");
-        let source = DocumentSnapshot {
-            path: PathBuf::from("app.py"),
-            content: "def run():\n    pass\n".to_owned(),
-        };
-        let sources = Sources::new(vec![&source]);
-        let config = SessionConfig {
-            root: server.root(),
-            language: Language::Python,
-            language_id: "python",
-            server: &command,
-            required_capabilities: CapabilityPolicy::SEMANTIC_GRAPH,
-            fallback,
-            readiness: ServerReadiness::Immediate,
-        };
-
-        let error = produce_semantic_facts(&config, &sources)
-            .expect_err("the fake language server should reject capture and shutdown");
+        let error = run_session(
+            &FakeServer::new(),
+            "capture-and-shutdown-error",
+            Language::Python,
+            IMMEDIATE,
+            true,
+        )
+        .expect_err("the fake language server should reject capture and shutdown");
         let message = error.to_string();
 
         assert!(
@@ -531,25 +464,14 @@ pub(crate) mod tests {
 
     #[test]
     fn includes_server_standard_error_with_semantic_rejection() {
-        let server = FakeServer::new();
-        let command = server.command("semantic-reject-stderr");
-        let source = DocumentSnapshot {
-            path: PathBuf::from("app.py"),
-            content: "def run():\n    pass\n".to_owned(),
-        };
-        let sources = Sources::new(vec![&source]);
-        let config = SessionConfig {
-            root: server.root(),
-            language: Language::Python,
-            language_id: "python",
-            server: &command,
-            required_capabilities: CapabilityPolicy::SEMANTIC_GRAPH,
-            fallback,
-            readiness: ServerReadiness::Immediate,
-        };
-
-        let error = produce_semantic_facts(&config, &sources)
-            .expect_err("the fake language server should reject semantic capture");
+        let error = run_session(
+            &FakeServer::new(),
+            "semantic-reject-stderr",
+            Language::Python,
+            IMMEDIATE,
+            true,
+        )
+        .expect_err("the fake language server should reject semantic capture");
         let message = error.to_string();
 
         assert!(
@@ -569,50 +491,28 @@ pub(crate) mod tests {
 
     #[test]
     fn waits_for_a_quiescent_server_status_before_capture() {
-        let server = FakeServer::new();
-        let command = server.command("status-quiescent");
-        let source = DocumentSnapshot {
-            path: PathBuf::from("app.py"),
-            content: "def run():\n    pass\n".to_owned(),
-        };
-        let sources = Sources::new(vec![&source]);
-        let config = SessionConfig {
-            root: server.root(),
-            language: Language::Rust,
-            language_id: "rust",
-            server: &command,
-            required_capabilities: CapabilityPolicy::SEMANTIC_GRAPH,
-            fallback,
-            readiness: ServerReadiness::QuiescentServerStatus {
-                timeout: Duration::from_secs(10),
-            },
-        };
-
-        let facts = produce_semantic_facts(&config, &sources)
-            .expect("the session should proceed after the quiescent status");
+        let facts = run_session(
+            &FakeServer::new(),
+            "status-quiescent",
+            Language::Rust,
+            quiescent(Duration::from_secs(10)),
+            true,
+        )
+        .expect("the session should proceed after the quiescent status");
 
         assert_eq!(facts, Vec::new());
     }
 
     #[test]
     fn fails_when_the_server_reports_an_error_status() {
-        let server = FakeServer::new();
-        let command = server.command("status-error");
-        let sources = Sources::new(Vec::new());
-        let config = SessionConfig {
-            root: server.root(),
-            language: Language::Rust,
-            language_id: "rust",
-            server: &command,
-            required_capabilities: CapabilityPolicy::SEMANTIC_GRAPH,
-            fallback,
-            readiness: ServerReadiness::QuiescentServerStatus {
-                timeout: Duration::from_secs(10),
-            },
-        };
-
-        let error = produce_semantic_facts(&config, &sources)
-            .expect_err("the error status should fail the session");
+        let error = run_session(
+            &FakeServer::new(),
+            "status-error",
+            Language::Rust,
+            quiescent(Duration::from_secs(10)),
+            false,
+        )
+        .expect_err("the error status should fail the session");
 
         assert_eq!(
             error.to_string(),
@@ -622,23 +522,14 @@ pub(crate) mod tests {
 
     #[test]
     fn fails_when_the_server_reports_no_quiescent_status() {
-        let server = FakeServer::new();
-        let command = server.command("status-silent");
-        let sources = Sources::new(Vec::new());
-        let config = SessionConfig {
-            root: server.root(),
-            language: Language::Rust,
-            language_id: "rust",
-            server: &command,
-            required_capabilities: CapabilityPolicy::SEMANTIC_GRAPH,
-            fallback,
-            readiness: ServerReadiness::QuiescentServerStatus {
-                timeout: Duration::from_millis(300),
-            },
-        };
-
-        let error = produce_semantic_facts(&config, &sources)
-            .expect_err("the silent server should time out");
+        let error = run_session(
+            &FakeServer::new(),
+            "status-silent",
+            Language::Rust,
+            quiescent(Duration::from_millis(300)),
+            false,
+        )
+        .expect_err("the silent server should time out");
 
         assert!(
             error
@@ -648,259 +539,46 @@ pub(crate) mod tests {
         );
     }
 
+    const IMMEDIATE: ServerReadiness = ServerReadiness::Immediate;
+
+    fn quiescent(timeout: Duration) -> ServerReadiness {
+        ServerReadiness::QuiescentServerStatus { timeout }
+    }
+
+    /// Runs one session against the fake server in the given mode.
+    ///
+    /// With `with_source`, the session opens one `app.py` document.
+    fn run_session(
+        server: &FakeServer,
+        mode: &str,
+        language: Language,
+        readiness: ServerReadiness,
+        with_source: bool,
+    ) -> Result<Vec<SemanticFact>, LspError> {
+        let command = server.command(mode);
+        let source = DocumentSnapshot {
+            path: PathBuf::from("app.py"),
+            content: "def run():\n    pass\n".to_owned(),
+        };
+        let sources = Sources::new(if with_source {
+            vec![&source]
+        } else {
+            Vec::new()
+        });
+        let config = SessionConfig {
+            root: server.root(),
+            language,
+            language_id: language.as_str(),
+            server: &command,
+            required_capabilities: CapabilityPolicy::SEMANTIC_GRAPH,
+            fallback,
+            readiness,
+        };
+
+        produce_semantic_facts(&config, &sources)
+    }
+
     fn fallback(_: &ProtocolSymbolSite) -> ResolutionFallback {
         ResolutionFallback::ScopeOwner
     }
-
-    pub(crate) struct FakeServer {
-        directory: TestDirectory,
-        executable: PathBuf,
-    }
-
-    impl FakeServer {
-        pub(crate) fn new() -> Self {
-            let directory = TestDirectory::new();
-            let source = directory.path().join("fake_server.rs");
-            let executable = directory
-                .path()
-                .join(format!("fake_server{}", env::consts::EXE_SUFFIX));
-            fs::write(&source, FAKE_SERVER).expect("the fake server source should be written");
-            let compiler = env::var_os("RUSTC").unwrap_or_else(|| OsString::from("rustc"));
-            let output = Command::new(compiler)
-                .arg("--edition=2024")
-                .arg("-Dwarnings")
-                .arg(&source)
-                .arg("-o")
-                .arg(&executable)
-                .output()
-                .expect("rustc should start for the fake server");
-            assert!(
-                output.status.success(),
-                "the fake server should compile: {}",
-                String::from_utf8_lossy(&output.stderr)
-            );
-
-            Self {
-                directory,
-                executable,
-            }
-        }
-
-        fn root(&self) -> &Path {
-            self.directory.path()
-        }
-
-        pub(crate) fn command(&self, mode: &str) -> ServerCommand {
-            ServerCommand {
-                program: self.executable.to_string_lossy().into_owned(),
-                arguments: vec![mode.to_owned()],
-                initialization_options: json!({"analysis": {"mode": "test"}}),
-            }
-        }
-
-        fn shutdown_marker(&self) -> PathBuf {
-            self.directory.path().join("shutdown-requested")
-        }
-    }
-
-    struct TestDirectory {
-        path: PathBuf,
-    }
-
-    impl TestDirectory {
-        fn new() -> Self {
-            static NEXT_ID: AtomicU64 = AtomicU64::new(0);
-
-            let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
-            let path = env::temp_dir().join(format!("tekdek-lsp-session-{}-{id}", process::id()));
-            fs::create_dir(&path).expect("the fake server directory should be created");
-            Self { path }
-        }
-
-        fn path(&self) -> &Path {
-            &self.path
-        }
-    }
-
-    impl Drop for TestDirectory {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.path);
-        }
-    }
-
-    const FAKE_SERVER: &str = r##"
-use std::{
-    env, fs,
-    io::{self, BufRead, Write},
-    process,
-};
-
-fn main() -> io::Result<()> {
-    let mode = env::args().nth(1).unwrap_or_default();
-    if mode == "fail" {
-        eprintln!("invalid project configuration");
-        process::exit(1);
-    }
-
-    let stdin = io::stdin();
-    let stdout = io::stdout();
-    let mut input = stdin.lock();
-    let mut output = stdout.lock();
-
-    while let Some(message) = read_message(&mut input)? {
-        let request_id = request_id(&message);
-
-        if message.contains(r#""method":"initialize""#) {
-            let request_id = required_id(request_id)?;
-            if mode == "reject" {
-                eprintln!("rejected project configuration");
-                write_error(&mut output, request_id, "invalid initialization")?;
-                continue;
-            }
-            if !message.contains(
-                r#""initializationOptions":{"analysis":{"mode":"test"}}"#,
-            ) {
-                eprintln!("initialization options were not forwarded");
-                process::exit(1);
-            }
-            write_result(
-                &mut output,
-                request_id,
-                r#"{"capabilities":{"documentSymbolProvider":true,"callHierarchyProvider":true,"referencesProvider":true,"typeDefinitionProvider":true}}"#,
-            )?;
-        } else if message.contains(r#""method":"initialized""#) {
-            // A well-behaved server reports readiness when the client asks.
-            // The status modes replace that report to test the waiting client.
-            if mode == "status-quiescent" {
-                write_notification(
-                    &mut output,
-                    "experimental/serverStatus",
-                    r#"{"health":"ok","quiescent":false}"#,
-                )?;
-                write_notification(
-                    &mut output,
-                    "experimental/serverStatus",
-                    r#"{"health":"ok","quiescent":true}"#,
-                )?;
-            } else if mode == "status-error" {
-                write_notification(
-                    &mut output,
-                    "experimental/serverStatus",
-                    r#"{"health":"error","quiescent":false,"message":"workspace failed to load"}"#,
-                )?;
-            } else if mode != "status-silent" {
-                write_notification(
-                    &mut output,
-                    "experimental/serverStatus",
-                    r#"{"health":"ok","quiescent":true}"#,
-                )?;
-            }
-        } else if message.contains(r#""method":"textDocument/documentSymbol""#) {
-            let request_id = required_id(request_id)?;
-            if mode == "protocol-error" || mode == "capture-and-shutdown-error" {
-                write_error(&mut output, request_id, "document symbol capture failed")?;
-                continue;
-            }
-            if mode == "semantic-reject-stderr" {
-                eprintln!("semantic request diagnostic");
-                write_error(&mut output, request_id, "document symbol capture failed")?;
-                continue;
-            }
-            write_result(
-                &mut output,
-                request_id,
-                r#"[{"name":"run","kind":12,"range":{"start":{"line":0,"character":0},"end":{"line":1,"character":8}},"selectionRange":{"start":{"line":0,"character":4},"end":{"line":0,"character":7}}}]"#,
-            )?;
-        } else if message.contains(r#""method":"textDocument/prepareCallHierarchy""#)
-            || message.contains(r#""method":"textDocument/references""#)
-        {
-            write_result(&mut output, required_id(request_id)?, "[]")?;
-        } else if message.contains(r#""method":"textDocument/typeDefinition""#) {
-            write_result(&mut output, required_id(request_id)?, "null")?;
-        } else if message.contains(r#""method":"shutdown""#) {
-            let executable = env::current_exe()?;
-            let directory = executable.parent().ok_or_else(|| {
-                io::Error::other("the fake server executable has no parent")
-            })?;
-            fs::write(directory.join("shutdown-requested"), "requested")?;
-            if mode == "shutdown-error" || mode == "capture-and-shutdown-error" {
-                write_error(&mut output, required_id(request_id)?, "shutdown failed")?;
-                continue;
-            }
-            write_result(&mut output, required_id(request_id)?, "null")?;
-        } else if message.contains(r#""method":"exit""#) {
-            break;
-        }
-    }
-
-    Ok(())
-}
-
-fn read_message(reader: &mut impl BufRead) -> io::Result<Option<String>> {
-    let mut content_length = None;
-    loop {
-        let mut line = String::new();
-        if reader.read_line(&mut line)? == 0 {
-            return Ok(None);
-        }
-        if line == "\r\n" || line == "\n" {
-            break;
-        }
-        if let Some((name, value)) = line.split_once(':')
-            && name.eq_ignore_ascii_case("content-length")
-        {
-            content_length = Some(value.trim().parse::<usize>().map_err(|error| {
-                io::Error::new(io::ErrorKind::InvalidData, error)
-            })?);
-        }
-    }
-
-    let length = content_length.ok_or_else(|| {
-        io::Error::new(io::ErrorKind::InvalidData, "missing Content-Length")
-    })?;
-    let mut body = vec![0; length];
-    reader.read_exact(&mut body)?;
-    String::from_utf8(body)
-        .map(Some)
-        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
-}
-
-fn request_id(message: &str) -> Option<&str> {
-    let value = message.split_once(r#""id":"#)?.1.trim_start();
-    let length = value.bytes().take_while(u8::is_ascii_digit).count();
-    (length > 0).then_some(&value[..length])
-}
-
-fn required_id(request_id: Option<&str>) -> io::Result<&str> {
-    request_id.ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "missing request id"))
-}
-
-fn write_result(writer: &mut impl Write, request_id: &str, result: &str) -> io::Result<()> {
-    write_message(
-        writer,
-        format!(r#"{{"jsonrpc":"2.0","id":{request_id},"result":{result}}}"#),
-    )
-}
-
-fn write_notification(writer: &mut impl Write, method: &str, params: &str) -> io::Result<()> {
-    write_message(
-        writer,
-        format!(r#"{{"jsonrpc":"2.0","method":{method:?},"params":{params}}}"#),
-    )
-}
-
-fn write_error(writer: &mut impl Write, request_id: &str, message: &str) -> io::Result<()> {
-    write_message(
-        writer,
-        format!(
-            r#"{{"jsonrpc":"2.0","id":{request_id},"error":{{"code":-32002,"message":{message:?}}}}}"#
-        ),
-    )
-}
-
-fn write_message(writer: &mut impl Write, body: String) -> io::Result<()> {
-    write!(writer, "Content-Length: {}\r\n\r\n{body}", body.len())?;
-    writer.flush()
-}
-"##;
 }
