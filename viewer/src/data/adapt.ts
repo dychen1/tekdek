@@ -3,7 +3,7 @@
    The adapters read data only; they never fetch.
    # Sections
    graph, flow, shared rules */
-import type { ClusterColor, DeckCall, DeckCluster, DeckFlow, DeckFunction, DeckGraph, DeckStep, DeckTree, FlowArtifact, FlowEntry, GraphDocument } from "./models.ts";
+import type { ArtifactEntry, ArtifactIndex, ClusterColor, DeckCall, DeckCluster, DeckFlow, DeckFunction, DeckGraph, DeckStep, DeckTree, FlowArtifact, FlowEntry, GraphDocument } from "./models.ts";
 
 // ============ graph ============
 
@@ -16,7 +16,7 @@ export function displayName(key: string, fallback: string): string {
 /** Builds the deck graph from a verified graph document.
  *  Files come from module nodes and callable paths. Functions keep source order in each file.
  *  Calls are the distinct `calls` edges between two different callables. */
-export function deckGraph(document: GraphDocument, repo: string): DeckGraph {
+export function deckGraph(document: GraphDocument): DeckGraph {
   const nodes = document.graph.nodes;
   const byId = new Map(nodes.map(node => [node.id, node]));
   const files = new Set<string>();
@@ -36,8 +36,7 @@ export function deckGraph(document: GraphDocument, repo: string): DeckGraph {
     seen.add(id);
     calls.push({ source: source.key, target: target.key });
   }
-  const sorted = [...files].sort();
-  return { repo, files: sorted, tree: fileTree(sorted), functions, calls };
+  return { tree: fileTree([...files].sort()), functions, calls };
 }
 
 /** Builds the directory tree. In each directory, files come first, then subdirectories, each in name order. */
@@ -103,17 +102,16 @@ export function deckFlow(artifact: FlowArtifact, graph: DeckGraph, graphDigest: 
 
 // ============ shared rules ============
 
-/** Returns a copy of the graph where each function carries the flow cluster that holds it. */
-export function withMembership(graph: DeckGraph, flow: DeckFlow | null): DeckGraph {
-  const clusterOf = new Map<string, string>();
-  for (const cluster of flow?.clusters ?? []) for (const id of cluster.members) if (!clusterOf.has(id)) clusterOf.set(id, cluster.id);
-  return { ...graph, functions: graph.functions.map(fn => ({ ...fn, cluster: clusterOf.get(fn.id) ?? null })) };
-}
-
 /** Returns the flows that the viewer shows: the frozen schema 3 entries of a codebase, in index order. */
 export const frozenFlows = (flows: readonly FlowEntry[] | undefined) => (flows ?? []).filter(flow => flow.schemaVersion === 3);
 
 /** Picks the flow to open: the requested name, else the first flow. */
 export function pickFlow(flows: readonly FlowEntry[], requested: string | null): FlowEntry | null {
   return flows.find(flow => flow.name === requested) ?? flows[0] ?? null;
+}
+
+/** Picks the codebase to open: the requested file, else the index default, else the first codebase. */
+export function pickArtifact(index: ArtifactIndex, requested: string | null): ArtifactEntry | null {
+  const find = (file: string | null | undefined) => index.artifacts.find(item => item.file === file);
+  return find(requested) ?? find(index.defaultArtifact) ?? index.artifacts[0] ?? null;
 }

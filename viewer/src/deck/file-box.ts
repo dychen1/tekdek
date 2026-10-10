@@ -2,9 +2,10 @@
    The layout comes from `layout/file-box.ts`. A slot, a row, or a step pill goes to its step.
    The chevron folds the rows that are not in the flow. */
 import { fileBox, type FileBox } from "../layout/file-box.ts";
-import { f1, plural } from "../layout/util.ts";
-import { esc, icon } from "./markup.ts";
-import { $, shownFile, type DeckContext, type FileBoxView } from "./model.ts";
+import { esc, f1, plural } from "../layout/util.ts";
+import { icon } from "./markup.ts";
+import { shownFile } from "../layout/model.ts";
+import { $, type DeckContext, type FileBoxView } from "./context.ts";
 
 export function createFileBox(ctx: DeckContext): FileBoxView {
   const { model, state, signal } = ctx;
@@ -52,15 +53,10 @@ export function createFileBox(ctx: DeckContext): FileBoxView {
   }
 
   fbIn.addEventListener("click", e => {
-    const t = (e.target as Element).closest<HTMLElement>("[data-step], #fileFold");
-    if (!t) return;
-    if (t.id === "fileFold") {
-      if (!shown) return;
-      if (state.folded.has(shown.file)) state.folded.delete(shown.file); else state.folded.add(shown.file);
-      render();
-      ctx.place();
-      ctx.kick(800);
-    } else ctx.go(+t.dataset.step!);
+    if (!shown || !(e.target as Element).closest("#fileFold")) return;
+    if (state.folded.has(shown.file)) state.folded.delete(shown.file); else state.folded.add(shown.file);
+    render();
+    ctx.place();
   }, { signal });
 
   return {

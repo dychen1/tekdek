@@ -4,9 +4,9 @@
    # Sections
    step strip, explainer, buttons */
 import { rangesOf } from "../layout/plan.ts";
-import { clamp, f1, plural } from "../layout/util.ts";
-import { esc, md } from "./markup.ts";
-import { $, type Bar, type DeckContext } from "./model.ts";
+import { clamp, esc, f1, plural } from "../layout/util.ts";
+import { md } from "./markup.ts";
+import { $, type Bar, type DeckContext } from "./context.ts";
 
 export function createBar(ctx: DeckContext): Bar {
   const { model, state, signal } = ctx;
@@ -22,7 +22,6 @@ export function createBar(ctx: DeckContext): Bar {
   ticks.innerHTML = steps.map(s => `<button class="tick" type="button" tabindex="-1" data-step="${s.index}" style="--c:${esc(tickColor(s.index))}" aria-label="Step ${s.index}: ${esc(s.title)}"></button>`).join("");
   const tickEls = [...ticks.querySelectorAll<HTMLElement>(".tick")];
   if (tickEls[0]) tickEls[0].tabIndex = 0;
-  ticks.addEventListener("click", e => { const t = (e.target as Element).closest<HTMLElement>(".tick"); if (t) ctx.go(+t.dataset.step!); }, { signal });
 
   /** Names the step of a cell in the tip above the bar. */
   function showTip(t: HTMLElement) {
@@ -46,7 +45,7 @@ export function createBar(ctx: DeckContext): Bar {
   // ============ explainer ============
 
   function render(clusterChanged: boolean) {
-    const id = state.cur ? model.stepCluster(state.cur) : null, C = id ? CL.get(id) ?? null : null;
+    const id = model.stepCluster(state.cur), C = id ? CL.get(id) ?? null : null;
     $("#counter").textContent = `Step ${state.cur} / ${N}`;
     chip.classList.toggle("none", !C);
     chip.style.setProperty("--c", C ? C.cv : "transparent");
@@ -54,7 +53,7 @@ export function createBar(ctx: DeckContext): Bar {
     $("#cMeta").textContent = C ? `${plural(model.members.get(C.id)?.length ?? 0, "function")} · steps ${rangesOf(model.plan, C.id)}`
       : model.flow ? `${plural(N, "step")} in ${plural(model.clusters.length, "cluster")}` : "";
     cDesc.innerHTML = C ? md(C.description) : model.flow && !state.cur ? "Step forward to lift the first cluster onto its deck." : "";
-    if (clusterChanged && !ctx.reducedMotion && !document.body.classList.contains("booting")) {
+    if (clusterChanged && !document.body.classList.contains("booting")) {
       for (const el of [cExpl, cDesc]) { el.classList.remove("swap"); void el.offsetWidth; el.classList.add("swap"); }
     }
     prevBtn.disabled = state.cur <= 1;
@@ -83,6 +82,11 @@ export function createBar(ctx: DeckContext): Bar {
       ticks.replaceChildren();
       hideTip();
       cExpl.classList.remove("swap"); cDesc.classList.remove("swap");
+      $("#counter").textContent = "Step 0 / 0";
+      chip.classList.add("none");
+      $("#chipText").textContent = "No flow";
+      $("#cMeta").textContent = "";
+      cDesc.textContent = "";
     },
   };
 }

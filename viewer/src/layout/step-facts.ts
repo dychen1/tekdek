@@ -1,6 +1,6 @@
 /* Step facts. This module owns the text of the code column's fact block: the transition from the previous step,
-   the call lists, the other visits, and the note that replaces code when the source cannot be shown.
-   It returns plain text and plain records; the code column escapes them. */
+   the call lists, the other visits, the note that replaces code when the source cannot be shown, and the line
+   numbers of the code viewer. It returns plain text and plain records; the code column escapes them. */
 import type { DeckCall, DeckFunction, SourceView, Transition } from "../data/models.ts";
 
 /** The sentence for the transition into the current step. The flow start and a gap also carry a tag. */
@@ -42,17 +42,29 @@ export const calleesOf = (key: string, calls: readonly DeckCall[]) => distinct(c
 /** The visits of the function other than the current step. */
 export const otherVisits = (visits: readonly number[], current: number) => visits.filter(i => i !== current);
 
-/** The note that replaces code, or null when the source can show. The text may hold `code` spans. */
+/** The note that replaces code, or null when the source can show. The text may hold `code` spans.
+ *  An `ok` answer with no lines counts as unreadable. */
 export function sourceNote(view: SourceView | undefined): string | null {
   if (!view) return "This file cannot be read: the viewer server did not send it.";
   switch (view.status) {
-    case "ok": return null;
+    case "ok": return view.lines?.length ? null : "This file cannot be read: the viewer server sent no lines.";
     case "missing": return "This function is not in the current graph.";
     case "changed": return "This file changed after the last index. Run `tekdek index` to see this function.";
     // The file may be readable here, so the note names the function and not the file.
     case "no_range": return "This function cannot be shown: the graph has no source range for it.";
     default: return `This file cannot be read: ${view.reason ?? "unknown reason"}.`;
   }
+}
+
+/** A line number or a count from the `/source` answer, as a whole number. Anything else gives the fallback. */
+export const whole = (value: unknown, fallback: number) => (Number.isSafeInteger(value) ? value as number : fallback);
+
+/** Returns the indexes of a line range in `count` shown lines that start at line `first`, cut at the last shown line.
+ *  Returns null when the range is not a pair of whole numbers or does not start in the shown lines. */
+export function lineSpan(range: readonly [number, number] | null | undefined, first: number, count: number): { from: number; to: number } | null {
+  if (!Array.isArray(range)) return null;
+  const from = whole(range[0], -1) - first, to = Math.min(whole(range[1], -1) - first, count - 1);
+  return from >= 0 && to >= from ? { from, to } : null;
 }
 
 /** A signature on one line: no space after "(", no trailing comma before ")", one space between words. */

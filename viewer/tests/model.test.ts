@@ -1,4 +1,4 @@
-// Tests for the deck model: derived maps, the rest state, and the file that the file box shows.
+// Tests for the deck model: membership, derived maps, the rest state, and the file that the file box shows.
 
 import assert from "node:assert/strict";
 import test from "node:test";
@@ -7,13 +7,21 @@ import { deckFlow, deckGraph } from "../src/data/adapt.ts";
 import type { DeckFlow } from "../src/data/models.ts";
 import { isShown } from "../src/layout/explorer.ts";
 import { MIN_DECK_W } from "../src/layout/deck-geometry.ts";
-import { buildModel, initialState, shownFile } from "../src/deck/model.ts";
+import { buildModel, initialState, shownFile, withMembership } from "../src/layout/model.ts";
 
 import { artifact, DIGEST, graphDocument, must } from "./fixtures.ts";
 
-const graph = deckGraph(graphDocument(), "demo");
+const graph = deckGraph(graphDocument());
 const flow = deckFlow(artifact, graph, DIGEST);
 const model = buildModel(graph, flow, new Map());
+
+test("membership marks each function with the cluster that holds it", () => {
+  const graph = deckGraph(graphDocument());
+  const marked = withMembership(graph, deckFlow(artifact, graph, DIGEST));
+  assert.equal(marked.functions.filter(fn => fn.cluster).length, 21);
+  assert.equal(must(marked.functions.find(fn => fn.id === "src/main.rs::callable:main")).cluster, "route-command");
+  assert.equal(graph.functions.filter(fn => fn.cluster).length, 0, "the source graph stays unmarked");
+});
 
 test("members follow their first visit and the deck is as wide as the widest cluster needs", () => {
   for (const cluster of model.clusters) {
@@ -66,4 +74,16 @@ test("a step whose function the graph lost shows no file", () => {
   const state = initialState(broken);
   state.cur = 1;
   assert.equal(shownFile(broken, state), null);
+  assert.equal(broken.stepAt(1)?.missing, true);
+  assert.equal(broken.fnAt(1), null);
+});
+
+test("the step and its function at an index, and neither at rest or past the end", () => {
+  const step = must(model.stepAt(1), "step 1");
+  assert.equal(step, model.steps[0]);
+  assert.equal(must(model.fnAt(1), "step 1 function").id, step.node);
+  for (const index of [0, model.N + 1]) {
+    assert.equal(model.stepAt(index), null);
+    assert.equal(model.fnAt(index), null);
+  }
 });

@@ -1,10 +1,11 @@
 /* Deck instance. This module creates the deck for one codebase and one flow, wires its modules, and owns the step
-   controller, the placement of the file box and the pinned deck, and the draw loop. The page shell (`index.html`)
-   holds the static elements; an instance fills them, and `destroy` empties them.
+   controller and the placement of the file box and the pinned deck. The page shell (`index.html`) holds the static
+   elements; an instance fills them, and `destroy` empties them.
    # Sections
-   instance, stepping, placement, draw loop, boot and teardown */
+   instance, stepping, placement, boot and teardown */
 import { deckSpot, fileBoxCenter, FILE_X, startZoom, type Frame } from "../layout/deck-geometry.ts";
 import { openTo } from "../layout/explorer.ts";
+import { buildModel, initialState } from "../layout/model.ts";
 import { clamp, f1 } from "../layout/util.ts";
 import { createBar } from "./bar.ts";
 import { createClusterDeck } from "./cluster-deck.ts";
@@ -13,10 +14,9 @@ import { createExplorer } from "./explorer.ts";
 import { createFileBox } from "./file-box.ts";
 import { createInput } from "./input.ts";
 import { createLinks } from "./links.ts";
-import { $, buildModel, initialState, type DeckContext, type DeckOptions, type DeckParts } from "./model.ts";
+import { $, type DeckContext, type DeckOptions, type DeckParts } from "./context.ts";
 import { createTools } from "./tools.ts";
 
-export type { DeckOptions } from "./model.ts";
 
 export interface DeckInstance {
   go(step: number): void;
@@ -41,20 +41,18 @@ export function createDeck(options: DeckOptions): DeckInstance {
   const model = buildModel(options.graph, options.flow, options.sources);
   const state = initialState(model);
   const ctx: DeckContext = {
-    options, model, state, parts: {} as DeckParts, signal: abort.signal,
-    reducedMotion: window.matchMedia("(prefers-reduced-motion: reduce)").matches,
-    go, place, kick,
+    model, state, parts: {} as DeckParts, signal: abort.signal, go, place, placeSoon,
   };
   let alive = true;
   /** The cluster whose deck shows, or null. */
   let deckCluster: string | null = null;
-  // The page shell holds these elements. `place` and `kick` read them, so they come before the parts.
+  // The page shell holds these elements. `place` reads them, so they come before the parts.
   const cv = $("#cv"), fileblk = $("#fileblk"), frameEl = $("#frame"), card = $("#card");
-  let drawUntil = 0, drawRaf = 0;
+  let placeRaf = 0;
   // The boot class keeps the first frames still: no fade, no transition. It also covers a URL step.
   document.body.classList.add("booting");
   // Every module reads the others through `ctx.parts` at call time, so the creation order is free.
-  // A part may call `ctx.kick` while it is created. It may call `ctx.place` only after all parts exist.
+  // A part may call `ctx.place` only after all parts exist.
   const parts = ctx.parts;
   parts.explorer = createExplorer(ctx);
   parts.fileBox = createFileBox(ctx);
@@ -63,8 +61,14 @@ export function createDeck(options: DeckOptions): DeckInstance {
   parts.code = createCode(ctx);
   parts.bar = createBar(ctx);
   parts.tools = createTools(ctx);
-  parts.input = createInput(ctx);
+  createInput(ctx);
   const { explorer, fileBox, clusterDeck, links, code, bar, tools } = parts;
+  // Every element that goes to a step carries `data-step`: in the file box, the deck, the code column, and the step strip.
+  document.addEventListener("click", e => {
+    const t = (e.target as Element).closest<HTMLElement>("[data-step]");
+    if (t) go(+t.dataset.step!);
+  }, { signal: abort.signal });
+  addEventListener("resize", placeSoon, { signal: abort.signal });
 
   // ============ stepping ============
   // Nothing on the canvas moves between steps: each step sets the file box, the deck, and the connectors at their
@@ -84,13 +88,13 @@ export function createDeck(options: DeckOptions): DeckInstance {
 
   /** Shows the current step in every part. `prev` is the step before it. */
   function render(prev: number) {
-    const n = state.cur, step = n ? model.steps[n - 1] : null;
-    const cluster = n ? model.stepCluster(n) : null;
+    const n = state.cur, step = model.stepAt(n);
+    const cluster = model.stepCluster(n);
     const clusterChanged = prev !== n && (!n || !prev || cluster !== model.stepCluster(prev));
     document.documentElement.style.setProperty("--cc", cluster ? model.CL.get(cluster)!.cv : "var(--accent)");
     document.body.classList.toggle("flow", !!step);
     options.onStep?.(n);
-    const fn = step && !step.missing ? model.FN.get(step.node) : undefined;
+    const fn = model.fnAt(n);
     const row = fn ? model.rowByPath.get(fn.file) : undefined;
     if (row) openTo(state.open, row);
     explorer.sync();
@@ -103,8 +107,6 @@ export function createDeck(options: DeckOptions): DeckInstance {
     place();
     bar.render(clusterChanged);
     tools.sync();
-    links.draw();
-    kick(clusterChanged ? 2200 : 1000);
   }
 
   // ============ placement ============
@@ -133,16 +135,9 @@ export function createDeck(options: DeckOptions): DeckInstance {
     return { frame, spot };
   }
 
-  // ============ draw loop ============
-  // Draw every frame while something can still move (layout, fonts), then stop.
-
-  function kick(ms: number) {
-    drawUntil = Math.max(drawUntil, performance.now() + (ctx.reducedMotion ? 0 : ms));
-    if (!drawRaf) drawRaf = requestAnimationFrame(loop);
-  }
-  function loop() {
-    links.draw();
-    drawRaf = performance.now() < drawUntil ? requestAnimationFrame(loop) : 0;
+  function placeSoon() {
+    if (placeRaf) return;
+    placeRaf = requestAnimationFrame(() => { placeRaf = 0; tools.layoutTop(); place(); });
   }
 
   // ============ boot and teardown ============
@@ -161,29 +156,26 @@ export function createDeck(options: DeckOptions): DeckInstance {
     document.body.classList.remove("booting");
     links.draw();
   }));
+  // Loaded fonts change line heights. The code column renders first: its step text moves the code header that the arrow joins.
   document.fonts?.ready.then(() => {
     if (!alive) return;
     tools.layoutTop();
-    place();
     code.render(state.cur);
-    links.draw();
+    place();
   });
 
   function destroy() {
     alive = false;
     abort.abort();
-    if (drawRaf) cancelAnimationFrame(drawRaf);
-    drawRaf = 0;
-    for (const part of [parts.input, tools, bar, code, links, clusterDeck, fileBox, explorer]) part.destroy();
+    if (placeRaf) cancelAnimationFrame(placeRaf);
+    placeRaf = 0;
+    for (const part of [tools, bar, code, links, clusterDeck, fileBox, explorer]) part.destroy();
     document.body.classList.remove("flow", "full", "booting");
     document.documentElement.style.removeProperty("--cc");
   }
 
   /** The `d` attribute of a connector path, or null when the connector is hidden. */
-  const pathOf = (group: string, path: string, hidden: (g: SVGGElement) => boolean) => {
-    const g = $<SVGGElement>(group);
-    return hidden(g) ? null : $<SVGPathElement>(path).getAttribute("d");
-  };
+  const pathOf = (group: string, path: string) => ($(group).classList.contains("away") ? null : $(path).getAttribute("d"));
 
   return {
     go, destroy,
@@ -197,9 +189,9 @@ export function createDeck(options: DeckOptions): DeckInstance {
       deckRect: () => rectOf(cv.querySelector(".deckcam")),
       fileNodeRect: () => rectOf(fileBox.nodeEl()),
       paths: () => ({
-        guide: pathOf("#guideG", "#guidePath", g => g.style.display === "none"),
-        tether: pathOf("#tetherG", "#tetherPath", g => g.style.display === "none"),
-        arrow: pathOf("#arrowG", "#arrPath", g => g.classList.contains("away")),
+        guide: pathOf("#guideG", "#guidePath"),
+        tether: pathOf("#tetherG", "#tetherPath"),
+        arrow: pathOf("#arrowG", "#arrPath"),
       }),
     },
   };

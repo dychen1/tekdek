@@ -2,15 +2,15 @@
    header (`path:line`), and the code viewer with its line numbers, colors, and margin marks. The facts come from
    `layout/step-facts.ts` and the lines from the `/source` answer. Every data string goes through `esc`.
    # Sections
-   markup, empty states, facts, code viewer, step, events */
+   markup, empty states, facts, code viewer, step */
 import type { DeckStep, SourceView } from "../data/models.ts";
 import { displayName } from "../data/adapt.ts";
 import { highlight } from "../layout/highlight.ts";
 import { nearestStep } from "../layout/plan.ts";
-import { callRefs, calleesOf, callersOf, oneLineSignature, otherVisits, sourceNote, transitionFact, type CallRef } from "../layout/step-facts.ts";
-import { clamp, plural } from "../layout/util.ts";
-import { esc, md } from "./markup.ts";
-import { $, type CodeColumn, type DeckContext } from "./model.ts";
+import { callRefs, calleesOf, callersOf, lineSpan, oneLineSignature, otherVisits, sourceNote, transitionFact, whole, type CallRef } from "../layout/step-facts.ts";
+import { clamp, esc, plural } from "../layout/util.ts";
+import { md } from "./markup.ts";
+import { $, type CodeColumn, type DeckContext } from "./context.ts";
 
 // ============ markup ============
 
@@ -30,9 +30,6 @@ function whereHtml(path: string, line: number | null): string {
   return `<span class="dir">${esc(path.slice(0, cut))}</span>${esc(path.slice(cut))}${line === null ? "" : `<span class="at">:${esc(line)}</span>`}`;
 }
 
-/** A line number or a count from the `/source` answer, as a whole number. Anything else gives the fallback. */
-const whole = (value: unknown, fallback: number) => (Number.isSafeInteger(value) ? value as number : fallback);
-
 /** A call list: names as the graph gives them, file hints dimmed, never merged. A current cluster member takes its color and goes to its step. */
 function refList(refs: readonly CallRef[]): string {
   if (!refs.length) return '<span class="none">none</span>';
@@ -43,15 +40,8 @@ function refList(refs: readonly CallRef[]): string {
   }).join(SEP);
 }
 
-/** The note that replaces code, or null when the code shows. An `ok` answer with no lines counts as unreadable. */
-function codeNote(view: SourceView | undefined): string | null {
-  const note = sourceNote(view);
-  if (note !== null || !view || view.lines?.length) return note;
-  return sourceNote({ ...view, status: "unreadable", reason: "the viewer server sent no lines" });
-}
-
 export function createCode(ctx: DeckContext): CodeColumn {
-  const { model, state, signal } = ctx;
+  const { model, state } = ctx;
   const head = $("#cdHead"), stepEl = $("#cdStep"), whereEl = $("#where"), codeEl = $("#code");
 
   // ============ empty states ============
@@ -107,9 +97,9 @@ export function createCode(ctx: DeckContext): CodeColumn {
     const gut = codeEl.querySelector(".gut")!, els = codeEl.querySelectorAll<HTMLElement>(".cl");
     /** Draws one margin mark over a line range. Returns false when the range is not in the lines. */
     const mark = (range: readonly [number, number] | null | undefined, name: "doc" | "signature"): boolean => {
-      if (!Array.isArray(range)) return false;
-      const from = whole(range[0], -1) - first, to = Math.min(whole(range[1], -1) - first, lines.length - 1), count = to - from + 1;
-      if (from < 0 || count < 1) return false;
+      const span = lineSpan(range, first, lines.length);
+      if (!span) return false;
+      const { from, to } = span, count = to - from + 1;
       const a = els[from], b = els[to];
       const m = document.createElement("div");
       m.className = "mark";
@@ -131,27 +121,27 @@ export function createCode(ctx: DeckContext): CodeColumn {
 
   // ============ step ============
 
-  /** Restarts the 240 ms fade of the step text and the code on a step change, except at boot or with reduced motion. */
+  /** Restarts the fade of the step text and the code on a step change, except at boot. The CSS stops it under reduced motion. */
   function swap(prev: number) {
-    if (prev === state.cur || ctx.reducedMotion || document.body.classList.contains("booting")) return;
+    if (prev === state.cur || document.body.classList.contains("booting")) return;
     for (const el of [stepEl, codeEl]) { el.classList.remove("swap"); void el.offsetWidth; el.classList.add("swap"); }
   }
 
   function render(prev: number) {
-    const step = state.cur ? model.steps[state.cur - 1] : null;
+    const step = model.stepAt(state.cur);
     if (!step) { renderEmpty(); return; }
     head.innerHTML = `<span class="cd-no" aria-label="Step ${step.index}">${step.index}</span>${title(step.title)}`;
     const facts: [string, string][] = [];
     const from = fromFact(step);
     if (from) facts.push(from);
-    const fn = step.missing ? undefined : model.FN.get(step.node);
+    const fn = model.fnAt(state.cur);
     if (!fn) {
       // a step function that the graph no longer has: the note in place of code, and no facts beyond "from"
       whereEl.innerHTML = "";
       codeEl.innerHTML = noteHtml(sourceNote({ key: step.node, status: "missing" }) ?? "");
     } else {
       const view = model.sources.get(step.node), path = view?.path ?? fn.file;
-      const note = codeNote(view);
+      const note = sourceNote(view);
       let marks = { doc: false, sig: false };
       if (note !== null || !view?.lines) {
         whereEl.innerHTML = whereHtml(path, null);
@@ -168,14 +158,6 @@ export function createCode(ctx: DeckContext): CodeColumn {
     stepEl.innerHTML = `<p class="cd-ann">${md(step.annotation)}</p><dl class="cd-facts">${facts.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("")}</dl>`;
     swap(prev);
   }
-
-  // ============ events ============
-
-  stepEl.addEventListener("click", e => {
-    const t = (e.target as Element).closest<HTMLElement>("[data-step]");
-    if (t) ctx.go(+t.dataset.step!);
-  }, { signal });
-  codeEl.addEventListener("scroll", () => ctx.kick(0), { signal });
 
   return {
     render,

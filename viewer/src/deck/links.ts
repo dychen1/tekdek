@@ -2,16 +2,17 @@
    of the two elements that each one joins: the guide (explorer row to file node), the tether (current slot to
    current lid), and the arrow (current lid to code header). Each end touches its element. */
 import { arrowPath, guidePath, tetherPath } from "../layout/paths.ts";
-import { clamp, f1 } from "../layout/util.ts";
-import { $, type DeckContext, type Links } from "./model.ts";
+import { f1 } from "../layout/util.ts";
+import { $, type DeckContext, type Links } from "./context.ts";
 
 export function createLinks(ctx: DeckContext): Links {
   const { state } = ctx;
-  const links = $("#links");
   const guideG = $("#guideG"), guideEl = $("#guidePath");
   const tetherG = $("#tetherG"), tetherEl = $("#tetherPath"), tetherDot = $("#tetherDot");
   const arrowG = $("#arrowG"), arrEl = $("#arrPath"), arrHead = $("#arrHead"), arrDot = $("#arrDot");
   const sbTree = $("#sbTree"), codeHead = $("#codeHead"), frameEl = $("#frame");
+  /** Hides every connector. */
+  const hideAll = () => { for (const g of [guideG, tetherG, arrowG]) g.classList.add("away"); };
 
   /** Draws the guide from the end of the explorer row straight across to the file node. */
   function drawGuide(): boolean {
@@ -30,13 +31,13 @@ export function createLinks(ctx: DeckContext): Links {
   /** Draws the tether from the current slot to the current lid, level out past the widest row, then one S curve. */
   function drawTether(lid: HTMLElement | null): boolean {
     const slot = ctx.parts.fileBox.slotEl();
-    if (!lid || !slot || +getComputedStyle(lid).opacity < 0.02) return false;
+    if (!lid || !slot) return false;
     const s = slot.getBoundingClientRect(), l = lid.getBoundingClientRect();
     const a = { x: s.right, y: s.top + s.height / 2 }, b = { x: l.left, y: l.top + l.height / 2 };
-    if (b.x <= a.x) return false;
-    tetherEl.setAttribute("d", tetherPath(a, ctx.parts.fileBox.rowsRight(), b));
+    const tether = tetherPath(a, ctx.parts.fileBox.rowsRight(), b);
+    tetherEl.setAttribute("d", tether.d);
     tetherDot.setAttribute("cx", f1(a.x)); tetherDot.setAttribute("cy", f1(a.y));
-    return true;
+    return tether.ok;
   }
 
   /** Draws the arrow from the current lid out past the deck's edge, then one S curve into the code header. */
@@ -52,19 +53,12 @@ export function createLinks(ctx: DeckContext): Links {
   }
 
   function draw() {
-    links.style.setProperty("--lk", clamp(state.zoom, 0.6, 1.4).toFixed(2));
-    if (state.full) {
-      guideG.style.display = "none"; tetherG.style.display = "none"; arrowG.classList.add("away");
-      return;
-    }
+    if (state.full) { hideAll(); return; }
     const lid = ctx.parts.clusterDeck.currentLid();
-    guideG.style.display = drawGuide() ? "inline" : "none";
-    tetherG.style.display = drawTether(lid) ? "inline" : "none";
+    guideG.classList.toggle("away", !drawGuide());
+    tetherG.classList.toggle("away", !drawTether(lid));
     arrowG.classList.toggle("away", !drawArrow(lid));
   }
 
-  return {
-    draw,
-    destroy() { guideG.style.display = "none"; tetherG.style.display = "none"; arrowG.classList.add("away"); },
-  };
+  return { draw, destroy: hideAll };
 }

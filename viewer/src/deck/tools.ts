@@ -1,34 +1,23 @@
 /* Deck tools. This module owns the map tools (compact, zoom, key), the key popover with its cluster legend and the
-   theme switch, full screen code, the flow badge with its freshness, and the top band layout. The pickers stay in
-   `main.ts`; the flow badge only calls `options.onFlowPick`.
+   theme switch, full screen code, and the top band layout. `main.ts` owns the flow badge in the top band.
    # Sections
-   flow band, key popover, theme variant, map tools, full screen, top band */
+   key popover, theme variant, map tools, full screen, top band */
 import { rangesOf } from "../layout/plan.ts";
-import { clamp } from "../layout/util.ts";
-import { esc, icon } from "./markup.ts";
-import { $, KEY_VARIANT, store, type DeckContext, type Tools } from "./model.ts";
+import { clamp, esc } from "../layout/util.ts";
+import { icon } from "./markup.ts";
+import { $, type DeckContext, type Tools } from "./context.ts";
 
 const VARIANTS = ["night", "storm", "moon"];
+const KEY_VARIANT = "tekdek.deck.variant";
+
+/** Per-viewer conveniences. Blocked storage keeps the in-memory state. */
+const store = {
+  get(key: string) { try { return localStorage.getItem(key); } catch { return null; } },
+  set(key: string, value: string) { try { localStorage.setItem(key, value); } catch { /* storage is blocked */ } },
+};
 
 export function createTools(ctx: DeckContext): Tools {
-  const { model, state, options, signal } = ctx;
-  const { flow } = model;
-
-  // ============ flow band ============
-  // The flow badge is a picker when the codebase has more than one flow. Freshness and the generation follow it.
-
-  if (flow && options.flowCount > 1) {
-    $("#flowPick").outerHTML = `<button class="pbadge" id="flowPick" type="button" aria-haspopup="dialog" aria-expanded="false" aria-label="Flow ${esc(flow.name)}. Choose another flow">` +
-      `<span>${esc(flow.name)}</span>${icon("chev")}</button>`;
-    const badge = $("#flowPick");
-    badge.addEventListener("click", () => options.onFlowPick?.(badge), { signal });
-  } else {
-    $("#flowPick").outerHTML = flow ? `<span class="pbadge" id="flowPick"><span>${esc(flow.name)}</span></span>` : '<span id="flowPick"></span>';
-  }
-  const fhMeta = $("#fhMeta");
-  fhMeta.innerHTML = flow
-    ? `${flow.stale ? '<b style="color:var(--warn)">stale</b>' : '<b class="fresh">fresh</b>'} · generation ${esc(flow.generation)}`
-    : "";
+  const { model, state, signal } = ctx;
 
   // ============ key popover ============
   // One legend row for each cluster that a step lifts. A row goes to the cluster's first step.
@@ -65,7 +54,7 @@ export function createTools(ctx: DeckContext): Tools {
     varBtns.forEach(b => b.setAttribute("aria-pressed", String(b.dataset.variant === name)));
     if (save) store.set(KEY_VARIANT, name);
   }
-  varBtns.forEach(b => b.addEventListener("click", () => { setVariant(b.dataset.variant!, true); ctx.kick(0); }, { signal }));
+  varBtns.forEach(b => b.addEventListener("click", () => setVariant(b.dataset.variant!, true), { signal }));
   setVariant(store.get(KEY_VARIANT), false);
 
   // ============ map tools ============
@@ -77,7 +66,7 @@ export function createTools(ctx: DeckContext): Tools {
     compactBtn.disabled = !state.cur;
     compactBtn.setAttribute("aria-pressed", String(state.compact));
     zoomLbl.textContent = `${Math.round(state.zoom * 100)}%`;
-    const id = state.cur ? model.stepCluster(state.cur) : null;
+    const id = model.stepCluster(state.cur);
     kpClusters.querySelectorAll<HTMLElement>(".kp-c").forEach(b => b.classList.toggle("on", !!id && b.dataset.c === id));
   }
 
@@ -86,7 +75,6 @@ export function createTools(ctx: DeckContext): Tools {
     state.zoom = clamp(Math.round(k * 100) / 100, 0.5, 1.5);
     ctx.place();
     sync();
-    ctx.kick(600);
   }
 
   /** Stubs or names the functions off the flow. Compact starts on at every load; nothing stores it. */
@@ -96,7 +84,6 @@ export function createTools(ctx: DeckContext): Tools {
     ctx.parts.fileBox.render();
     ctx.place();
     sync();
-    ctx.kick(800);
   }
 
   compactBtn.addEventListener("click", toggleCompact, { signal });
@@ -113,16 +100,15 @@ export function createTools(ctx: DeckContext): Tools {
     fullBtn.setAttribute("aria-pressed", String(on)); fullBtn.title = label; fullBtn.setAttribute("aria-label", label);
     fullBtn.innerHTML = icon(on ? "exit" : "full");
   }
-  /** Shows the code full screen over the canvas, or returns to the canvas with its connectors drawn at once. */
+  /** Shows the code full screen over the canvas with no connectors, or returns to the canvas with its connectors drawn at once. */
   function setFull(on: boolean) {
     state.full = on;
     showFull(on);
-    if (!on) {
-      layoutTop();
-      // the explorer does not scroll to the current row in full screen: the canvas frame has no size there
-      ctx.parts.explorer.reveal();
-      ctx.place();
-    }
+    if (on) { ctx.parts.links.draw(); return; }
+    layoutTop();
+    // the explorer does not scroll to the current row in full screen: the canvas frame has no size there
+    ctx.parts.explorer.reveal();
+    ctx.place();
   }
   fullBtn.addEventListener("click", () => setFull(!state.full), { signal });
 
@@ -137,12 +123,10 @@ export function createTools(ctx: DeckContext): Tools {
   }
 
   return {
-    sync, layoutTop, setFull, toggleCompact, setZoom, keyOpen, setKey,
+    sync, layoutTop, setFull, toggleCompact, keyOpen, setKey,
     destroy() {
       setKey(false);
       kpClusters.replaceChildren();
-      fhMeta.replaceChildren();
-      $("#flowPick").outerHTML = '<span id="flowPick"></span>';
       showFull(false);
     },
   };

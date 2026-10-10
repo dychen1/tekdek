@@ -65,14 +65,10 @@
   --key-lift-shadow:0 5px 6px color-mix(in srgb,var(--tn-black) 85%,transparent);
   --front-mix:44%;
   --icon-stroke:1.5;
-  /* geometry: a straight 15 degree pitch, no yaw; the script reads the same numbers */
-  --deck-z:170px; --deck-t:30px; --box-h:28px; --focus-dz:30px; --shadow-dy:28px; --bh:32px;
-  --ease-lift:cubic-bezier(.45,.05,.25,1);
-  --ease-rise:cubic-bezier(.22,1.22,.42,1);
-  --ease-sink:cubic-bezier(.55,0,.85,.35);
-  --ease-slab:cubic-bezier(.2,1.12,.35,1);
+  /* geometry of the deck and its boxes; the deck camera sets --deck-z from DECK_Z in layout/deck-geometry.ts */
+  --deck-t:30px; --box-h:28px; --focus-dz:30px; --shadow-dy:28px; --bh:32px;
   --ease-out:cubic-bezier(.16,1,.3,1);
-  --dur-hover:110ms; --dur-pop:140ms; --dur-drawer:200ms; --dur-state:240ms; --dur-layout:520ms;
+  --dur-hover:110ms; --dur-pop:140ms; --dur-state:240ms;
   --blink:1060ms;
   /* layout: explorer at left, the code column at right, the canvas frame and the bottom bar between them */
   --sb:262px; --rc:clamp(440px,36vw,580px); --gap:12px; --lab:66px;
@@ -103,7 +99,7 @@ code{font:inherit;color:var(--keyword)}
   border:1px dashed var(--frame-line);border-radius:var(--r-l);pointer-events:none;
   background-image:radial-gradient(circle,var(--grid-dot) 0 .8px,transparent 1.2px);background-size:18px 18px;background-position:9px 9px}
 /* the canvas world: a zero-size layer in screen coordinates. Zoom scales it around the current slot. */
-.cv{position:fixed;z-index:2;left:0;top:0;width:0;height:0;pointer-events:none;transition:transform 260ms var(--ease-out)}
+.cv{position:fixed;z-index:2;left:0;top:0;width:0;height:0;pointer-events:none}
 
 /* ============ file box and its rows ============ */
 /* the file box never moves on screen: each step sets its place and its rows at once, then the connectors are drawn */
@@ -117,8 +113,7 @@ code{font:inherit;color:var(--keyword)}
 .row.file .node{gap:2px;height:20px;padding:0 9px 0 2px;border:1px solid var(--line-strong);border-radius:var(--r-s);background:var(--surface-file);
   font:var(--fw-bold) var(--fs-code) var(--font-code);color:var(--ink)}
 .row.file.curfile .node{border-color:var(--cc);outline:1px solid color-mix(in srgb,var(--cc) 55%,transparent);outline-offset:1.5px}
-.fold{flex:0 0 16px;width:16px;height:16px;padding:0;display:grid;place-items:center;border:0;border-radius:var(--r-xs);background:transparent;color:var(--dim);cursor:pointer;
-  transition:transform var(--dur-drawer) var(--ease-out),background-color var(--dur-hover),color var(--dur-hover)}
+.fold{flex:0 0 16px;width:16px;height:16px;padding:0;display:grid;place-items:center;border:0;border-radius:var(--r-xs);background:transparent;color:var(--dim);cursor:pointer}
 .fold .ic{width:12px;height:12px}
 .fold:hover{background:var(--surface-hover);color:var(--ink)}
 .row.folded .fold{transform:rotate(-90deg)}
@@ -138,21 +133,16 @@ code{font:inherit;color:var(--keyword)}
   color:color-mix(in srgb,var(--c) 58%,var(--ink-2));font-size:var(--fs-code)}
 .row.fn.ghost.focus .node{border-color:var(--light);color:var(--ink)}
 .spill{min-width:22px;height:18px;padding:0 5px;border:1px solid color-mix(in srgb,var(--c) 70%,transparent);border-radius:var(--r-s);background:transparent;
-  font:var(--fs-ui-s)/16px var(--font-code);color:var(--ink);cursor:pointer;pointer-events:auto;transition:border-color var(--dur-hover),background-color var(--dur-hover)}
+  font:var(--fs-ui-s)/16px var(--font-code);color:var(--ink);cursor:pointer;pointer-events:auto}
 .spill:hover{border-color:var(--c);background:color-mix(in srgb,var(--c) 16%,transparent)}
 
 /* ============ deck (one per cluster) ============ */
-.deckcam{position:absolute;left:0;top:0;width:0;height:0;transform-style:preserve-3d;transform-origin:0 0;pointer-events:none;
-  transition:transform var(--dur-layout) var(--ease-lift)}
-.noanim,.noanim *{transition:none !important}
+.deckcam{position:absolute;left:0;top:0;width:0;height:0;transform-style:preserve-3d;transform-origin:0 0;pointer-events:none}
 .slab{position:absolute;left:0;top:0;transform-style:preserve-3d;pointer-events:none}
 .slab .shadow{position:absolute;inset:0;border-radius:var(--r-l);background:var(--shade);filter:blur(16px);
-  transform:translate3d(0,var(--shadow-dy),.3px) scale(.97);opacity:0;transition:opacity 420ms linear}
-.slab.up .shadow{opacity:1;transition:opacity 620ms linear 140ms}
-.deck{position:absolute;inset:0;transform-style:preserve-3d;transform:translateZ(0);transition:transform 460ms var(--ease-sink)}
-.slab.up .deck{transform:translateZ(var(--deck-z));transition:transform 700ms var(--ease-slab)}
-.deck>div{position:absolute;opacity:0;transition:opacity 260ms linear 220ms}
-.slab.up .deck>div{opacity:1;transition:opacity 220ms linear}
+  transform:translate3d(0,var(--shadow-dy),.3px) scale(.97)}
+.deck{position:absolute;inset:0;transform-style:preserve-3d;transform:translateZ(var(--deck-z))}
+.deck>div{position:absolute}
 .dtop{inset:0;border:1px solid var(--c);border-radius:var(--r-m);
   background:
     linear-gradient(color-mix(in srgb,var(--c) 34%,var(--deck-ground)),color-mix(in srgb,var(--c) 34%,var(--deck-ground))) top left / 100% 36px no-repeat,
@@ -165,22 +155,18 @@ code{font:inherit;color:var(--keyword)}
 .dlabel .dname{min-width:0;overflow:hidden;text-overflow:ellipsis}
 
 /* ============ lifted boxes: a lid and a front face ============ */
-.mbox{position:absolute;left:0;top:0;width:var(--lw);height:var(--bh);transform-style:preserve-3d;pointer-events:none;
-  transition:transform 440ms var(--ease-sink) var(--dly,0ms),width 320ms var(--ease-lift)}
-.mbox.up{transition:transform 720ms var(--ease-rise) var(--dly,0ms),width 320ms var(--ease-lift)}
-.riser{position:absolute;inset:0;transform-style:preserve-3d;transform:translateZ(0);transition:transform 420ms cubic-bezier(.3,1.4,.5,1)}
+.mbox{position:absolute;left:0;top:0;width:var(--lw);height:var(--bh);transform-style:preserve-3d;pointer-events:none}
+.riser{position:absolute;inset:0;transform-style:preserve-3d;transform:translateZ(0)}
 .mbox.focus .riser{transform:translateZ(var(--focus-dz))}
-.mbox .face{position:absolute;opacity:0;transition:opacity 160ms linear calc(var(--dly,0ms) + 320ms)}
-.mbox.up .face{opacity:1;transition:opacity 140ms linear var(--dly,0ms)}
+.mbox .face{position:absolute}
 .mbox .lid{left:0;top:0;width:100%;height:100%;transform:translateZ(var(--box-h));display:flex;align-items:center;gap:2px;padding:0 7px 0 0;
-  border:1px solid var(--c);border-radius:var(--r-s);background:var(--card-face);box-shadow:var(--face-light);transition:opacity 140ms linear var(--dly,0ms),border-color var(--dur-hover)}
-.mbox.up .lid{pointer-events:auto}
-.mbox.up .lid:hover{border-color:color-mix(in srgb,var(--c) 55%,var(--light))}
+  border:1px solid var(--c);border-radius:var(--r-s);background:var(--card-face);box-shadow:var(--face-light);pointer-events:auto}
+.mbox .lid:hover{border-color:color-mix(in srgb,var(--c) 55%,var(--light))}
 .mbox .front{left:0;top:100%;width:100%;height:var(--box-h);transform-origin:50% 0;transform:translateZ(var(--box-h)) rotateX(-90deg);
   border-radius:0 0 var(--r-s) var(--r-s);background:color-mix(in srgb,var(--c) var(--front-mix),var(--tn-black))}
-.mbox .fshadow{left:3px;top:6px;right:3px;bottom:-4px;border-radius:var(--r-m);background:var(--shade);filter:blur(6px);transform:translateZ(.5px);opacity:0 !important}
-.mbox.up.focus .fshadow{opacity:.9 !important}
-.lid .ptr{position:absolute;left:1px;top:50%;margin-top:-6px;opacity:0;transition:opacity var(--dur-hover)}
+.mbox .fshadow{left:3px;top:6px;right:3px;bottom:-4px;border-radius:var(--r-m);background:var(--shade);filter:blur(6px);transform:translateZ(.5px);opacity:0}
+.mbox.focus .fshadow{opacity:.9}
+.lid .ptr{position:absolute;left:1px;top:50%;margin-top:-6px;opacity:0}
 .mbox.focus .lid .ptr{opacity:1}
 .tmain{flex:1 1 auto;min-width:0;height:100%;padding:0 4px 0 13px;display:flex;flex-direction:column;justify-content:center;align-items:flex-start;
   border:0;border-radius:var(--r-s);background:transparent;cursor:pointer;text-align:left}
@@ -196,16 +182,16 @@ code{font:inherit;color:var(--keyword)}
 .mbox.focus .lid{border-color:var(--light);box-shadow:var(--face-light-hot);outline:1px solid var(--c);outline-offset:2px}
 
 /* ============ connectors: three at most, in screen space, from the rects they join ============ */
-.links{position:fixed;inset:0;width:100vw;height:100vh;z-index:7;pointer-events:none;overflow:visible;--lk:1}
+.links{position:fixed;inset:0;width:100vw;height:100vh;z-index:7;pointer-events:none;overflow:visible}
+/* a connector that cannot be drawn carries .away */
+.links .away{display:none}
 /* (a) guide: the explorer row's tree guide, continued straight into the file box */
-.guide{display:none}
 .guide path{fill:none;stroke:var(--line);stroke-width:1px;stroke-linecap:butt;stroke-linejoin:round}
 /* (b) tether: the current slot to the current box, the arrow's curve and stroke in the cluster color */
-.tether{display:none;--c:var(--cc)}
+.tether{--c:var(--cc)}
 .tether .tp{fill:none;stroke:var(--c);stroke-width:1.5;stroke-linecap:butt}
 .tether .td{fill:var(--c)}
 /* (c) stack arrow: the current box to the code header, in the accent. Connectors never animate: drawn at their final shape. */
-.arrowg.away{display:none}
 .arrowg .arr{fill:none;stroke:var(--accent);stroke-width:1.5;stroke-linecap:butt}
 .arrowg .head,.arrowg .dot{fill:var(--accent)}
 
@@ -301,9 +287,8 @@ button.pbadge:hover{filter:brightness(1.12)}
 .kp-lift::after{content:"";position:absolute;left:-1px;right:-1px;top:100%;height:4px;border-radius:0 0 var(--r-xs) var(--r-xs);background:color-mix(in srgb,var(--ink-2) 40%,var(--tn-black))}
 .kp-g{margin-top:5px;overflow:visible}
 .kp-g .g1{stroke:var(--line);stroke-width:1;fill:none}
-.kp-g .g2{stroke:color-mix(in srgb,var(--ink-2) 80%,var(--light));stroke-width:2;fill:none}
 .kp-g .g3{stroke:var(--accent);stroke-width:1.5;fill:none}
-.kp-g circle{fill:var(--ink-2)} .kp-g .h3{fill:var(--accent)}
+.kp-g .h3{fill:var(--accent)}
 .kp-keys{margin:10px 0 0;padding:10px 0 0;border-top:1px solid var(--line-faint);display:grid;grid-template-columns:48px 1fr;gap:3px 10px;font:var(--fs-ui-s)/18px var(--font-code);color:var(--ink-2)}
 .kp-keys dt{display:flex;align-items:center;gap:1px}
 .kp-keys dd{margin:0}
@@ -352,7 +337,7 @@ kbd{display:inline-flex;align-items:center;gap:1px;height:16px;padding:0 4px;bor
 .cursor{flex:0 0 auto;width:8px;height:15px;margin-left:3px;border-radius:1px;background:var(--accent);animation:blink var(--blink) steps(1,end) infinite}
 @keyframes blink{50%{opacity:0}}
 .cd-step{flex:0 0 auto;padding:8px 16px 12px}
-.cd-step.swap,.code.swap{animation:swap 240ms var(--ease-out)}
+.cd-step.swap,.code.swap{animation:swap var(--dur-state) var(--ease-out)}
 .cd-ann{margin:0;font:var(--fs-ui)/1.6 var(--font-code);color:var(--ink)}
 .cd-facts{margin:10px 0 0;display:grid;grid-template-columns:var(--lab) minmax(0,1fr);gap:2px 0;font:var(--fs-ui-s)/1.6 var(--font-code);font-variant-ligatures:none}
 .cd-facts dt{color:var(--dim)}
@@ -404,7 +389,7 @@ button.ref:hover{text-decoration:underline;text-underline-offset:3px}
 .c1{display:flex;align-items:center;gap:5px;min-width:0}
 .counter{flex:0 0 auto;margin:0 6px 0 8px;font:var(--fs-ui) var(--font-code);color:var(--ink-2);white-space:nowrap}
 .cexpl{flex:1 1 auto;min-width:0;display:flex;align-items:center;gap:10px}
-.cexpl.swap,.c-desc.swap{animation:swap 240ms var(--ease-out)}
+.cexpl.swap,.c-desc.swap{animation:swap var(--dur-state) var(--ease-out)}
 .chip{flex:0 1 auto;min-width:0;display:flex;align-items:center;white-space:nowrap;font:var(--fw-bold) var(--fs-ui-s) var(--font-code)}
 .chip span{min-width:0;max-width:100%;height:19px;padding:0 7px;display:block;overflow:hidden;text-overflow:ellipsis;line-height:19px;border-radius:var(--r-s);background:var(--c);color:var(--on-accent)}
 .chip.none span{padding:0 6px;background:transparent;border:1px dashed var(--line-strong);line-height:17px;color:var(--dim);font-weight:400}

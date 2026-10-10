@@ -19,14 +19,6 @@ try { const v = localStorage.getItem('tekdek.deck.variant'); if (v === 'storm' |
 <script type="module" src="./dist/app.js"></script>
 </head>
 <body class="booting">
-<!-- DIRECTION CONTRACT
-THESIS: A flow reads as one walk in a Tokyo Night terminal world. The explorer names the file, the file box shows its functions, one pinned cluster deck holds the cluster's functions as lifted boxes, and the code column shows the source of the current step.
-OWN-WORLD: Terminals and editors themed Tokyo Night. Blue-black ground, periwinkle text, blue for focus and the cursor, orange for the step number, magenta for keys. One monospace family.
-STORY: Press the right arrow. The file box shows the functions of the current file. The deck of the current cluster stands beside it, seen straight on, with its boxes in step order. A tether joins the current slot to its box. An arrow joins the box to its source in the code column. Nothing on the canvas moves between steps; only the code column and the bar text fade in.
-FIRST VIEWPORT: The guided file tree at left, an empty dashed canvas frame, the code column at right that says the flow is clear and that k starts it, the prompt-like bottom bar with an empty step strip, and a help line under it.
-FORM: user-selected prototype; handoff ~/Developer/denis/tekdek-design-explorations/2026-10-09-branching-layout/design-handoff.md; selection option-7 deck + code column
-FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, and DESIGN.md
--->
 <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
   <symbol id="i-chev" viewBox="0 0 16 16"><path d="M4 6l4 4 4-4"/></symbol>
   <symbol id="i-minus" viewBox="0 0 16 16"><path d="M4 8h8"/></symbol>
@@ -93,7 +85,7 @@ FINISH: unreviewed and undocumented is unfinished; this build ends with the fini
     <button class="cbtn" id="prevBtn" type="button" aria-label="Previous step"><svg class="ic" aria-hidden="true"><use href="#i-prev"/></svg></button>
     <button class="cbtn" id="nextBtn" type="button" aria-label="Next step"><svg class="ic" aria-hidden="true"><use href="#i-next"/></svg></button>
     <div class="counter" id="counter" aria-live="polite">Step 0 / 0</div>
-    <div class="cexpl" id="cExpl"><div class="chip none" id="chip"><span id="chipText"></span></div><span class="cmeta" id="cMeta"></span></div>
+    <div class="cexpl" id="cExpl"><div class="chip none" id="chip"><span id="chipText">No flow</span></div><span class="cmeta" id="cMeta"></span></div>
     <button class="cbtn quiet" id="clearBtn" type="button" aria-label="Clear the flow"><svg class="ic" aria-hidden="true"><use href="#i-x"/></svg></button>
   </div>
   <p class="c-desc" id="cDesc"></p>
@@ -107,9 +99,9 @@ FINISH: unreviewed and undocumented is unfinished; this build ends with the fini
 </main>
 
 <svg class="links" id="links" aria-hidden="true">
-  <g class="guide" id="guideG"><path id="guidePath" d="M0 0"/></g>
-  <g class="tether" id="tetherG"><path class="tp" id="tetherPath" d="M0 0"/><circle class="td" id="tetherDot" r="3.5" cx="0" cy="0"/></g>
-  <g class="arrowg" id="arrowG"><path class="arr" id="arrPath" d="M0 0"/><path class="head" id="arrHead" d="M0 0"/><circle class="dot" id="arrDot" r="3.5" cx="0" cy="0"/></g>
+  <g class="guide away" id="guideG"><path id="guidePath" d="M0 0"/></g>
+  <g class="tether away" id="tetherG"><path class="tp" id="tetherPath" d="M0 0"/><circle class="td" id="tetherDot" r="3.5" cx="0" cy="0"/></g>
+  <g class="arrowg away" id="arrowG"><path class="arr" id="arrPath" d="M0 0"/><path class="head" id="arrHead" d="M0 0"/><circle class="dot" id="arrDot" r="3.5" cx="0" cy="0"/></g>
 </svg>
 
 <div class="pop tip" id="tip" role="tooltip"></div>

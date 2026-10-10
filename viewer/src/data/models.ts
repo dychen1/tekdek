@@ -6,7 +6,7 @@
 // ============ artifact index ============
 
 /** One flow in the artifact index. `file` points to a frozen schema 3 generation under `flows/`. */
-export interface FlowEntry { name: string; file: string; behavior?: string; stepCount?: number; clusterCount?: number; schemaVersion?: number; stale?: boolean }
+export interface FlowEntry { name: string; file: string; stepCount?: number; clusterCount?: number; schemaVersion?: number; stale?: boolean }
 
 /** One indexed codebase. */
 export interface ArtifactEntry { label?: string; file: string; digest: string; flows?: FlowEntry[] }
@@ -37,7 +37,6 @@ export interface FlowArtifact {
   generation: { ordinal: number };
   facts: { binding: { graphDigest: string }; nodes: { key: string; signature?: string | null; documentation?: string | null }[] };
   intent: {
-    behavior: string;
     clusters: { key: string; label: string; description: string }[];
     steps: { id: string; nodeKey: string; clusterKey: string | null; title: string; annotation: string }[];
   };
@@ -60,7 +59,7 @@ export interface DeckCall { source: string; target: string }
 export interface DeckTree { [name: string]: DeckTree | null }
 
 /** Source facts that the deck shows, independent of any flow. */
-export interface DeckGraph { repo: string; files: string[]; tree: DeckTree; functions: DeckFunction[]; calls: DeckCall[] }
+export interface DeckGraph { tree: DeckTree; functions: DeckFunction[]; calls: DeckCall[] }
 
 /** One flow cluster. `members` holds only functions that the bound graph contains. */
 export interface DeckCluster { id: string; label: string; description: string; color: ClusterColor; members: string[] }

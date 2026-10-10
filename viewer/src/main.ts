@@ -2,12 +2,13 @@
    the source load, and the URL state (`?artifact=&flow=&step=`). It creates one deck for the selected
    codebase and flow, and replaces it on a change.
    # Sections
-   status, loading, pickers, URL state, boot */
+   status, loading, pickers and badges, URL state, boot */
 import type { ArtifactEntry, ArtifactIndex, DeckFlow, DeckGraph, FlowEntry, SourceView } from "./data/models.ts";
-import { deckFlow, deckGraph, pickFlow, frozenFlows } from "./data/adapt.ts";
+import { deckFlow, deckGraph, pickArtifact, pickFlow, frozenFlows } from "./data/adapt.ts";
 import { loadFlow, loadGraph, loadIndex, loadSource, LoadError, type LoadReason } from "./data/load.ts";
 import { createDeck, type DeckInstance } from "./deck/deck.ts";
-import { codebasePicker, esc, flowPicker, icon } from "./deck/markup.ts";
+import { codebasePicker, flowPicker, icon } from "./deck/markup.ts";
+import { esc } from "./layout/util.ts";
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -27,22 +28,14 @@ function showReader(visible: boolean) {
   for (const id of ["codeHead", "code"]) $(id).style.display = visible ? "" : "none";
 }
 
-/** Fills the code column, the bar, and the flow band while no deck is loaded. The chrome stays visible and inert. */
+/** Fills the code column and empties the flow band while no deck is loaded. The chrome stays visible and inert.
+ *  A deck part returns its own elements to the shell state when the deck is destroyed. */
 function showShell(badge: string, color: string, desc: string, meta: string) {
   document.documentElement.style.setProperty("--cc", color);
   $("cdHead").innerHTML = `<span class="pbadge" style="--c:${esc(color)}"><span>${esc(badge)}</span></span>`;
   $("cdStep").innerHTML = `<p class="cd-ann">${desc}</p>` + (meta ? `<p class="cd-empty">${meta}</p>` : "");
   showReader(false);
-  $("where").replaceChildren();
-  $("code").replaceChildren();
-  $("counter").textContent = "Step 0 / 0";
-  $("chip").classList.add("none");
-  $("chipText").textContent = "No flow";
-  $("cMeta").textContent = "";
-  $("cDesc").textContent = "";
-  $("ticks").replaceChildren();
-  $("flowPick").outerHTML = '<span id="flowPick"></span>';
-  $("fhMeta").replaceChildren();
+  renderFlowBand(null);
   setChrome(false);
 }
 
@@ -55,11 +48,11 @@ function setChrome(enabled: boolean) {
 
 /** The recovery step for each cause of a load failure. */
 const RECOVERY: Record<LoadReason, string> = {
-  fetch: "Run <code>make serve</code> from the repository root, then reload this page.",
-  digest: "Reindex the source with <code>cargo run -- &lt;path&gt;</code>, then reload this page.",
-  graph: "Reindex the source with <code>cargo run -- &lt;path&gt;</code> to write a current graph.",
-  flow: "Freeze the flow again with <code>flow import</code>, then reload this page.",
-  empty: "Index a codebase with <code>cargo run -- &lt;path&gt;</code>, then reload this page.",
+  fetch: "Start the viewer server with <code>tekdek serve</code>, then reload this page.",
+  digest: "Reindex the codebase with <code>tekdek index</code>, then reload this page.",
+  graph: "Reindex the codebase with <code>tekdek index</code> to write a current graph.",
+  flow: "Freeze the flow again with <code>tekdek flow import</code>, then reload this page.",
+  empty: "Index a codebase with <code>tekdek index</code>, then reload this page.",
 };
 
 /** Shows a load failure in the code column, with one recovery step.
@@ -96,7 +89,7 @@ async function openArtifact(file: string, flowName: string | null, step: number)
     showLoading(`loading ${name}`);
     const document = await loadGraph(entry);
     if (mine !== ticket) return;
-    graph = deckGraph(document, entry.label ?? entry.file.replace(/\.json$/, ""));
+    graph = deckGraph(document);
     await openFlow(pickFlow(frozenFlows(entry.flows), flowName), step);
   } catch (error) {
     fail(error, mine);
@@ -126,11 +119,8 @@ async function openFlow(next: FlowEntry | null, step: number) {
     showLoading(null);
     setChrome(true);
     showReader(true);
-    deck = createDeck({
-      graph: graph!, flow, sources, flowCount: frozenFlows(entry!.flows).length,
-      onFlowPick: anchor => openPicker(anchor, "flow"),
-      onStep: n => writeUrl(n),
-    });
+    deck = createDeck({ graph: graph!, flow, sources, onStep: n => writeUrl(n) });
+    renderFlowBand(flow);
     (window as unknown as { __deck: unknown }).__deck = deck.inspect;
     writeUrl(0);
     if (step > 0) deck.go(step);
@@ -139,7 +129,7 @@ async function openFlow(next: FlowEntry | null, step: number) {
   }
 }
 
-// ============ pickers ============
+// ============ pickers and badges ============
 
 const pickPop = $("pickPop");
 let pickAnchor: HTMLElement | null = null;
@@ -182,12 +172,14 @@ pickPop.addEventListener("click", e => {
     void openArtifact(item.dataset.artifact, null, 0);
   }
 });
+// No key in the picker reaches the deck keys, so the deck never changes under an open list.
 pickPop.addEventListener("keydown", e => {
+  e.stopPropagation();
   const items = [...pickPop.querySelectorAll<HTMLElement>(".pk-item")];
   const i = items.indexOf(document.activeElement as HTMLElement);
   const j = e.key === "ArrowDown" ? i + 1 : e.key === "ArrowUp" ? i - 1 : e.key === "Home" ? 0 : e.key === "End" ? items.length - 1 : null;
   if (j === null) return;
-  e.preventDefault(); e.stopPropagation();
+  e.preventDefault();
   items[Math.max(0, Math.min(items.length - 1, j))]?.focus();
 });
 document.addEventListener("pointerdown", e => {
@@ -195,20 +187,34 @@ document.addEventListener("pointerdown", e => {
 });
 // Escape closes an open picker before the deck sees it: the picker first, then the key, then the flow.
 addEventListener("keydown", e => {
-  if (!pickAnchor) return;
-  if (e.key === "Escape") { e.preventDefault(); e.stopImmediatePropagation(); closePicker(true); }
-  else if (["ArrowLeft", "ArrowRight"].includes(e.key) && pickPop.contains(document.activeElement)) e.stopImmediatePropagation();
+  if (pickAnchor && e.key === "Escape") { e.preventDefault(); e.stopImmediatePropagation(); closePicker(true); }
 }, { capture: true });
+
+/** A name badge: a button that opens a picker when `label` is set, else a plain label. `inner` is escaped markup. */
+function badgeHtml(id: string, cls: string, inner: string, label: string | null): string {
+  return label
+    ? `<button class="${cls}" id="${id}" type="button" aria-haspopup="dialog" aria-expanded="false" aria-label="${label}">${inner}${icon("chev")}</button>`
+    : `<span class="${cls}" id="${id}">${inner}</span>`;
+}
 
 /** The codebase badge: a picker when the index holds more than one codebase. */
 function renderRepoBadge() {
-  const head = $("sbHead");
   const name = esc(entry?.label ?? entry?.file ?? "codebase");
-  if ((index?.artifacts.length ?? 0) > 1) {
-    head.innerHTML = `<button class="sb-title" id="repoPick" type="button" aria-haspopup="dialog" aria-expanded="false" aria-label="Codebase ${name}. Choose another codebase">${name}${icon("chev")}</button>`;
-    const button = $("repoPick");
-    button.addEventListener("click", () => openPicker(button, "codebase"));
-  } else head.innerHTML = `<span class="sb-title" id="repoPick">${name}</span>`;
+  const pick = (index?.artifacts.length ?? 0) > 1;
+  $("sbHead").innerHTML = badgeHtml("repoPick", "sb-title", name, pick ? `Codebase ${name}. Choose another codebase` : null);
+  if (pick) { const button = $("repoPick"); button.addEventListener("click", () => openPicker(button, "codebase")); }
+}
+
+/** The flow badge and its freshness in the top band, or an empty band without a flow.
+ *  The badge is a picker when the codebase has more than one flow. */
+function renderFlowBand(flow: DeckFlow | null) {
+  const name = esc(flow?.name ?? "");
+  const pick = !!flow && frozenFlows(entry?.flows).length > 1;
+  $("flowPick").outerHTML = flow ? badgeHtml("flowPick", "pbadge", `<span>${name}</span>`, pick ? `Flow ${name}. Choose another flow` : null) : '<span id="flowPick"></span>';
+  if (pick) { const button = $("flowPick"); button.addEventListener("click", () => openPicker(button, "flow")); }
+  $("fhMeta").innerHTML = flow
+    ? `${flow.stale ? '<b style="color:var(--warn)">stale</b>' : '<b class="fresh">fresh</b>'} · generation ${esc(flow.generation)}`
+    : "";
 }
 
 // ============ URL state ============
@@ -234,9 +240,7 @@ async function boot() {
   showLoading("loading the artifact index");
   index = await loadIndex();
   const want = readUrl();
-  const file = index.artifacts.some(item => item.file === want.artifact) ? want.artifact!
-    : index.artifacts.some(item => item.file === index!.defaultArtifact) ? index.defaultArtifact! : index.artifacts[0].file;
-  await openArtifact(file, want.flow, want.step);
+  await openArtifact(pickArtifact(index, want.artifact)!.file, want.flow, want.step);
 }
 
 boot().catch(fail);

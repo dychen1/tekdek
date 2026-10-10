@@ -5,9 +5,10 @@
    rows, marks, scroll, clicks and keys */
 import { anchorRow, dirNote, guideKinds, isShown, type ExplorerRow } from "../layout/explorer.ts";
 import { nextStepOfFile } from "../layout/plan.ts";
-import { clamp } from "../layout/util.ts";
-import { esc, PTR } from "./markup.ts";
-import { $, shownFile, type DeckContext, type Explorer } from "./model.ts";
+import { clamp, esc } from "../layout/util.ts";
+import { PTR } from "./markup.ts";
+import { shownFile } from "../layout/model.ts";
+import { $, type DeckContext, type Explorer } from "./context.ts";
 
 /** A row and the elements that show it. */
 interface RowView { row: ExplorerRow; el: HTMLButtonElement; note: HTMLElement | null }
@@ -50,7 +51,7 @@ export function createExplorer(ctx: DeckContext): Explorer {
   const currentFile = () => shownFile(model, state)?.file ?? null;
 
   function sync() {
-    const cid = state.cur ? model.stepCluster(state.cur) : null;
+    const cid = model.stepCluster(state.cur);
     const file = currentFile();
     for (const { row, el, note } of views) {
       el.hidden = !isShown(row, state.open);
@@ -88,11 +89,7 @@ export function createExplorer(ctx: DeckContext): Explorer {
     if (y < lo || y > hi) sbTree.scrollTop += y - (lo + hi) / 2;
   }
 
-  let scrollRaf = 0;
-  sbTree.addEventListener("scroll", () => {
-    if (scrollRaf) return;
-    scrollRaf = requestAnimationFrame(() => { scrollRaf = 0; ctx.place(); ctx.kick(600); });
-  }, { signal });
+  sbTree.addEventListener("scroll", ctx.placeSoon, { signal });
 
   // ============ clicks and keys ============
 
@@ -100,7 +97,6 @@ export function createExplorer(ctx: DeckContext): Explorer {
     if (state.open.has(row.path)) state.open.delete(row.path); else state.open.add(row.path);
     sync();
     ctx.place();
-    ctx.kick(800);
   }
 
   /** A file click goes to its next flow step, from the current step on. At rest, or for a file with no step, it shows the file box. */
@@ -123,10 +119,6 @@ export function createExplorer(ctx: DeckContext): Explorer {
 
   return {
     sync, reveal, anchorEl,
-    destroy() {
-      if (scrollRaf) cancelAnimationFrame(scrollRaf);
-      scrollRaf = 0;
-      sbTree.replaceChildren();
-    },
+    destroy() { sbTree.replaceChildren(); },
   };
 }
