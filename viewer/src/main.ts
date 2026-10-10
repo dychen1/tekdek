@@ -182,12 +182,14 @@ pickPop.addEventListener("click", e => {
     void openArtifact(item.dataset.artifact, null, 0);
   }
 });
+// No key in the picker reaches the deck keys, so the deck never changes under an open list.
 pickPop.addEventListener("keydown", e => {
+  e.stopPropagation();
   const items = [...pickPop.querySelectorAll<HTMLElement>(".pk-item")];
   const i = items.indexOf(document.activeElement as HTMLElement);
   const j = e.key === "ArrowDown" ? i + 1 : e.key === "ArrowUp" ? i - 1 : e.key === "Home" ? 0 : e.key === "End" ? items.length - 1 : null;
   if (j === null) return;
-  e.preventDefault(); e.stopPropagation();
+  e.preventDefault();
   items[Math.max(0, Math.min(items.length - 1, j))]?.focus();
 });
 document.addEventListener("pointerdown", e => {
@@ -195,9 +197,7 @@ document.addEventListener("pointerdown", e => {
 });
 // Escape closes an open picker before the deck sees it: the picker first, then the key, then the flow.
 addEventListener("keydown", e => {
-  if (!pickAnchor) return;
-  if (e.key === "Escape") { e.preventDefault(); e.stopImmediatePropagation(); closePicker(true); }
-  else if (["ArrowLeft", "ArrowRight"].includes(e.key) && pickPop.contains(document.activeElement)) e.stopImmediatePropagation();
+  if (pickAnchor && e.key === "Escape") { e.preventDefault(); e.stopImmediatePropagation(); closePicker(true); }
 }, { capture: true });
 
 /** The codebase badge: a picker when the index holds more than one codebase. */
