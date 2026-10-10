@@ -336,6 +336,7 @@ impl RustSyntaxWalker {
             item.span(),
             Some((brace.span.open(), brace.span.close())),
         )?;
+        let declaration_start = evidence.declarations[0].start;
         let module =
             self.builder
                 .add_entity(owner, item.ident.to_string(), EntityKind::Module, evidence);
@@ -348,11 +349,10 @@ impl RustSyntaxWalker {
             .entry(nested_path.clone())
             .or_default()
             .push(module.clone());
-        let declaration = source_range(document, item.ident.span())?;
         self.declared_modules.insert(
             DeclarationId {
                 path: document.path.clone(),
-                start: declaration.start,
+                start: declaration_start,
             },
             module.clone(),
         );
@@ -374,7 +374,8 @@ impl RustSyntaxWalker {
         end: Span,
         body: Option<(Span, Span)>,
     ) -> Result<(), AnalysisError> {
-        let declaration = source_range(document, ident.span())?;
+        let evidence = entity_evidence(document, ident.span(), start, end, body)?;
+        let declaration_start = evidence.declarations[0].start;
         let name = ident.to_string();
         let entity = self.builder.add_entity(
             owner,
@@ -383,18 +384,7 @@ impl RustSyntaxWalker {
                 kind,
                 documentation: documentation(attrs),
             }),
-            EntityEvidence {
-                path: document.path.clone(),
-                declarations: vec![declaration],
-                scope: Some(source_range_between(document, start, end)?),
-                body: body
-                    .map(|(body_start, body_end)| {
-                        source_range_between(document, body_start, body_end)
-                    })
-                    .transpose()?,
-                type_inputs: Vec::new(),
-                type_outputs: Vec::new(),
-            },
+            evidence,
         );
         self.builder
             .add_relation(owner, &entity, RelationKind::Contains);
@@ -407,7 +397,7 @@ impl RustSyntaxWalker {
         self.declared_types.insert(
             DeclarationId {
                 path: document.path.clone(),
-                start: declaration.start,
+                start: declaration_start,
             },
             entity,
         );
@@ -533,21 +523,15 @@ impl RustSyntaxWalker {
                     .map_or_else(|| index.to_string(), |variant| format!("{variant}.{index}"));
                 (name, field.ty.span())
             };
-            let declaration = source_range(document, declaration_span)?;
+            let evidence =
+                entity_evidence(document, declaration_span, field.span(), field.span(), None)?;
             let entity = self.builder.add_entity(
                 owner,
                 name,
                 EntityKind::Field(FieldData {
                     declared_type: Some(source_text(document, field.ty.span())?.trim().to_owned()),
                 }),
-                EntityEvidence {
-                    path: document.path.clone(),
-                    declarations: vec![declaration],
-                    scope: Some(source_range(document, field.span())?),
-                    body: None,
-                    type_inputs: Vec::new(),
-                    type_outputs: Vec::new(),
-                },
+                evidence,
             );
             self.builder
                 .add_relation(owner, &entity, RelationKind::Contains);
@@ -636,6 +620,20 @@ impl RustSyntaxWalker {
         let signature_text = source_text_between(document, start, signature.span())?
             .trim()
             .to_owned();
+        let mut evidence = entity_evidence(
+            document,
+            signature.ident.span(),
+            start,
+            end,
+            body.map(|block| {
+                (
+                    block.brace_token.span.open(),
+                    block.brace_token.span.close(),
+                )
+            }),
+        )?;
+        evidence.type_inputs = callable_type_inputs(document, signature)?;
+        evidence.type_outputs = callable_type_outputs(document, signature)?;
         let entity = self.builder.add_entity(
             owner,
             signature.ident.to_string(),
@@ -646,22 +644,7 @@ impl RustSyntaxWalker {
                 return_type: callable_return_type(document, signature)?,
                 documentation: documentation(attrs),
             }),
-            EntityEvidence {
-                path: document.path.clone(),
-                declarations: vec![source_range(document, signature.ident.span())?],
-                scope: Some(source_range_between(document, start, end)?),
-                body: body
-                    .map(|block| {
-                        source_range_between(
-                            document,
-                            block.brace_token.span.open(),
-                            block.brace_token.span.close(),
-                        )
-                    })
-                    .transpose()?,
-                type_inputs: callable_type_inputs(document, signature)?,
-                type_outputs: callable_type_outputs(document, signature)?,
-            },
+            evidence,
         );
         self.builder
             .add_relation(owner, &entity, RelationKind::Contains);
@@ -691,13 +674,10 @@ impl RustSyntaxWalker {
         current_module: &EntityKey,
         path: &[String],
     ) -> Lookup<EntityKey> {
-        if path.is_empty() || path == ["self"] {
+        if path.is_empty() {
             return Lookup::Unique(current_module.clone());
         }
-        let Some(path) = relative_module_path(current_path, path) else {
-            return Lookup::Absent;
-        };
-        self.lookup_module(&path)
+        self.resolve_module(current_path, current_module, path)
     }
 
     fn resolve_module(
@@ -914,11 +894,7 @@ fn source_range_between(
 }
 
 fn source_text<'a>(document: &ParsedDocument<'a>, span: Span) -> Result<&'a str, AnalysisError> {
-    let range = source_range(document, span)?;
-    document
-        .source
-        .get(range.start as usize..range.end as usize)
-        .ok_or_else(invalid_source_range)
+    source_text_between(document, span, span)
 }
 
 fn source_text_between<'a>(
