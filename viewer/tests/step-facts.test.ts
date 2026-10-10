@@ -1,0 +1,47 @@
+// Tests for the step facts: transition sentences, call lists, visits, and source notes.
+
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import type { DeckFunction } from "../src/data/models.ts";
+import { calleesOf, callersOf, callRefs, otherVisits, sourceNote, transitionFact } from "../src/layout/step-facts.ts";
+
+test("each transition reads as one sentence, with a tag at the flow start and at a gap", () => {
+  assert.deepEqual(transitionFact("flow_start", null, "main"), { tag: "flow start", text: "" });
+  assert.deepEqual(transitionFact("calls", "main", "run"), { tag: null, text: "main calls run" });
+  assert.deepEqual(transitionFact("sibling_call", "parse", "execute"), { tag: null, text: "parse and execute share a caller" });
+  assert.deepEqual(transitionFact("returns_to_caller", "digests", "verify_artifact"), { tag: null, text: "returns to the caller verify_artifact" });
+  assert.deepEqual(transitionFact("same_function", "run", "run"), { tag: null, text: "stays in run" });
+  assert.deepEqual(transitionFact("calls_indirectly", "a", "b"), { tag: null, text: "a reaches b through other calls" });
+  assert.deepEqual(transitionFact("returns_to_ancestor", "a", "b"), { tag: null, text: "returns from a to an earlier caller, b" });
+  assert.deepEqual(transitionFact("no_static_edge", "fact_layer", "freeze"), { tag: "gap", text: "no static call from fact_layer to freeze" });
+  assert.deepEqual(transitionFact(null, "a", "b"), { tag: null, text: "" });
+});
+
+const fn = (id: string, name: string, file: string): DeckFunction => ({ id, name, file, cluster: null });
+const fns = new Map([fn("a::run", "run", "src/cli/mod.rs"), fn("b::run", "run", "src/cli/flow.rs"), fn("c::emit", "emit", "src/cli/mod.rs")].map(f => [f.id, f]));
+
+test("call lists keep every name, add the file only to equal names, and link current cluster members", () => {
+  const refs = callRefs(["a::run", "b::run", "c::emit"], fns, new Set(["c::emit"]), key => (key === "c::emit" ? 25 : null), 3);
+  assert.deepEqual(refs.map(r => [r.label, r.hint, r.inCluster, r.step]), [
+    ["run", "src/cli/mod.rs", false, null],
+    ["run", "src/cli/flow.rs", false, null],
+    ["emit", null, true, 25],
+  ]);
+  assert.equal(callRefs(["c::emit"], fns, new Set(["c::emit"]), () => 3, 3)[0].step, null);
+});
+
+test("callers and callees are distinct keys in graph order", () => {
+  const calls = [{ source: "a::run", target: "c::emit" }, { source: "b::run", target: "c::emit" }, { source: "c::emit", target: "b::run" }];
+  assert.deepEqual(callersOf("c::emit", calls), ["a::run", "b::run"]);
+  assert.deepEqual(calleesOf("c::emit", calls), ["b::run"]);
+  assert.deepEqual(otherVisits([3, 7, 12], 7), [3, 12]);
+});
+
+test("a missing, changed, or unreadable source becomes one note in place of code", () => {
+  assert.equal(sourceNote({ key: "k", status: "ok", lines: ["fn a() {}"] }, "src/a.rs"), null);
+  assert.equal(sourceNote({ key: "k", status: "missing" }, "src/a.rs"), "This function is not in the current graph.");
+  assert.equal(sourceNote({ key: "k", status: "changed", path: "src/a.rs" }, "src/a.rs"), "src/a.rs changed after the last index. Run tekdek index to see this function.");
+  assert.equal(sourceNote({ key: "k", status: "unreadable", reason: "the file is missing" }, "src/a.rs"), "The source of src/a.rs cannot be read: the file is missing.");
+  assert.equal(sourceNote(undefined, "src/a.rs"), "The source of src/a.rs cannot be read: the viewer server did not send it.");
+});
