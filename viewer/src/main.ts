@@ -27,20 +27,13 @@ function showReader(visible: boolean) {
   for (const id of ["codeHead", "code"]) $(id).style.display = visible ? "" : "none";
 }
 
-/** Fills the code column, the bar, and the flow band while no deck is loaded. The chrome stays visible and inert. */
+/** Fills the code column and empties the flow band while no deck is loaded. The chrome stays visible and inert.
+ *  A deck part returns its own elements to the shell state when the deck is destroyed. */
 function showShell(badge: string, color: string, desc: string, meta: string) {
   document.documentElement.style.setProperty("--cc", color);
   $("cdHead").innerHTML = `<span class="pbadge" style="--c:${esc(color)}"><span>${esc(badge)}</span></span>`;
   $("cdStep").innerHTML = `<p class="cd-ann">${desc}</p>` + (meta ? `<p class="cd-empty">${meta}</p>` : "");
   showReader(false);
-  $("where").replaceChildren();
-  $("code").replaceChildren();
-  $("counter").textContent = "Step 0 / 0";
-  $("chip").classList.add("none");
-  $("chipText").textContent = "No flow";
-  $("cMeta").textContent = "";
-  $("cDesc").textContent = "";
-  $("ticks").replaceChildren();
   renderFlowBand(null);
   setChrome(false);
 }

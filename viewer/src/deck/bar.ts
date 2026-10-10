@@ -83,6 +83,11 @@ export function createBar(ctx: DeckContext): Bar {
       ticks.replaceChildren();
       hideTip();
       cExpl.classList.remove("swap"); cDesc.classList.remove("swap");
+      $("#counter").textContent = "Step 0 / 0";
+      chip.classList.add("none");
+      $("#chipText").textContent = "No flow";
+      $("#cMeta").textContent = "";
+      cDesc.textContent = "";
     },
   };
 }
