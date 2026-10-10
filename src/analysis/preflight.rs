@@ -213,11 +213,14 @@ mod tests {
     #[cfg(all(feature = "python", feature = "rust"))]
     #[test]
     fn preflights_only_detected_languages() {
-        let mut profiles = builtin_profiles();
-        let python = profile_mut(&mut profiles, Language::Python);
+        let profiles = builtin_profiles();
+        let detected = profiles
+            .iter()
+            .filter(|profile| profile.language == Language::Python)
+            .collect::<Vec<_>>();
         let mut checked = Vec::new();
 
-        preflight_server_programs_with(&[python], |program| {
+        preflight_server_programs_with(&detected, |program| {
             checked.push(program.to_owned());
             true
         })
