@@ -1,10 +1,10 @@
-// Tests for the data layer: the graph digest check, the graph adapter, and the frozen flow adapter.
+// Tests for the data layer: the graph digest check, load failures, the graph adapter, and the frozen flow adapter.
 
 import assert from "node:assert/strict";
 import test from "node:test";
 
 import { deckFlow, deckGraph, displayName, fileTree, pickFlow, frozenFlows, withMembership } from "../src/data/adapt.ts";
-import { digestOf, LoadError, verifyGraph } from "../src/data/load.ts";
+import { digestOf, loadFlow, loadIndex, loadSource, LoadError, verifyGraph } from "../src/data/load.ts";
 
 import { artifact, DIGEST, graphDocument, must } from "./fixtures.ts";
 
@@ -23,6 +23,22 @@ test("the graph check rejects changed bytes and unsupported documents with their
   const wrong = bytesOf({ schemaVersion: 2, graph: { nodes: [], edges: [] } });
   await assert.rejects(verifyGraph(wrong, { file: "graph.json", digest: await digestOf(wrong) }),
     (error) => error instanceof LoadError && error.reason === "graph");
+});
+
+test("a load whose answer is not JSON fails with the cause of its file", async (t) => {
+  t.mock.method(globalThis, "fetch", async () => new Response("{", { status: 200 }));
+  await assert.rejects(loadFlow({ name: "a", file: "a/generations/1-000000000000.json" }),
+    (error) => error instanceof LoadError && error.reason === "flow");
+  await assert.rejects(loadIndex(), (error) => error instanceof LoadError && error.reason === "fetch");
+  await assert.rejects(loadSource("demo.json", "a"), (error) => error instanceof LoadError && error.reason === "fetch");
+});
+
+test("a load that the server refuses or never answers is a fetch failure", async (t) => {
+  const answer = t.mock.method(globalThis, "fetch", async () => new Response("{}", { status: 500 }));
+  await assert.rejects(loadFlow({ name: "a", file: "a.json" }), (error) => error instanceof LoadError && error.reason === "fetch");
+  await assert.rejects(loadSource("demo.json", "a"), (error) => error instanceof LoadError && error.reason === "fetch");
+  answer.mock.mockImplementation(async () => { throw new TypeError("network down"); });
+  await assert.rejects(loadIndex(), (error) => error instanceof LoadError && error.reason === "fetch");
 });
 
 test("method names keep their type and nested functions keep their parent", () => {
