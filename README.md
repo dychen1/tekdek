@@ -242,7 +242,9 @@ cachePriming.enable = false
 |   |   `-- schema/            # Agent output and flow artifact JSON Schemas
 |   |-- catalog.rs             # Catalog of graphs and flows for the viewer
 |   |-- query.rs               # Graph search and node neighbors for agents
-|   `-- serve.rs               # Viewer server with the embedded viewer
+|   |-- serve.rs               # Viewer server with the embedded viewer
+|   |-- serve/files.rs         # Store and project file reads that follow no link
+|   `-- source_view.rs         # Function source cuts for the code column of the viewer
 |-- tools/build-viewer.ts      # esbuild script that build.rs runs
 |-- viewer/
 |   |-- index.html             # Lift Deck page
