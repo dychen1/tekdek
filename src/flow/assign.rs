@@ -19,14 +19,14 @@ use super::{
 };
 
 /// The only policy: agent labels, unanimous membership.
-pub const POLICY: AssignmentPolicy = AssignmentPolicy {
+const POLICY: AssignmentPolicy = AssignmentPolicy {
     label_policy: LabelPolicy::AgentLabels,
     membership_rule: MembershipRule::Unanimous,
 };
 
 /// Returns the provenance of the `step-labels` 1.0.0 rules assigner.
 #[must_use]
-pub fn step_labels_assigner() -> AssignerProvenance {
+fn step_labels_assigner() -> AssignerProvenance {
     AssignerProvenance::Rules {
         assigner_id: "step-labels".to_owned(),
         version: "1.0.0".to_owned(),
@@ -93,7 +93,7 @@ pub fn assign(intent: &IntentLayer) -> Result<AssignmentLayer, AssignError> {
 ///
 /// # Errors
 /// Returns an error when the inputs cannot have a canonical form.
-pub fn input_digest(
+fn input_digest(
     intent: &IntentLayer,
     assigner: &AssignerProvenance,
 ) -> Result<Sha256Digest, CanonicalError> {

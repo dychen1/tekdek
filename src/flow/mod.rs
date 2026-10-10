@@ -12,7 +12,7 @@
 //! canonical forms.
 //!
 //! # Sections
-//! `Contracts` embeds the JSON Schemas. `Lookup` resolves a flow name.
+//! `Contracts` embeds the agent output JSON Schema. `Lookup` resolves a flow name.
 //! `Errors` reports failures.
 
 pub mod assign;
@@ -42,9 +42,6 @@ use models::{FlowId, FlowIssue, IssueCode};
 
 /// The embedded agent output contract, version 1.
 pub const AGENT_OUTPUT_SCHEMA: &str = include_str!("schema/agent-output.schema.json");
-
-/// The embedded frozen artifact schema, version 3.
-pub const FLOW_ARTIFACT_SCHEMA: &str = include_str!("schema/flow-artifact.schema.json");
 
 // -----------------------------------------------------------------------------
 // Lookup
@@ -186,10 +183,13 @@ mod tests {
     use serde_json::Value;
 
     use super::{
-        AGENT_OUTPUT_SCHEMA, FLOW_ARTIFACT_SCHEMA,
+        AGENT_OUTPUT_SCHEMA,
         fixtures::{self, frozen, import, output},
         models::{AgentFlowOutput, ClusterColor, FlowArtifact, wire_name},
     };
+
+    /// The frozen artifact schema, version 3.
+    const FLOW_ARTIFACT_SCHEMA: &str = include_str!("schema/flow-artifact.schema.json");
 
     fn schemas() -> (Value, Value) {
         (

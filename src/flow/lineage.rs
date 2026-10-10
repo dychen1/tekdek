@@ -25,7 +25,7 @@ use crate::store::{reject_symlink, write_bytes};
 /// Names the current generation of one flow.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct CurrentPointer {
+struct CurrentPointer {
     pub generation_digest: Sha256Digest,
     pub ordinal: u32,
 }
@@ -121,7 +121,7 @@ pub fn read_generation(
 /// # Errors
 /// Returns `UnknownSchema` for another schema version and a JSON error for any
 /// other shape problem.
-pub fn parse_artifact(bytes: &[u8]) -> Result<FlowArtifact, LineageError> {
+fn parse_artifact(bytes: &[u8]) -> Result<FlowArtifact, LineageError> {
     #[derive(Deserialize)]
     #[serde(rename_all = "camelCase")]
     struct Header {

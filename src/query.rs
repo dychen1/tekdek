@@ -197,7 +197,7 @@ fn kind_order(kind: &str) -> u8 {
 
 /// Joins a multi-line signature into one line.
 #[must_use]
-pub fn one_line(signature: &str) -> String {
+fn one_line(signature: &str) -> String {
     signature
         .lines()
         .map(str::trim)

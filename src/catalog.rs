@@ -112,7 +112,7 @@ pub fn default_artifact(directory: &Path) -> io::Result<String> {
 
 /// Returns the graph file named after the project folder of the store, if the folder has a UTF-8 name.
 #[must_use]
-pub fn project_graph_file(directory: &Path) -> Option<String> {
+fn project_graph_file(directory: &Path) -> Option<String> {
     let directory = fs::canonicalize(directory).unwrap_or_else(|_| PathBuf::from(directory));
     let name = directory.parent()?.file_name()?.to_str()?;
     Some(format!("{name}.json"))
@@ -143,7 +143,7 @@ fn select_default(directory: &Path, files: &[String]) -> io::Result<String> {
 /// # Errors
 ///
 /// Returns an error if the store is a symbolic link or cannot be listed.
-pub fn artifact_files(directory: &Path) -> io::Result<Vec<String>> {
+fn artifact_files(directory: &Path) -> io::Result<Vec<String>> {
     reject_symlink(directory)?;
     let mut files = Vec::new();
     for entry in fs::read_dir(directory)? {
