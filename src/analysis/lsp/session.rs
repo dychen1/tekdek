@@ -401,6 +401,33 @@ mod tests {
     }
 
     #[test]
+    fn includes_server_standard_error_with_an_undecodable_initialize_result() {
+        let error = run_session(
+            &FakeServer::new(),
+            "undecodable-initialize",
+            Language::Python,
+            IMMEDIATE,
+            false,
+        )
+        .expect_err("the initialize result should not decode");
+        let message = error.to_string();
+
+        assert!(
+            message.contains("cannot decode the initialize result"),
+            "the error should name the decode failure: {message}"
+        );
+        assert!(
+            message.contains("broken capability report"),
+            "the error should include server standard error: {message}"
+        );
+        assert_eq!(
+            message.matches("language server standard error:").count(),
+            1,
+            "the error should include standard error once: {message}"
+        );
+    }
+
+    #[test]
     fn returns_shutdown_failure_after_successful_capture() {
         let error = run_session(
             &FakeServer::new(),

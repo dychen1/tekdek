@@ -159,13 +159,13 @@ impl LspClient {
                 R::METHOD
             ))
         })?;
-        let result = self
-            .request_value(R::METHOD, &parameters, timeout)
-            .map_err(|error| self.with_standard_error(error))?;
-
-        serde_json::from_value(result).map_err(|error| {
-            LspError::new(format!("cannot decode the {} result: {error}", R::METHOD))
-        })
+        self.request_value(R::METHOD, &parameters, timeout)
+            .and_then(|result| {
+                serde_json::from_value(result).map_err(|error| {
+                    LspError::new(format!("cannot decode the {} result: {error}", R::METHOD))
+                })
+            })
+            .map_err(|error| self.with_standard_error(error))
     }
 
     /// Sends the initialization request and then the initialized notification.

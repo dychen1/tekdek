@@ -33,6 +33,11 @@ fn main() -> io::Result<()> {
                 write_error(&mut output, request_id, "invalid initialization")?;
                 continue;
             }
+            if mode == "undecodable-initialize" {
+                eprintln!("broken capability report");
+                write_result(&mut output, request_id, r#"{"capabilities":5}"#)?;
+                continue;
+            }
             if !message.contains(r#""initializationOptions":{"analysis":{"mode":"test"}}"#) {
                 eprintln!("initialization options were not forwarded");
                 process::exit(1);
