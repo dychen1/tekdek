@@ -2,7 +2,7 @@
    the source load, and the URL state (`?artifact=&flow=&step=`). It creates one deck for the selected
    codebase and flow, and replaces it on a change.
    # Sections
-   status, loading, pickers, URL state, boot */
+   status, loading, pickers and badges, URL state, boot */
 import type { ArtifactEntry, ArtifactIndex, DeckFlow, DeckGraph, FlowEntry, SourceView } from "./data/models.ts";
 import { deckFlow, deckGraph, pickFlow, frozenFlows } from "./data/adapt.ts";
 import { loadFlow, loadGraph, loadIndex, loadSource, LoadError, type LoadReason } from "./data/load.ts";
@@ -41,8 +41,7 @@ function showShell(badge: string, color: string, desc: string, meta: string) {
   $("cMeta").textContent = "";
   $("cDesc").textContent = "";
   $("ticks").replaceChildren();
-  $("flowPick").outerHTML = '<span id="flowPick"></span>';
-  $("fhMeta").replaceChildren();
+  renderFlowBand(null);
   setChrome(false);
 }
 
@@ -126,11 +125,8 @@ async function openFlow(next: FlowEntry | null, step: number) {
     showLoading(null);
     setChrome(true);
     showReader(true);
-    deck = createDeck({
-      graph: graph!, flow, sources, flowCount: frozenFlows(entry!.flows).length,
-      onFlowPick: anchor => openPicker(anchor, "flow"),
-      onStep: n => writeUrl(n),
-    });
+    deck = createDeck({ graph: graph!, flow, sources, onStep: n => writeUrl(n) });
+    renderFlowBand(flow);
     (window as unknown as { __deck: unknown }).__deck = deck.inspect;
     writeUrl(0);
     if (step > 0) deck.go(step);
@@ -139,7 +135,7 @@ async function openFlow(next: FlowEntry | null, step: number) {
   }
 }
 
-// ============ pickers ============
+// ============ pickers and badges ============
 
 const pickPop = $("pickPop");
 let pickAnchor: HTMLElement | null = null;
@@ -200,15 +196,31 @@ addEventListener("keydown", e => {
   if (pickAnchor && e.key === "Escape") { e.preventDefault(); e.stopImmediatePropagation(); closePicker(true); }
 }, { capture: true });
 
+/** A name badge: a button that opens a picker when `label` is set, else a plain label. `inner` is escaped markup. */
+function badgeHtml(id: string, cls: string, inner: string, label: string | null): string {
+  return label
+    ? `<button class="${cls}" id="${id}" type="button" aria-haspopup="dialog" aria-expanded="false" aria-label="${label}">${inner}${icon("chev")}</button>`
+    : `<span class="${cls}" id="${id}">${inner}</span>`;
+}
+
 /** The codebase badge: a picker when the index holds more than one codebase. */
 function renderRepoBadge() {
-  const head = $("sbHead");
   const name = esc(entry?.label ?? entry?.file ?? "codebase");
-  if ((index?.artifacts.length ?? 0) > 1) {
-    head.innerHTML = `<button class="sb-title" id="repoPick" type="button" aria-haspopup="dialog" aria-expanded="false" aria-label="Codebase ${name}. Choose another codebase">${name}${icon("chev")}</button>`;
-    const button = $("repoPick");
-    button.addEventListener("click", () => openPicker(button, "codebase"));
-  } else head.innerHTML = `<span class="sb-title" id="repoPick">${name}</span>`;
+  const pick = (index?.artifacts.length ?? 0) > 1;
+  $("sbHead").innerHTML = badgeHtml("repoPick", "sb-title", name, pick ? `Codebase ${name}. Choose another codebase` : null);
+  if (pick) { const button = $("repoPick"); button.addEventListener("click", () => openPicker(button, "codebase")); }
+}
+
+/** The flow badge and its freshness in the top band, or an empty band without a flow.
+ *  The badge is a picker when the codebase has more than one flow. */
+function renderFlowBand(flow: DeckFlow | null) {
+  const name = esc(flow?.name ?? "");
+  const pick = !!flow && frozenFlows(entry?.flows).length > 1;
+  $("flowPick").outerHTML = flow ? badgeHtml("flowPick", "pbadge", `<span>${name}</span>`, pick ? `Flow ${name}. Choose another flow` : null) : '<span id="flowPick"></span>';
+  if (pick) { const button = $("flowPick"); button.addEventListener("click", () => openPicker(button, "flow")); }
+  $("fhMeta").innerHTML = flow
+    ? `${flow.stale ? '<b style="color:var(--warn)">stale</b>' : '<b class="fresh">fresh</b>'} · generation ${esc(flow.generation)}`
+    : "";
 }
 
 // ============ URL state ============

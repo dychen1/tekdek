@@ -1,8 +1,7 @@
 /* Deck tools. This module owns the map tools (compact, zoom, key), the key popover with its cluster legend and the
-   theme switch, full screen code, the flow badge with its freshness, and the top band layout. The pickers stay in
-   `main.ts`; the flow badge only calls `options.onFlowPick`.
+   theme switch, full screen code, and the top band layout. `main.ts` owns the flow badge in the top band.
    # Sections
-   flow band, key popover, theme variant, map tools, full screen, top band */
+   key popover, theme variant, map tools, full screen, top band */
 import { rangesOf } from "../layout/plan.ts";
 import { clamp } from "../layout/util.ts";
 import { esc, icon } from "./markup.ts";
@@ -18,24 +17,7 @@ const store = {
 };
 
 export function createTools(ctx: DeckContext): Tools {
-  const { model, state, options, signal } = ctx;
-  const { flow } = model;
-
-  // ============ flow band ============
-  // The flow badge is a picker when the codebase has more than one flow. Freshness and the generation follow it.
-
-  if (flow && options.flowCount > 1) {
-    $("#flowPick").outerHTML = `<button class="pbadge" id="flowPick" type="button" aria-haspopup="dialog" aria-expanded="false" aria-label="Flow ${esc(flow.name)}. Choose another flow">` +
-      `<span>${esc(flow.name)}</span>${icon("chev")}</button>`;
-    const badge = $("#flowPick");
-    badge.addEventListener("click", () => options.onFlowPick?.(badge), { signal });
-  } else {
-    $("#flowPick").outerHTML = flow ? `<span class="pbadge" id="flowPick"><span>${esc(flow.name)}</span></span>` : '<span id="flowPick"></span>';
-  }
-  const fhMeta = $("#fhMeta");
-  fhMeta.innerHTML = flow
-    ? `${flow.stale ? '<b style="color:var(--warn)">stale</b>' : '<b class="fresh">fresh</b>'} · generation ${esc(flow.generation)}`
-    : "";
+  const { model, state, signal } = ctx;
 
   // ============ key popover ============
   // One legend row for each cluster that a step lifts. A row goes to the cluster's first step.
@@ -148,8 +130,6 @@ export function createTools(ctx: DeckContext): Tools {
     destroy() {
       setKey(false);
       kpClusters.replaceChildren();
-      fhMeta.replaceChildren();
-      $("#flowPick").outerHTML = '<span id="flowPick"></span>';
       showFull(false);
     },
   };

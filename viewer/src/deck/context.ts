@@ -80,9 +80,6 @@ export interface DeckOptions {
   flow: DeckFlow | null;
   /** The source of each step function, by function key. Empty when the flow has none. */
   sources: ReadonlyMap<string, SourceView>;
-  /** Number of flows in the codebase. The flow badge is a picker when it is more than one. */
-  flowCount: number;
-  onFlowPick?: (anchor: HTMLElement) => void;
   onStep?: (step: number) => void;
 }
 
