@@ -34,6 +34,10 @@ export interface DeckModel {
   /** The widest file box right edge over every flow file, compact on, for the starting zoom. */
   fileRight: number;
   sources: ReadonlyMap<string, SourceView>;
+  /** The step at an index, or null at rest. */
+  stepAt(index: number): DeckStep | null;
+  /** The graph function of the step at an index, or null at rest and for a step function that the graph lost. */
+  fnAt(index: number): DeckFunction | null;
   /** The cluster that lifts at a step, or null. */
   stepCluster(index: number): string | null;
 }
@@ -61,9 +65,13 @@ export function buildModel(sourceGraph: DeckGraph, flow: DeckFlow | null, source
     fns: fnsByFile.get(file) ?? [], visits: plan.visits, currentCluster: "", currentKey: null, compact: true, folded: false,
   }).right));
   const explorer = buildExplorer(graph.tree);
+  const steps = flow?.steps ?? [];
+  const stepAt = (index: number) => steps[index - 1] ?? null;
   return {
-    flow, graph, clusters, CL, FN, steps: flow?.steps ?? [], N: flow?.steps.length ?? 0, plan, explorer,
+    flow, graph, clusters, CL, FN, steps, N: steps.length, plan, explorer,
     rowByPath: new Map(explorer.map(row => [row.path, row])), fnsByFile, clustersByFile, members, deckSize, fileRight, sources,
+    stepAt,
+    fnAt: index => { const step = stepAt(index); return step && !step.missing ? FN.get(step.node) ?? null : null; },
     stepCluster: index => (flow ? effectiveCluster(flow, CL, index) : null),
   };
 }
@@ -109,7 +117,6 @@ export function initialState(model: DeckModel): DeckState {
  *  A browsed file wins over the step and marks neither. A step with no function in the graph shows no file. */
 export function shownFile(model: DeckModel, state: DeckState): { file: string; cluster: string | null; key: string | null } | null {
   if (state.browseFile) return { file: state.browseFile, cluster: null, key: null };
-  const step = state.cur ? model.steps[state.cur - 1] : undefined;
-  const fn = step && !step.missing ? model.FN.get(step.node) : undefined;
+  const fn = model.fnAt(state.cur);
   return fn ? { file: fn.file, cluster: model.stepCluster(state.cur), key: fn.id } : null;
 }

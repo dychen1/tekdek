@@ -51,7 +51,7 @@ export function createExplorer(ctx: DeckContext): Explorer {
   const currentFile = () => shownFile(model, state)?.file ?? null;
 
   function sync() {
-    const cid = state.cur ? model.stepCluster(state.cur) : null;
+    const cid = model.stepCluster(state.cur);
     const file = currentFile();
     for (const { row, el, note } of views) {
       el.hidden = !isShown(row, state.open);
@@ -89,11 +89,7 @@ export function createExplorer(ctx: DeckContext): Explorer {
     if (y < lo || y > hi) sbTree.scrollTop += y - (lo + hi) / 2;
   }
 
-  let scrollRaf = 0;
-  sbTree.addEventListener("scroll", () => {
-    if (scrollRaf) return;
-    scrollRaf = requestAnimationFrame(() => { scrollRaf = 0; ctx.place(); ctx.kick(600); });
-  }, { signal });
+  sbTree.addEventListener("scroll", ctx.placeSoon, { signal });
 
   // ============ clicks and keys ============
 
@@ -124,10 +120,6 @@ export function createExplorer(ctx: DeckContext): Explorer {
 
   return {
     sync, reveal, anchorEl,
-    destroy() {
-      if (scrollRaf) cancelAnimationFrame(scrollRaf);
-      scrollRaf = 0;
-      sbTree.replaceChildren();
-    },
+    destroy() { sbTree.replaceChildren(); },
   };
 }

@@ -128,13 +128,13 @@ export function createCode(ctx: DeckContext): CodeColumn {
   }
 
   function render(prev: number) {
-    const step = state.cur ? model.steps[state.cur - 1] : null;
+    const step = model.stepAt(state.cur);
     if (!step) { renderEmpty(); return; }
     head.innerHTML = `<span class="cd-no" aria-label="Step ${step.index}">${step.index}</span>${title(step.title)}`;
     const facts: [string, string][] = [];
     const from = fromFact(step);
     if (from) facts.push(from);
-    const fn = step.missing ? undefined : model.FN.get(step.node);
+    const fn = model.fnAt(state.cur);
     if (!fn) {
       // a step function that the graph no longer has: the note in place of code, and no facts beyond "from"
       whereEl.innerHTML = "";
@@ -161,10 +161,6 @@ export function createCode(ctx: DeckContext): CodeColumn {
 
   // ============ events ============
 
-  stepEl.addEventListener("click", e => {
-    const t = (e.target as Element).closest<HTMLElement>("[data-step]");
-    if (t) ctx.go(+t.dataset.step!);
-  }, { signal });
   codeEl.addEventListener("scroll", () => ctx.kick(0), { signal });
 
   return {

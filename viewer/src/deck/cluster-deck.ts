@@ -17,7 +17,7 @@ interface DeckView { cam: HTMLElement; slab: HTMLElement; top: HTMLElement; boxe
 const setBox = (el: HTMLElement, x: number, y: number, z: number) => { el.style.transform = `translate3d(${f1(x)}px,${f1(y)}px,${f1(z)}px)`; };
 
 export function createClusterDeck(ctx: DeckContext): ClusterDeck {
-  const { model, state, signal } = ctx;
+  const { model, state } = ctx;
   const { CL, FN } = model;
   const cv = $("#cv");
   let deck: DeckView | null = null;
@@ -75,9 +75,9 @@ export function createClusterDeck(ctx: DeckContext): ClusterDeck {
 
   /** Marks the current box and shows a file path on the boxes that live in other files. */
   function mark() {
-    const step = state.cur ? model.steps[state.cur - 1] : null;
+    const step = model.stepAt(state.cur);
     if (!deck || !step) return;
-    const file = step.missing ? null : FN.get(step.node)?.file ?? null;
+    const file = model.fnAt(state.cur)?.file ?? null;
     for (const box of deck.boxes) {
       const focus = box.key === step.node, away = box.file !== file;
       box.el.classList.toggle("focus", focus);
@@ -89,16 +89,11 @@ export function createClusterDeck(ctx: DeckContext): ClusterDeck {
     }
   }
 
-  cv.addEventListener("click", e => {
-    const t = (e.target as Element).closest<HTMLElement>(".tmain");
-    if (t?.dataset.step) ctx.go(+t.dataset.step);
-  }, { signal });
-
   return {
     show, mark,
     pin(spot, anchor, k) { if (deck) deck.cam.style.transform = deckTransform(spot, anchor, k); },
     currentLid() {
-      const step = state.cur ? model.steps[state.cur - 1] : null;
+      const step = model.stepAt(state.cur);
       return deck && step ? deck.byKey.get(step.node)?.lid ?? null : null;
     },
     deckRight: () => deck?.top.getBoundingClientRect().right ?? 0,

@@ -44,14 +44,14 @@ export function createDeck(options: DeckOptions): DeckInstance {
   const ctx: DeckContext = {
     options, model, state, parts: {} as DeckParts, signal: abort.signal,
     reducedMotion: window.matchMedia("(prefers-reduced-motion: reduce)").matches,
-    go, place, kick,
+    go, place, placeSoon, kick,
   };
   let alive = true;
   /** The cluster whose deck shows, or null. */
   let deckCluster: string | null = null;
   // The page shell holds these elements. `place` and `kick` read them, so they come before the parts.
   const cv = $("#cv"), fileblk = $("#fileblk"), frameEl = $("#frame"), card = $("#card");
-  let drawUntil = 0, drawRaf = 0;
+  let drawUntil = 0, drawRaf = 0, placeRaf = 0;
   // The boot class keeps the first frames still: no fade, no transition. It also covers a URL step.
   document.body.classList.add("booting");
   // Every module reads the others through `ctx.parts` at call time, so the creation order is free.
@@ -64,8 +64,14 @@ export function createDeck(options: DeckOptions): DeckInstance {
   parts.code = createCode(ctx);
   parts.bar = createBar(ctx);
   parts.tools = createTools(ctx);
-  parts.input = createInput(ctx);
+  createInput(ctx);
   const { explorer, fileBox, clusterDeck, links, code, bar, tools } = parts;
+  // Every element that goes to a step carries `data-step`: in the file box, the deck, the code column, and the step strip.
+  document.addEventListener("click", e => {
+    const t = (e.target as Element).closest<HTMLElement>("[data-step]");
+    if (t) go(+t.dataset.step!);
+  }, { signal: abort.signal });
+  addEventListener("resize", placeSoon, { signal: abort.signal });
 
   // ============ stepping ============
   // Nothing on the canvas moves between steps: each step sets the file box, the deck, and the connectors at their
@@ -85,13 +91,13 @@ export function createDeck(options: DeckOptions): DeckInstance {
 
   /** Shows the current step in every part. `prev` is the step before it. */
   function render(prev: number) {
-    const n = state.cur, step = n ? model.steps[n - 1] : null;
-    const cluster = n ? model.stepCluster(n) : null;
+    const n = state.cur, step = model.stepAt(n);
+    const cluster = model.stepCluster(n);
     const clusterChanged = prev !== n && (!n || !prev || cluster !== model.stepCluster(prev));
     document.documentElement.style.setProperty("--cc", cluster ? model.CL.get(cluster)!.cv : "var(--accent)");
     document.body.classList.toggle("flow", !!step);
     options.onStep?.(n);
-    const fn = step && !step.missing ? model.FN.get(step.node) : undefined;
+    const fn = model.fnAt(n);
     const row = fn ? model.rowByPath.get(fn.file) : undefined;
     if (row) openTo(state.open, row);
     explorer.sync();
@@ -134,6 +140,11 @@ export function createDeck(options: DeckOptions): DeckInstance {
     return { frame, spot };
   }
 
+  function placeSoon() {
+    if (placeRaf) return;
+    placeRaf = requestAnimationFrame(() => { placeRaf = 0; tools.layoutTop(); place(); kick(600); });
+  }
+
   // ============ draw loop ============
   // Draw every frame while something can still move (layout, fonts), then stop.
 
@@ -174,8 +185,9 @@ export function createDeck(options: DeckOptions): DeckInstance {
     alive = false;
     abort.abort();
     if (drawRaf) cancelAnimationFrame(drawRaf);
-    drawRaf = 0;
-    for (const part of [parts.input, tools, bar, code, links, clusterDeck, fileBox, explorer]) part.destroy();
+    if (placeRaf) cancelAnimationFrame(placeRaf);
+    drawRaf = 0; placeRaf = 0;
+    for (const part of [tools, bar, code, links, clusterDeck, fileBox, explorer]) part.destroy();
     document.body.classList.remove("flow", "full", "booting");
     document.documentElement.style.removeProperty("--cc");
   }

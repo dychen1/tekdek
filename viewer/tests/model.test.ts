@@ -74,4 +74,16 @@ test("a step whose function the graph lost shows no file", () => {
   const state = initialState(broken);
   state.cur = 1;
   assert.equal(shownFile(broken, state), null);
+  assert.equal(broken.stepAt(1)?.missing, true);
+  assert.equal(broken.fnAt(1), null);
+});
+
+test("the step and its function at an index, and neither at rest or past the end", () => {
+  const step = must(model.stepAt(1), "step 1");
+  assert.equal(step, model.steps[0]);
+  assert.equal(must(model.fnAt(1), "step 1 function").id, step.node);
+  for (const index of [0, model.N + 1]) {
+    assert.equal(model.stepAt(index), null);
+    assert.equal(model.fnAt(index), null);
+  }
 });

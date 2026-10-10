@@ -53,15 +53,11 @@ export function createFileBox(ctx: DeckContext): FileBoxView {
   }
 
   fbIn.addEventListener("click", e => {
-    const t = (e.target as Element).closest<HTMLElement>("[data-step], #fileFold");
-    if (!t) return;
-    if (t.id === "fileFold") {
-      if (!shown) return;
-      if (state.folded.has(shown.file)) state.folded.delete(shown.file); else state.folded.add(shown.file);
-      render();
-      ctx.place();
-      ctx.kick(800);
-    } else ctx.go(+t.dataset.step!);
+    if (!shown || !(e.target as Element).closest("#fileFold")) return;
+    if (state.folded.has(shown.file)) state.folded.delete(shown.file); else state.folded.add(shown.file);
+    render();
+    ctx.place();
+    ctx.kick(800);
   }, { signal });
 
   return {

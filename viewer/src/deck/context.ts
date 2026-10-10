@@ -63,13 +63,10 @@ export interface Tools {
   sync(): void; layoutTop(): void; setFull(on: boolean): void; toggleCompact(): void; setZoom(k: number): void;
   keyOpen(): boolean; setKey(open: boolean, returnFocus?: boolean): void; destroy(): void;
 }
-/** Declared here and created by `input.ts`. */
-export interface Input { destroy(): void }
-
 /** The deck modules. `deck.ts` fills this object after it creates every module. */
 export interface DeckParts {
   explorer: Explorer; fileBox: FileBoxView; clusterDeck: ClusterDeck; links: Links;
-  code: CodeColumn; bar: Bar; tools: Tools; input: Input;
+  code: CodeColumn; bar: Bar; tools: Tools;
 }
 
 // ============ context ============
@@ -97,6 +94,8 @@ export interface DeckContext {
   go(step: number): void;
   /** Places the file box and the deck, then draws the connectors. */
   place(): void;
+  /** Lays out the top band and places the deck on the next frame, once for every call in that frame. */
+  placeSoon(): void;
   /** Draws the connectors on every frame for a while (layout settles, fonts load), then once at rest. */
   kick(ms: number): void;
 }

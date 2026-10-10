@@ -66,7 +66,7 @@ export function createTools(ctx: DeckContext): Tools {
     compactBtn.disabled = !state.cur;
     compactBtn.setAttribute("aria-pressed", String(state.compact));
     zoomLbl.textContent = `${Math.round(state.zoom * 100)}%`;
-    const id = state.cur ? model.stepCluster(state.cur) : null;
+    const id = model.stepCluster(state.cur);
     kpClusters.querySelectorAll<HTMLElement>(".kp-c").forEach(b => b.classList.toggle("on", !!id && b.dataset.c === id));
   }
 

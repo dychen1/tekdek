@@ -1,18 +1,15 @@
-/* Deck input. This module owns the deck keys and the window resize. `main.ts` closes an open picker before these
-   keys see Escape. The URL step is `?step=`, and `main.ts` writes it.
-   # Sections
-   keyboard, resize */
-import type { DeckContext, Input } from "./context.ts";
+/* Deck input. This module owns the deck keys. `main.ts` closes an open picker before these keys see Escape.
+   The URL step is `?step=`, and `main.ts` writes it. */
+import type { DeckContext } from "./context.ts";
 
 /** True when a key goes to a text field. */
 const typing = (target: EventTarget | null) =>
   target instanceof HTMLElement && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName));
 
-export function createInput(ctx: DeckContext): Input {
+/** Listens for the deck keys until the deck's signal aborts.
+ *  j and Left go back, k and Right go forward; neither wraps. Escape closes the key, then leaves full screen, then clears the flow. */
+export function createInput(ctx: DeckContext): void {
   const { model, state, signal } = ctx;
-
-  // ============ keyboard ============
-  // j and Left go back, k and Right go forward; neither wraps. Escape closes the key, then leaves full screen, then clears the flow.
 
   addEventListener("keydown", e => {
     if (e.altKey || e.metaKey || e.ctrlKey || typing(e.target)) return;
@@ -30,19 +27,4 @@ export function createInput(ctx: DeckContext): Input {
     if (k === "f") { tools.setFull(!state.full); return; }
     if (k === "c") tools.toggleCompact();
   }, { signal });
-
-  // ============ resize ============
-
-  let resizeRaf = 0;
-  addEventListener("resize", () => {
-    if (resizeRaf) return;
-    resizeRaf = requestAnimationFrame(() => { resizeRaf = 0; ctx.parts.tools.layoutTop(); ctx.place(); ctx.kick(600); });
-  }, { signal });
-
-  return {
-    destroy() {
-      if (resizeRaf) cancelAnimationFrame(resizeRaf);
-      resizeRaf = 0;
-    },
-  };
 }
