@@ -1,9 +1,10 @@
 //! Shared language-server session.
 //!
-//! This module owns server initialization, capability validation, readiness
-//! waiting, document capture, capture validation, normalization, and
-//! shutdown. A session configuration and selected sources are the inputs.
-//! Semantic facts are the output.
+//! This module owns the server lifecycle: start, initialization, capability
+//! validation, readiness waiting, and shutdown. `capture` sends the document
+//! requests in between, and `normalize` turns the capture into facts. A
+//! session configuration and selected sources are the inputs. Semantic facts
+//! are the output.
 
 use std::{
     fs,
@@ -12,12 +13,10 @@ use std::{
 };
 
 use lsp_types::{
-    CallHierarchyServerCapability, ClientCapabilities, DidOpenTextDocumentParams,
-    DocumentSymbolClientCapabilities, DocumentSymbolParams, DynamicRegistrationClientCapabilities,
-    GotoCapability, InitializeParams, OneOf, PartialResultParams, ServerCapabilities,
-    SymbolKindCapability, TextDocumentClientCapabilities, TextDocumentIdentifier, TextDocumentItem,
-    TypeDefinitionProviderCapability, Uri, WorkDoneProgressParams, WorkspaceFolder,
-    notification::DidOpenTextDocument, request::DocumentSymbolRequest,
+    CallHierarchyServerCapability, ClientCapabilities, DocumentSymbolClientCapabilities,
+    DynamicRegistrationClientCapabilities, GotoCapability, InitializeParams, OneOf,
+    ServerCapabilities, SymbolKindCapability, TextDocumentClientCapabilities,
+    TypeDefinitionProviderCapability, Uri, WorkspaceFolder,
 };
 use serde_json::{Value, json};
 
@@ -27,9 +26,7 @@ use crate::analysis::{
     source::Sources,
 };
 
-use super::{
-    CapturedDocument, FallbackPolicy, LspClient, LspError, SemanticCapture, capture, file_uri,
-};
+use super::{FallbackPolicy, LspClient, LspError, capture, file_uri, normalize};
 
 pub struct SessionConfig<'a> {
     pub root: &'a Path,
@@ -100,14 +97,14 @@ pub fn produce_semantic_facts(
     let captured = validate_capabilities(&result.capabilities, config.required_capabilities)
         .and_then(|()| {
             await_readiness(&mut client, config)?;
-            capture_document_semantics(&mut client, config, &root, sources)
+            capture::capture_document_semantics(&mut client, config, &root, sources)
         });
     let shutdown = client.shutdown();
 
     let captured = captured?;
     shutdown?;
-    capture::validate_capture(&captured)?;
-    capture::normalize_capture(&root, sources, captured, config.fallback)
+    normalize::validate_capture(&captured)?;
+    normalize::normalize_capture(&root, sources, captured, config.fallback)
 }
 
 #[allow(
@@ -131,7 +128,7 @@ fn initialize_parameters(
                 }),
                 document_symbol: Some(DocumentSymbolClientCapabilities {
                     symbol_kind: Some(SymbolKindCapability {
-                        value_set: Some(capture::supported_symbol_kinds()),
+                        value_set: Some(normalize::supported_symbol_kinds()),
                     }),
                     hierarchical_document_symbol_support: Some(true),
                     ..DocumentSymbolClientCapabilities::default()
@@ -258,73 +255,7 @@ fn validate_capabilities(
     Ok(())
 }
 
-/// Opens all documents, then captures facts for every hierarchical symbol.
-fn capture_document_semantics(
-    client: &mut LspClient,
-    config: &SessionConfig<'_>,
-    root: &Path,
-    sources: &Sources<'_>,
-) -> Result<SemanticCapture, LspError> {
-    let mut files = Vec::with_capacity(sources.len());
-
-    for document in sources.iter() {
-        let path = capture::source_path(document)?;
-        let uri = file_uri(&root.join(path))?;
-        client
-            .notify::<DidOpenTextDocument>(DidOpenTextDocumentParams {
-                text_document: TextDocumentItem::new(
-                    uri.clone(),
-                    config.language_id.to_owned(),
-                    1,
-                    document.content.clone(),
-                ),
-            })
-            .map_err(|error| LspError::new(format!("cannot open {path}: {error}")))?;
-        files.push((path.to_owned(), uri));
-    }
-
-    let files = files
-        .into_iter()
-        .enumerate()
-        .map(|(index, (path, uri))| {
-            let timeout = if index == 0 {
-                FIRST_REQUEST_TIMEOUT
-            } else {
-                SYMBOL_REQUEST_TIMEOUT
-            };
-            let response = client
-                .request::<DocumentSymbolRequest>(
-                    DocumentSymbolParams {
-                        text_document: TextDocumentIdentifier::new(uri.clone()),
-                        work_done_progress_params: WorkDoneProgressParams::default(),
-                        partial_result_params: PartialResultParams::default(),
-                    },
-                    timeout,
-                )
-                .map_err(|error| {
-                    LspError::new(format!(
-                        "cannot read {} symbols from {path}: {error}",
-                        language_title(config.language)
-                    ))
-                })?;
-
-            Ok(CapturedDocument {
-                symbols: capture::nested_symbols(response, &path)?,
-                path,
-                uri,
-            })
-        })
-        .collect::<Result<Vec<_>, LspError>>()?;
-
-    let facts = capture::request_facts(client, &files)?;
-
-    Ok(SemanticCapture {
-        documents: files,
-        facts,
-    })
-}
-
-const fn language_title(language: Language) -> &'static str {
+pub(super) const fn language_title(language: Language) -> &'static str {
     match language {
         Language::Python => "Python",
         Language::Rust => "Rust",
@@ -332,8 +263,6 @@ const fn language_title(language: Language) -> &'static str {
 }
 
 const INITIALIZE_TIMEOUT: Duration = Duration::from_mins(2);
-const FIRST_REQUEST_TIMEOUT: Duration = Duration::from_mins(5);
-const SYMBOL_REQUEST_TIMEOUT: Duration = Duration::from_mins(1);
 
 #[cfg(test)]
 pub(crate) mod tests {

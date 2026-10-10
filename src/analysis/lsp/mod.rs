@@ -1,8 +1,10 @@
 //! Language Server Protocol integration.
 //!
 //! This module owns shared capture models, the resolution policy, and LSP
-//! errors. `client` transports messages and converts coordinates. `capture`
-//! requests and normalizes semantic facts.
+//! errors. `client` runs the server process and transports messages.
+//! `session` runs one server from start to shutdown. `capture` sends the
+//! document requests. `normalize` checks the capture and converts it into
+//! semantic facts.
 //!
 //! # Sections
 //!
@@ -12,6 +14,7 @@
 
 pub(crate) mod capture;
 mod client;
+mod normalize;
 pub(crate) mod session;
 
 use std::{error::Error, fmt, io};
@@ -20,7 +23,7 @@ use lsp_types::{DocumentSymbol, Location, Range, SymbolKind, Uri};
 
 use crate::analysis::fact::ResolutionFallback;
 
-pub(crate) use client::{LspClient, file_uri, position_to_byte_offset, uri_path};
+pub(crate) use client::{LspClient, file_uri, uri_path};
 
 // -----------------------------------------------------------------------------
 // Captured Facts

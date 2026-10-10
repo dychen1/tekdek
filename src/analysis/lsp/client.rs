@@ -1,15 +1,15 @@
 //! Language server client.
 //!
-//! This module owns the server process, message transport, and path and position
-//! conversion. A server command, protocol values, paths, and source text are the
-//! inputs. Protocol results, file URIs, and source byte offsets are the outputs.
+//! This module owns the server process, message transport, and file URI
+//! conversion. A server command, protocol values, and paths are the inputs.
+//! Protocol results and file URIs are the outputs.
 //!
 //! # Sections
 //!
 //! `Client` owns the server process and synchronous requests.
 //! `Message Framing` reads and writes LSP messages.
 //! `Message Classification` identifies notifications, requests, and responses.
-//! `Path and Position Conversion` converts file paths and source coordinates.
+//! `File URIs` converts file paths to file URIs and back.
 
 use std::{
     io::{BufRead, BufReader, Read, Write},
@@ -24,7 +24,7 @@ use std::{
 };
 
 use lsp_types::{
-    InitializeParams, InitializeResult, InitializedParams, Position, Uri,
+    InitializeParams, InitializeResult, InitializedParams, Uri,
     notification::{Exit, Initialized, Notification},
     request::{Initialize, Request, Shutdown},
 };
@@ -555,10 +555,8 @@ fn response_result(message: &Value) -> Result<Value, LspError> {
 }
 
 // -----------------------------------------------------------------------------
-// Path and Position Conversion
+// File URIs
 // -----------------------------------------------------------------------------
-// The client relies on the LSP default UTF-16 position encoding. It advertises
-// no other encoding.
 
 /// Converts an absolute file path to an LSP file URI.
 ///
@@ -590,77 +588,6 @@ pub fn uri_path(uri: &Uri) -> Option<PathBuf> {
     Url::parse(uri.as_str()).ok()?.to_file_path().ok()
 }
 
-/// Converts one zero-based UTF-16 LSP position into a UTF-8 byte offset.
-///
-/// # Errors
-///
-/// Returns an error if the line or character is outside the source text.
-/// Returns an error if the character splits a UTF-16 surrogate pair.
-pub(crate) fn position_to_byte_offset(
-    source: &str,
-    path: &str,
-    position: Position,
-) -> Result<u32, LspError> {
-    let line_number = usize::try_from(position.line).map_err(|_| invalid_line(path, position))?;
-    let line_start = source
-        .split_inclusive('\n')
-        .take(line_number)
-        .map(str::len)
-        .sum::<usize>();
-    let line = source
-        .get(line_start..)
-        .and_then(|remainder| remainder.split('\n').next())
-        .filter(|_| line_number < source.split('\n').count())
-        .ok_or_else(|| invalid_line(path, position))?;
-    let line = line.strip_suffix('\r').unwrap_or(line);
-    let mut utf16_offset = 0_u32;
-
-    for (byte_offset, character) in line.char_indices() {
-        if utf16_offset == position.character {
-            return absolute_offset(line_start, byte_offset, path);
-        }
-
-        let character_width = if character.len_utf16() == 2 { 2 } else { 1 };
-        let next_offset = utf16_offset
-            .checked_add(character_width)
-            .ok_or_else(|| invalid_character(path, position))?;
-        if position.character < next_offset {
-            return Err(LspError::new(format!(
-                "the LSP character {} splits a UTF-16 character in {path}",
-                position.character
-            )));
-        }
-        utf16_offset = next_offset;
-    }
-
-    if utf16_offset == position.character {
-        return absolute_offset(line_start, line.len(), path);
-    }
-
-    Err(invalid_character(path, position))
-}
-
-/// # Errors
-///
-/// Returns an error if the combined offset does not fit in a source offset.
-fn absolute_offset(line_start: usize, byte_offset: usize, path: &str) -> Result<u32, LspError> {
-    line_start
-        .checked_add(byte_offset)
-        .and_then(|offset| u32::try_from(offset).ok())
-        .ok_or_else(|| LspError::new(format!("the source offset is too large in {path}")))
-}
-
-fn invalid_line(path: &str, position: Position) -> LspError {
-    LspError::new(format!("the LSP line {} is outside {path}", position.line))
-}
-
-fn invalid_character(path: &str, position: Position) -> LspError {
-    LspError::new(format!(
-        "the LSP character {} is outside line {} in {path}",
-        position.character, position.line
-    ))
-}
-
 // -----------------------------------------------------------------------------
 // Tests
 // -----------------------------------------------------------------------------
@@ -673,12 +600,11 @@ mod tests {
         sync::{Arc, Mutex},
     };
 
-    use lsp_types::Position;
     use serde_json::json;
 
     use super::{
-        STDERR_CAPTURE_LIMIT, file_uri, position_to_byte_offset, read_message, read_standard_error,
-        server_request_response, uri_path, write_message,
+        STDERR_CAPTURE_LIMIT, file_uri, read_message, read_standard_error, server_request_response,
+        uri_path, write_message,
     };
 
     #[test]
@@ -805,28 +731,5 @@ mod tests {
                 "{spelling} must name one path"
             );
         }
-    }
-
-    #[test]
-    fn converts_utf16_positions_into_utf8_offsets() {
-        let source = "alpha\né😀z\n";
-
-        assert_eq!(
-            position_to_byte_offset(source, "app.py", Position::new(1, 3))
-                .expect("the position must be valid"),
-            12
-        );
-        assert_eq!(
-            position_to_byte_offset(source, "app.py", Position::new(2, 0))
-                .expect("the final line must be valid"),
-            14
-        );
-    }
-
-    #[test]
-    fn rejects_a_position_inside_a_utf16_surrogate_pair() {
-        let result = position_to_byte_offset("😀", "app.py", Position::new(0, 1));
-
-        assert!(result.is_err());
     }
 }
