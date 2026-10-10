@@ -15,7 +15,7 @@
 //! # Compatibility
 //!
 //! The reader ignores unknown fields. Older schema 1 documents that hold a
-//! `clustering` or a `comparison` field stay readable.
+//! `clustering` or a `comparison` field, or a node `position`, stay readable.
 //!
 //! # Sections
 //!
@@ -78,9 +78,6 @@ pub struct ArtifactNode {
     pub scope: Option<ArtifactRange>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub body: Option<ArtifactRange>,
-    /// Optional declaration metadata preserved when reading graph artifacts.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub position: Option<ArtifactPosition>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub signature: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -117,13 +114,6 @@ pub struct ArtifactObservation {
 pub struct ArtifactRange {
     pub start: u32,
     pub end: u32,
-}
-
-/// One one-based line and column.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ArtifactPosition {
-    pub line: u32,
-    pub column: u32,
 }
 
 // -----------------------------------------------------------------------------
@@ -191,7 +181,6 @@ fn artifact_node(id: NodeId, node: &Node) -> ArtifactNode {
             .collect(),
         scope: evidence.scope.map(artifact_range),
         body: evidence.body.map(artifact_range),
-        position: None,
         signature,
         parameters,
         return_type,
@@ -343,10 +332,6 @@ impl ArtifactGraph {
                     .chain(&node.scope)
                     .chain(&node.body)
                     .any(|range| range.start > range.end)
-                || node
-                    .position
-                    .as_ref()
-                    .is_some_and(|position| position.line == 0 || position.column == 0)
             {
                 return Err(invalid("invalid graph node metadata"));
             }
@@ -446,13 +431,14 @@ mod tests {
     }
 
     #[test]
-    fn reads_an_older_graph_with_clustering_and_comparison_fields() {
+    fn reads_an_older_graph_with_clustering_comparison_and_position_fields() {
         let mut value = serde_json::to_value(GraphArtifact::new(&two_node_graph())).expect("value");
         value["clustering"] =
             serde_json::json!({"method": "file_path", "clusters": [], "memberships": []});
         value["comparison"] =
             serde_json::json!({"base": "b1", "target": "b2", "targetKind": "commit"});
         value["graph"]["nodes"][0]["change"] = "unchanged".into();
+        value["graph"]["nodes"][0]["position"] = serde_json::json!({"line": 1, "column": 1});
         value["graph"]["edges"][0]["previousWeight"] = 3.into();
 
         let read = GraphArtifact::read(&serde_json::to_vec(&value).expect("bytes"))
@@ -462,6 +448,7 @@ mod tests {
         assert!(written.get("clustering").is_none());
         assert!(written.get("comparison").is_none());
         assert!(written["graph"]["nodes"][0].get("change").is_none());
+        assert!(written["graph"]["nodes"][0].get("position").is_none());
     }
 
     #[test]

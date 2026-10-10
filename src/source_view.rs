@@ -347,7 +347,6 @@ mod tests {
             declarations: vec![range(name)],
             scope: Some(range(scope)),
             body: Some(range(body)),
-            position: None,
             signature: None,
             parameters: vec![],
             return_type: None,

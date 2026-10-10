@@ -55,7 +55,6 @@ pub fn write_graph(directory: &Path, extra: &str) -> GraphArtifact {
             declarations: vec![],
             scope: None,
             body: None,
-            position: None,
             signature: signature.map(str::to_owned),
             parameters: vec![],
             return_type: None,
