@@ -138,6 +138,7 @@ impl LspClient {
             "method": N::METHOD,
             "params": parameters,
         }))
+        .map_err(|error| self.with_standard_error(error))
     }
 
     /// # Errors
@@ -158,10 +159,9 @@ impl LspClient {
                 R::METHOD
             ))
         })?;
-        let result = match self.request_value(R::METHOD, &parameters, timeout) {
-            Ok(result) => result,
-            Err(error) => return Err(self.request_error(error)),
-        };
+        let result = self
+            .request_value(R::METHOD, &parameters, timeout)
+            .map_err(|error| self.with_standard_error(error))?;
 
         serde_json::from_value(result).map_err(|error| {
             LspError::new(format!("cannot decode the {} result: {error}", R::METHOD))
@@ -178,13 +178,8 @@ impl LspClient {
         parameters: InitializeParams,
         timeout: Duration,
     ) -> Result<InitializeResult, LspError> {
-        let result = match self.request::<Initialize>(parameters, timeout) {
-            Ok(result) => result,
-            Err(error) => return Err(self.initialization_error(error)),
-        };
-        if let Err(error) = self.notify::<Initialized>(InitializedParams {}) {
-            return Err(self.initialization_error(error));
-        }
+        let result = self.request::<Initialize>(parameters, timeout)?;
+        self.notify::<Initialized>(InitializedParams {})?;
         Ok(result)
     }
 
@@ -201,13 +196,28 @@ impl LspClient {
         method: &str,
         timeout: Duration,
     ) -> Result<Value, LspError> {
+        self.notification_value(method, timeout)
+            .map_err(|error| self.with_standard_error(error))
+    }
+
+    /// Requests a clean server shutdown.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the shutdown request, exit notification, or process check fails.
+    pub fn shutdown(mut self) -> Result<(), LspError> {
+        self.request::<Shutdown>((), Duration::from_secs(10))?;
+        self.notify::<Exit>(())?;
+        self.wait_for_exit(Duration::from_secs(5))
+    }
+
+    /// Answers server requests and skips other messages until the notification
+    /// arrives. One timeout covers the full wait loop.
+    fn notification_value(&mut self, method: &str, timeout: Duration) -> Result<Value, LspError> {
         let deadline = Instant::now() + timeout;
 
         loop {
-            let message = match self.receive(method, deadline) {
-                Ok(message) => message,
-                Err(error) => return Err(self.transport_error(error)),
-            };
+            let message = self.receive(method, deadline)?;
 
             if is_server_request(&message) {
                 self.answer_server_request(&message)?;
@@ -220,17 +230,6 @@ impl LspClient {
                 return Ok(message.get("params").cloned().unwrap_or(Value::Null));
             }
         }
-    }
-
-    /// Requests a clean server shutdown.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the shutdown request, exit notification, or process check fails.
-    pub fn shutdown(mut self) -> Result<(), LspError> {
-        self.request::<Shutdown>((), Duration::from_secs(10))?;
-        self.notify::<Exit>(())?;
-        self.wait_for_exit(Duration::from_secs(5))
     }
 
     /// Answers server requests that arrive before the matching response.
@@ -272,11 +271,7 @@ impl LspClient {
     }
 
     fn send(&mut self, message: &Value) -> Result<(), LspError> {
-        if let Err(error) = write_message(&mut self.stdin, message) {
-            return Err(self.transport_error(error));
-        }
-
-        Ok(())
+        write_message(&mut self.stdin, message)
     }
 
     /// Waits for the server process to exit and kills it after the timeout.
@@ -309,11 +304,10 @@ impl LspClient {
             .ok_or_else(|| LspError::timeout(method))?;
 
         match self.incoming_messages.recv_timeout(remaining) {
-            Ok(Ok(message)) => Ok(message),
-            Ok(Err(error)) => Err(self.transport_error(error)),
+            Ok(result) => result,
             Err(RecvTimeoutError::Timeout) => Err(LspError::timeout(method)),
             Err(RecvTimeoutError::Disconnected) => {
-                Err(self.transport_error(LspError::new("the language server reader stopped")))
+                Err(LspError::new("the language server reader stopped"))
             }
         }
     }
@@ -322,8 +316,11 @@ impl LspClient {
         self.send(&server_request_response(message))
     }
 
-    /// Adds retained server standard error to a transport failure.
-    fn transport_error(&mut self, error: LspError) -> LspError {
+    /// Adds the retained server standard error to one failure.
+    ///
+    /// Only the public methods call this, so each error gets the text once.
+    /// The wait lets a server that stops at the failure write its last lines.
+    fn with_standard_error(&mut self, error: LspError) -> LspError {
         let deadline = Instant::now() + STDERR_EXIT_WAIT;
 
         loop {
@@ -338,31 +335,6 @@ impl LspClient {
                     thread::sleep(Duration::from_millis(1));
                 }
                 Ok(None) | Err(_) => break,
-            }
-        }
-
-        append_standard_error(error, &self.standard_error)
-    }
-
-    /// Adds retained server standard error to an initialization failure.
-    fn initialization_error(&mut self, error: LspError) -> LspError {
-        self.request_error(error)
-    }
-
-    /// Adds retained server standard error to a request failure.
-    fn request_error(&mut self, error: LspError) -> LspError {
-        let deadline = Instant::now() + STDERR_CAPTURE_WAIT;
-
-        while standard_error_is_empty(&self.standard_error) && Instant::now() < deadline {
-            match self.process.try_wait() {
-                Ok(Some(_)) => {
-                    if let Some(thread) = self.standard_error_thread.take() {
-                        let _ = thread.join();
-                    }
-                    break;
-                }
-                Ok(None) => thread::sleep(Duration::from_millis(1)),
-                Err(_) => break,
             }
         }
 
@@ -389,7 +361,6 @@ fn stop_process(process: &mut Child) {
 }
 
 const STDERR_CAPTURE_LIMIT: usize = 64 * 1024;
-const STDERR_CAPTURE_WAIT: Duration = Duration::from_millis(50);
 const STDERR_EXIT_WAIT: Duration = Duration::from_millis(50);
 
 /// Drains server standard error and retains a bounded prefix.
@@ -417,19 +388,11 @@ fn append_standard_error(error: LspError, capture: &Mutex<Vec<u8>>) -> LspError 
     };
     let standard_error = String::from_utf8_lossy(&retained);
     let standard_error = standard_error.trim();
-    let suffix = format!("\n{STDERR_ERROR_HEADING}\n{standard_error}");
 
-    if standard_error.is_empty() || error.to_string().ends_with(&suffix) {
+    if standard_error.is_empty() {
         error
     } else {
-        LspError::new(format!("{error}{suffix}"))
-    }
-}
-
-fn standard_error_is_empty(capture: &Mutex<Vec<u8>>) -> bool {
-    match capture.lock() {
-        Ok(retained) => retained.is_empty(),
-        Err(poisoned) => poisoned.into_inner().is_empty(),
+        LspError::new(format!("{error}\n{STDERR_ERROR_HEADING}\n{standard_error}"))
     }
 }
 
@@ -469,14 +432,13 @@ fn server_request_response(message: &Value) -> Value {
 
 /// Reads LSP messages from the server output.
 ///
-/// Discards notifications. Sends other messages and read errors through the channel.
-/// Stops after an error, a closed output, or a closed channel.
+/// Sends every message, notifications included, and the first read error
+/// through the channel. Each receive loop skips the messages it does not wait
+/// for. Stops after an error, a closed output, or a closed channel.
 fn read_loop(mut reader: impl BufRead, sender: &Sender<Result<Value, LspError>>) {
     loop {
         match read_message(&mut reader) {
             Ok(Some(message)) => {
-                // Notifications pass through. Each receive loop skips the
-                // notifications it does not wait for.
                 if sender.send(Ok(message)).is_err() {
                     return;
                 }

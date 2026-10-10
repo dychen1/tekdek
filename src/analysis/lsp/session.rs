@@ -532,6 +532,11 @@ pub(crate) mod tests {
             message.contains("rejected project configuration"),
             "the error should include server standard error: {message}"
         );
+        assert_eq!(
+            message.matches("language server standard error:").count(),
+            1,
+            "the error should include standard error once: {message}"
+        );
     }
 
     #[test]
