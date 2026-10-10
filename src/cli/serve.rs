@@ -6,12 +6,16 @@
 
 use std::{
     path::{Path, PathBuf},
-    process::{Command, ExitCode, Stdio},
+    process::{Command, Stdio},
 };
 
-use tekdek::{catalog::build_catalog, serve::ViewerServer};
+use tekdek::{
+    flow::{lineage::read_current, models::FlowId},
+    serve::ViewerServer,
+};
+use url::Url;
 
-use super::{ERROR_CODE, split_arguments, store_directory};
+use super::{split_arguments, store_directory};
 
 pub(super) const USAGE: &str =
     "usage: tekdek serve [--store <directory>] [--port <n>] [--flow <name>] [--open]
@@ -29,36 +33,12 @@ struct Arguments {
 }
 
 /// Serves the viewer for one store until the process ends.
-pub(super) fn run(raw: impl Iterator<Item = String>) -> ExitCode {
-    let arguments = match parse(raw) {
-        Ok(arguments) => arguments,
-        Err(message) => {
-            eprintln!("error: {message}\n{USAGE}");
-            return ExitCode::from(ERROR_CODE);
-        }
-    };
-    let store = match store_directory(arguments.store) {
-        Ok(store) => store,
-        Err(message) => {
-            eprintln!("error: {message}");
-            return ExitCode::from(ERROR_CODE);
-        }
-    };
-    let server = match ViewerServer::bind(&store, arguments.port) {
-        Ok(server) => server,
-        Err(error) => {
-            eprintln!("error: {error}");
-            return ExitCode::from(ERROR_CODE);
-        }
-    };
+pub(super) fn run(raw: impl Iterator<Item = String>) -> Result<(), String> {
+    let arguments = parse(raw).map_err(|message| format!("{message}\n{USAGE}"))?;
+    let store = store_directory(arguments.store)?;
+    let server = ViewerServer::bind(&store, arguments.port).map_err(|error| error.to_string())?;
     let url = match &arguments.flow {
-        Some(flow) => match flow_url(&server.url(), &store, flow) {
-            Ok(url) => url,
-            Err(message) => {
-                eprintln!("error: {message}");
-                return ExitCode::from(ERROR_CODE);
-            }
-        },
+        Some(flow) => flow_url(&server.url(), &store, flow)?,
         None => server.url(),
     };
     println!("{url}");
@@ -69,12 +49,12 @@ pub(super) fn run(raw: impl Iterator<Item = String>) -> ExitCode {
         eprintln!("warning: cannot open a browser: {error}");
     }
     server.run();
-    ExitCode::SUCCESS
+    Ok(())
 }
 
 /// Parses the arguments after `serve`.
 fn parse(raw: impl Iterator<Item = String>) -> Result<Arguments, String> {
-    let (operands, mut options) = split_arguments(raw, &["--store", "--port", "--flow"])?;
+    let (operands, mut options, _) = split_arguments(raw, &["--store", "--port", "--flow"], &[])?;
     if let Some(operand) = operands.first() {
         return Err(format!("unexpected argument: {operand}"));
     }
@@ -100,32 +80,24 @@ fn parse(raw: impl Iterator<Item = String>) -> Result<Arguments, String> {
     })
 }
 
-/// Returns the viewer URL that opens one flow under the graph that the store catalog lists it with.
+/// Returns the viewer URL that opens one flow under the graph that its current generation binds.
 fn flow_url(base: &str, store: &Path, flow: &str) -> Result<String, String> {
-    let catalog =
-        build_catalog(store).map_err(|error| format!("cannot read the store catalog: {error}"))?;
-    let artifact = catalog
-        .graph_of_flow(flow)
-        .ok_or_else(|| format!("the store lists no flow named {flow}: run `tekdek flow list`"))?;
-    Ok(viewer_url(base, artifact, flow))
+    let unlisted = || format!("the store lists no flow named {flow}: run `tekdek flow list`");
+    let flow_id = FlowId::try_from(flow).map_err(|_| unlisted())?;
+    let current = read_current(store, &flow_id)
+        .map_err(|error| format!("cannot read the flow {flow}: {error}"))?
+        .ok_or_else(unlisted)?;
+    viewer_url(base, &current.artifact.facts.binding.graph_artifact, flow)
 }
 
 /// Returns the viewer URL of one flow under one graph file.
-fn viewer_url(base: &str, artifact: &str, flow: &str) -> String {
-    format!("{base}?artifact={}&flow={}", encode(artifact), encode(flow))
-}
-
-/// Percent-encodes every byte except the unreserved URL characters.
-fn encode(text: &str) -> String {
-    text.bytes()
-        .map(|byte| {
-            if byte.is_ascii_alphanumeric() || b"-._~".contains(&byte) {
-                char::from(byte).to_string()
-            } else {
-                format!("%{byte:02X}")
-            }
-        })
-        .collect()
+fn viewer_url(base: &str, artifact: &str, flow: &str) -> Result<String, String> {
+    let mut url =
+        Url::parse(base).map_err(|error| format!("invalid viewer URL {base}: {error}"))?;
+    url.query_pairs_mut()
+        .append_pair("artifact", artifact)
+        .append_pair("flow", flow);
+    Ok(url.into())
 }
 
 /// Opens the URL with the browser of the operating system.
@@ -176,7 +148,7 @@ mod tests {
     fn builds_the_url_of_a_flow_and_rejects_an_unlisted_flow() {
         assert_eq!(
             viewer_url("http://127.0.0.1:1/viewer/", "my app.json", "request-flow"),
-            "http://127.0.0.1:1/viewer/?artifact=my%20app.json&flow=request-flow"
+            Ok("http://127.0.0.1:1/viewer/?artifact=my+app.json&flow=request-flow".to_owned())
         );
         let store = tempfile::tempdir().expect("store");
         std::fs::write(store.path().join("app.json"), "{}").expect("graph");

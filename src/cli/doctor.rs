@@ -11,9 +11,6 @@
 //! `Checks` finds each server and runs its version command.
 //! `Report` formats the human report.
 
-use std::process::ExitCode;
-
-#[cfg(any(feature = "python", feature = "rust"))]
 use std::{
     ffi::OsStr,
     io::Read,
@@ -23,9 +20,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-#[cfg(any(feature = "python", feature = "rust"))]
 use serde::Serialize;
-#[cfg(any(feature = "python", feature = "rust"))]
 use tekdek::analysis::{
     PipelineConfig,
     config::configured_profiles,
@@ -33,8 +28,7 @@ use tekdek::analysis::{
     language::{Language, LanguageProfile},
 };
 
-#[cfg(any(feature = "python", feature = "rust"))]
-use super::{emit, failure, render, split_arguments};
+use super::{failure, render, split_arguments};
 
 pub(super) const USAGE: &str = "usage: tekdek doctor [<root>] [--config <path>] [--json]
 doctor checks the language server of each language that this build indexes.
@@ -42,7 +36,6 @@ With a root, it checks only the languages that have source files in the root.
 It prints the version or the install command of each server, and exits with 1
 when a needed server is missing or cannot run.";
 
-#[cfg(any(feature = "python", feature = "rust"))]
 const VERSION_TIMEOUT: Duration = Duration::from_secs(5);
 
 // -----------------------------------------------------------------------------
@@ -50,7 +43,6 @@ const VERSION_TIMEOUT: Duration = Duration::from_secs(5);
 // -----------------------------------------------------------------------------
 
 /// The check of one language server.
-#[cfg(any(feature = "python", feature = "rust"))]
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ServerCheck {
@@ -68,7 +60,6 @@ struct ServerCheck {
 }
 
 /// The state of one server. `Broken` and `Missing` fail the check.
-#[cfg(any(feature = "python", feature = "rust"))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 enum Status {
@@ -79,7 +70,6 @@ enum Status {
     NotNeeded,
 }
 
-#[cfg(any(feature = "python", feature = "rust"))]
 impl Status {
     const fn fails(self) -> bool {
         matches!(self, Self::Broken | Self::Missing)
@@ -96,23 +86,13 @@ impl Status {
     }
 }
 
-/// Checks the language servers and prints one report.
-#[cfg(any(feature = "python", feature = "rust"))]
-pub(super) fn run(arguments: Vec<String>) -> ExitCode {
-    let json = arguments.iter().any(|argument| argument == "--json");
-    let (code, output) = check(arguments).unwrap_or_else(|message| failure(json, &message));
-    emit(json, code, &output)
+/// Returns the exit code and one report of the language server checks.
+pub(super) fn run(arguments: Vec<String>, json: bool) -> (u8, String) {
+    check(arguments).unwrap_or_else(|message| failure(json, &message))
 }
 
-/// Reports that this build cannot index any language.
-#[cfg(not(any(feature = "python", feature = "rust")))]
-pub(super) fn run(_arguments: Vec<String>) -> ExitCode {
-    super::emit(false, 2, "error: this build has no language adapters")
-}
-
-#[cfg(any(feature = "python", feature = "rust"))]
 fn check(arguments: Vec<String>) -> Result<(u8, String), String> {
-    let (operands, mut options) = split_arguments(arguments.into_iter(), &["--config"])
+    let (operands, mut options, _) = split_arguments(arguments.into_iter(), &["--config"], &[])
         .map_err(|message| format!("{message}\n{USAGE}"))?;
     let json = options.remove("--json").is_some();
     let config = options.remove("--config").map(PathBuf::from);
@@ -158,7 +138,6 @@ fn check(arguments: Vec<String>) -> Result<(u8, String), String> {
 // -----------------------------------------------------------------------------
 
 /// Checks one profile. `used` lists the languages of the root, when a root is given.
-#[cfg(any(feature = "python", feature = "rust"))]
 fn check_server(profile: &LanguageProfile, used: Option<&[Language]>) -> ServerCheck {
     let mut check = ServerCheck {
         language: profile.language.as_str().to_owned(),
@@ -204,7 +183,6 @@ fn check_server(profile: &LanguageProfile, used: Option<&[Language]>) -> ServerC
 }
 
 /// The result of one version command.
-#[cfg(any(feature = "python", feature = "rust"))]
 #[derive(Debug, PartialEq, Eq)]
 enum Probe {
     Version(String),
@@ -219,7 +197,6 @@ enum Probe {
 /// Without that program, or when the command runs longer than the timeout or
 /// prints nothing, the version is unverified. A command that exits with an
 /// error is a failure: the rustup proxy of a missing component does this.
-#[cfg(any(feature = "python", feature = "rust"))]
 fn probe(server: &Path) -> Probe {
     let stem = server
         .file_stem()
@@ -290,7 +267,6 @@ fn probe(server: &Path) -> Probe {
 // -----------------------------------------------------------------------------
 
 /// Formats one line for each language after the tekdek version.
-#[cfg(any(feature = "python", feature = "rust"))]
 fn describe(checks: &[ServerCheck], root: Option<&Path>) -> String {
     let mut lines = vec![format!("tekdek {}", env!("CARGO_PKG_VERSION"))];
     for check in checks {
@@ -345,7 +321,7 @@ fn describe(checks: &[ServerCheck], root: Option<&Path>) -> String {
     lines.join("\n")
 }
 
-#[cfg(all(test, any(feature = "python", feature = "rust")))]
+#[cfg(test)]
 mod tests {
     use std::{fmt::Write as _, fs, path::PathBuf};
 

@@ -13,17 +13,12 @@
 //! `Arguments` parses the command line.
 //! `Artifact destination` selects indexed or explicit output.
 
-use std::process::ExitCode;
-
-use super::ERROR_CODE;
-
-#[cfg(any(feature = "python", feature = "rust"))]
 use std::{
     collections::BTreeMap,
     fs,
     path::{Path, PathBuf},
 };
-#[cfg(any(feature = "python", feature = "rust"))]
+
 use tekdek::{
     analysis::{
         self, PipelineConfig,
@@ -32,6 +27,8 @@ use tekdek::{
     },
     store::{PROJECT_STORE, create_project_store, find_project_store, graph::GraphArtifact},
 };
+
+use super::split_arguments;
 
 // -----------------------------------------------------------------------------
 // Entry
@@ -50,60 +47,26 @@ store, index creates <root>/.tekdek after the analysis succeeds. index writes
 <store>/<name>.json. --output writes one file and changes no store.";
 
 /// Analyzes one codebase and writes its graph into the store.
-#[cfg(any(feature = "python", feature = "rust"))]
-pub(super) fn run(raw: impl Iterator<Item = String>) -> ExitCode {
-    let arguments = match Arguments::parse(raw) {
-        Ok(arguments) => arguments,
-        Err(message) => {
-            eprintln!("error: {message}");
-            eprintln!("{USAGE}");
-            return ExitCode::from(ERROR_CODE);
-        }
-    };
-    let destination = match artifact_destination(&arguments) {
-        Ok(destination) => destination,
-        Err(message) => {
-            eprintln!("error: {message}");
-            return ExitCode::from(ERROR_CODE);
-        }
-    };
+pub(super) fn run(raw: impl Iterator<Item = String>) -> Result<(), String> {
+    let arguments = Arguments::parse(raw).map_err(|message| format!("{message}\n{USAGE}"))?;
+    let destination = artifact_destination(&arguments)?;
     if destination.project_root {
         println!("indexing the project root {}", destination.root.display());
     }
-    let config = match pipeline_config(&arguments, &destination.root) {
-        Ok(config) => config,
-        Err(error) => {
-            eprintln!("error: {error}");
-            return ExitCode::from(ERROR_CODE);
-        }
-    };
-    let result = match analysis::run(&config) {
-        Ok(result) => result,
-        Err(error) => {
-            eprintln!("error: {error}");
-            return ExitCode::from(ERROR_CODE);
-        }
-    };
+    let config =
+        pipeline_config(&arguments, &destination.root).map_err(|error| error.to_string())?;
+    let result = analysis::run(&config).map_err(|error| error.to_string())?;
     // Create a new store only after the analysis succeeds, so a failed first index leaves no store.
     if destination.create_store
         && let Some((store, _)) = &destination.indexed
     {
-        if let Err(error) = create_project_store(store) {
-            eprintln!(
-                "error: cannot create the store {}: {error}",
-                store.display()
-            );
-            return ExitCode::from(ERROR_CODE);
-        }
+        create_project_store(store)
+            .map_err(|error| format!("cannot create the store {}: {error}", store.display()))?;
         println!("created the store {}", store.display());
     }
-    if let Err(error) = GraphArtifact::new(&result.graph).write(&destination.output) {
-        eprintln!(
-            "error: cannot write {}: {error}",
-            destination.output.display()
-        );
-        return ExitCode::from(ERROR_CODE);
-    }
+    GraphArtifact::new(&result.graph)
+        .write(&destination.output)
+        .map_err(|error| format!("cannot write {}: {error}", destination.output.display()))?;
 
     println!(
         "{} nodes, {} edges -> {}",
@@ -111,14 +74,7 @@ pub(super) fn run(raw: impl Iterator<Item = String>) -> ExitCode {
         result.graph.edges.len(),
         destination.output.display()
     );
-    ExitCode::SUCCESS
-}
-
-/// Reports that this build cannot analyze any language.
-#[cfg(not(any(feature = "python", feature = "rust")))]
-pub(super) fn run(_raw: impl Iterator<Item = String>) -> ExitCode {
-    eprintln!("error: this build has no language adapters");
-    ExitCode::from(ERROR_CODE)
+    Ok(())
 }
 
 /// Builds pipeline configuration from files and command-line overrides.
@@ -126,7 +82,6 @@ pub(super) fn run(_raw: impl Iterator<Item = String>) -> ExitCode {
 /// # Errors
 ///
 /// Returns an error if configuration loading or override application fails.
-#[cfg(any(feature = "python", feature = "rust"))]
 fn pipeline_config(arguments: &Arguments, root: &Path) -> Result<PipelineConfig, ConfigError> {
     let mut profiles = configured_profiles(arguments.config.as_deref())?;
     apply_cli_overrides(
@@ -143,7 +98,6 @@ fn pipeline_config(arguments: &Arguments, root: &Path) -> Result<PipelineConfig,
 // Arguments
 // -----------------------------------------------------------------------------
 
-#[cfg(any(feature = "python", feature = "rust"))]
 #[derive(Debug)]
 struct Arguments {
     root: PathBuf,
@@ -160,7 +114,6 @@ struct Arguments {
     server_arguments: BTreeMap<Language, Vec<String>>,
 }
 
-#[cfg(any(feature = "python", feature = "rust"))]
 impl Arguments {
     /// Parses command-line arguments.
     ///
@@ -172,67 +125,46 @@ impl Arguments {
     /// Returns a message if a second positional value exists, an option is
     /// invalid, or `--output` appears with `--name` or `--store`.
     fn parse(arguments: impl Iterator<Item = String>) -> Result<Self, String> {
-        let mut root = None;
-        let mut output = None;
-        let mut name = None;
-        let mut store = None;
-        let mut config = None;
-        let mut servers = Vec::new();
-        let mut server_arguments = BTreeMap::<Language, Vec<String>>::new();
-        let mut arguments = arguments.peekable();
-
-        while let Some(argument) = arguments.next() {
-            match argument.as_str() {
-                // Set the indexed artifact name.
-                "--name" => {
-                    name = Some(next_value(&mut arguments, "--name")?);
-                }
-                // Set the store of the indexed artifact.
-                "--store" => {
-                    store = Some(PathBuf::from(next_value(&mut arguments, "--store")?));
-                }
-                // Set the artifact path.
-                "--output" => {
-                    output = Some(PathBuf::from(next_value(&mut arguments, "--output")?));
-                }
-                // Set the user configuration path.
-                "--config" => {
-                    config = Some(PathBuf::from(next_value(&mut arguments, "--config")?));
-                }
-                // Set the language server.
-                "--server" => {
-                    let value = next_value(&mut arguments, "--server")?;
-                    servers.push(parse_language_value(
-                        &value,
-                        "--server",
-                        "<language>=<program>",
-                        "program",
-                    )?);
-                }
-                // Add one language server argument.
-                "--server-arg" => {
-                    let value = next_value(&mut arguments, "--server-arg")?;
-                    let (language, value) = parse_language_value(
-                        &value,
-                        "--server-arg",
-                        "<language>=<argument>",
-                        "argument",
-                    )?;
-                    server_arguments.entry(language).or_default().push(value);
-                }
-                // Reject an unknown option.
-                value if value.starts_with("--") => {
-                    return Err(format!("unknown option: {value}"));
-                }
-                // Set the codebase root.
-                value if root.is_none() => root = Some(PathBuf::from(value)),
-                // Reject a second positional value.
-                value => return Err(format!("unexpected argument: {value}")),
-            }
+        let (operands, mut options, repeated) = split_arguments(
+            arguments,
+            &["--name", "--store", "--output", "--config"],
+            &["--server", "--server-arg"],
+        )?;
+        let root = match operands.as_slice() {
+            [] => None,
+            [root] => Some(PathBuf::from(root)),
+            [_, extra, ..] => return Err(format!("unexpected argument: {extra}")),
+        };
+        let output = options.remove("--output").map(PathBuf::from);
+        let name = options.remove("--name");
+        let store = options.remove("--store").map(PathBuf::from);
+        let config = options.remove("--config").map(PathBuf::from);
+        if let Some(option) = options.keys().next() {
+            return Err(format!("unexpected option: {option}"));
         }
-
         if output.is_some() && (name.is_some() || store.is_some()) {
             return Err("--output cannot be used with --name or --store".to_owned());
+        }
+
+        let mut servers = Vec::new();
+        let mut server_arguments = BTreeMap::<Language, Vec<String>>::new();
+        for (option, value) in repeated {
+            if option == "--server" {
+                servers.push(parse_language_value(
+                    &value,
+                    "--server",
+                    "<language>=<program>",
+                    "program",
+                )?);
+            } else {
+                let (language, value) = parse_language_value(
+                    &value,
+                    "--server-arg",
+                    "<language>=<argument>",
+                    "argument",
+                )?;
+                server_arguments.entry(language).or_default().push(value);
+            }
         }
 
         Ok(Self {
@@ -253,7 +185,6 @@ impl Arguments {
 /// # Errors
 ///
 /// Returns a message if either component is empty or the language is unknown.
-#[cfg(any(feature = "python", feature = "rust"))]
 fn parse_language_value(
     value: &str,
     option: &str,
@@ -273,21 +204,6 @@ fn parse_language_value(
     Ok((language, value.to_owned()))
 }
 
-/// Consumes and returns the next option value.
-///
-/// # Errors
-///
-/// Returns a message if the option has no value.
-#[cfg(any(feature = "python", feature = "rust"))]
-fn next_value(
-    arguments: &mut impl Iterator<Item = String>,
-    option: &str,
-) -> Result<String, String> {
-    arguments
-        .next()
-        .ok_or_else(|| format!("{option} needs a value"))
-}
-
 // -----------------------------------------------------------------------------
 // Artifact destination
 // -----------------------------------------------------------------------------
@@ -296,7 +212,6 @@ fn next_value(
 ///
 /// `create_store` is true when the destination is a new project store.
 /// `project_root` is true when index analyzes the project root instead of the working directory.
-#[cfg(any(feature = "python", feature = "rust"))]
 #[derive(Debug, PartialEq, Eq)]
 struct Destination {
     root: PathBuf,
@@ -320,7 +235,6 @@ struct Destination {
 ///
 /// Returns a message if the root or artifact name is invalid, or if a root
 /// inside a project has no `--name`.
-#[cfg(any(feature = "python", feature = "rust"))]
 fn artifact_destination(arguments: &Arguments) -> Result<Destination, String> {
     if let Some(output) = &arguments.output {
         return Ok(Destination {
@@ -388,7 +302,6 @@ fn artifact_destination(arguments: &Arguments) -> Result<Destination, String> {
 /// # Errors
 ///
 /// Returns a message if the name is not valid UTF-8.
-#[cfg(any(feature = "python", feature = "rust"))]
 fn folder_name(root: &Path) -> Result<String, String> {
     match root.file_name() {
         Some(name) => name
@@ -404,7 +317,6 @@ fn folder_name(root: &Path) -> Result<String, String> {
 /// # Errors
 ///
 /// Returns a message if the name is not one normal path component.
-#[cfg(any(feature = "python", feature = "rust"))]
 fn validate_artifact_name(name: &str) -> Result<(), String> {
     let path = Path::new(name);
     if name.is_empty()
@@ -424,15 +336,11 @@ fn validate_artifact_name(name: &str) -> Result<(), String> {
 // Tests
 // -----------------------------------------------------------------------------
 
-#[cfg(all(test, any(feature = "python", feature = "rust")))]
+#[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
-
     #[cfg(feature = "rust")]
-    use std::{
-        fs,
-        sync::atomic::{AtomicUsize, Ordering},
-    };
+    use std::fs;
+    use std::path::PathBuf;
 
     use tekdek::analysis::language::Language;
 
@@ -550,7 +458,8 @@ mod tests {
     #[cfg(feature = "rust")]
     #[test]
     fn applies_cli_overrides_after_explicit_configuration() {
-        let config_path = test_config_path();
+        let directory = tempfile::tempdir().expect("the temporary directory should exist");
+        let config_path = directory.path().join("config.toml");
         fs::write(
             &config_path,
             r#"
@@ -580,7 +489,6 @@ mod tests {
 
         let config = pipeline_config(&arguments, &arguments.root)
             .expect("the pipeline configuration should build");
-        fs::remove_file(&config_path).expect("the test configuration should be removed");
         let rust = config
             .profiles
             .iter()
@@ -665,21 +573,38 @@ mod tests {
     }
 
     #[test]
+    fn accepts_inline_option_values() {
+        let arguments =
+            parse(&["--name=sample", "--store=demo", "--server=rust=ra"]).expect("args");
+
+        assert_eq!(arguments.name.as_deref(), Some("sample"));
+        assert_eq!(arguments.store, Some(PathBuf::from("demo")));
+        assert_eq!(arguments.servers, [(Language::Rust, "ra".to_owned())]);
+    }
+
+    #[test]
+    fn rejects_a_short_option_as_an_unknown_option() {
+        assert_eq!(
+            parse(&["-h"]).expect_err("-h is not a root"),
+            "unknown option: -h"
+        );
+    }
+
+    #[test]
+    fn rejects_a_repeated_single_value_option() {
+        for option in ["--name", "--store", "--output", "--config"] {
+            assert_eq!(
+                parse(&[option, "a", option, "b"]).expect_err("a repeated option"),
+                format!("duplicate option: {option}")
+            );
+        }
+    }
+
+    #[test]
     fn reserves_the_artifact_index_name() {
         assert_eq!(
             validate_artifact_name("INDEX"),
             Err("invalid artifact name: INDEX".to_owned())
         );
-    }
-
-    #[cfg(feature = "rust")]
-    fn test_config_path() -> PathBuf {
-        static NEXT_PATH: AtomicUsize = AtomicUsize::new(0);
-
-        std::env::temp_dir().join(format!(
-            "tekdek-cli-{}-{}.toml",
-            std::process::id(),
-            NEXT_PATH.fetch_add(1, Ordering::Relaxed)
-        ))
     }
 }

@@ -58,7 +58,7 @@ enum Action {
 impl Command {
     /// Parses the arguments after `graph` without file access.
     fn parse(arguments: impl Iterator<Item = String>) -> Result<Self, String> {
-        let (operands, mut options) = split_arguments(arguments, VALUE_OPTIONS)?;
+        let (operands, mut options, _) = split_arguments(arguments, VALUE_OPTIONS, &[])?;
         let json = options.remove("--json").is_some();
         let store = options.remove("--store").map(PathBuf::from);
         let graph = options.remove("--graph");
@@ -116,9 +116,7 @@ impl Command {
 // -----------------------------------------------------------------------------
 
 /// Returns the exit code and one output document for a graph command.
-pub(super) fn run(arguments: Vec<String>) -> (u8, String) {
-    // Detect JSON mode before parsing so invalid commands also return JSON.
-    let json = arguments.iter().any(|argument| argument == "--json");
+pub(super) fn run(arguments: Vec<String>, json: bool) -> (u8, String) {
     let result = Command::parse(arguments.into_iter())
         .map_err(|message| format!("{message}\n{USAGE}"))
         .and_then(|command| execute(command).map_err(|error| error.to_string()));
@@ -292,7 +290,7 @@ mod tests {
         let mut raw = vec!["--store".to_owned(), directory.display().to_string()];
         raw.extend(arguments.iter().map(|value| (*value).to_owned()));
         raw.push("--json".to_owned());
-        let (code, output) = run(raw);
+        let (code, output) = run(raw, true);
         assert_eq!(code, expected_code, "{arguments:?}: {output}");
         serde_json::from_str(&output).expect("one JSON document")
     }

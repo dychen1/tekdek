@@ -51,17 +51,6 @@ struct ArtifactIndexEntry {
     flows: Vec<FlowListing>,
 }
 
-impl ArtifactIndex {
-    /// Returns the graph file that lists the flow, or `None` when no graph lists it.
-    #[must_use]
-    pub fn graph_of_flow(&self, flow: &str) -> Option<&str> {
-        self.artifacts
-            .iter()
-            .find(|artifact| artifact.flows.iter().any(|listing| listing.name == flow))
-            .map(|artifact| artifact.file.as_str())
-    }
-}
-
 // -----------------------------------------------------------------------------
 // Building
 // -----------------------------------------------------------------------------
@@ -278,12 +267,6 @@ mod tests {
                 "clusterCount": 2,
                 "stale": false
             })
-        );
-        assert_eq!(
-            build_catalog(path)
-                .expect("catalog")
-                .graph_of_flow("demo-flow"),
-            Some("graph.json")
         );
         assert_eq!(
             readable_files(path).expect("files"),

@@ -87,7 +87,7 @@ struct AuthorOptions {
 impl Command {
     /// Parses the arguments after `flow` without file access.
     fn parse(arguments: impl Iterator<Item = String>) -> Result<Self, String> {
-        let (operands, mut options) = split_arguments(arguments, VALUE_OPTIONS)?;
+        let (operands, mut options, _) = split_arguments(arguments, VALUE_OPTIONS, &[])?;
         let json = options.remove("--json").is_some();
         let store = options.remove("--store").map(PathBuf::from);
         let words: Vec<_> = operands.iter().map(String::as_str).collect();
@@ -164,9 +164,7 @@ impl AuthorOptions {
 // -----------------------------------------------------------------------------
 
 /// Returns the exit code and one output document for a flow command.
-pub(super) fn run(arguments: Vec<String>, input: &mut impl Read) -> (u8, String) {
-    // Detect JSON mode before parsing so invalid commands also return JSON.
-    let json = arguments.iter().any(|argument| argument == "--json");
+pub(super) fn run(arguments: Vec<String>, json: bool, input: &mut impl Read) -> (u8, String) {
     let result = Command::parse(arguments.into_iter())
         .map_err(|message| format!("{message}\n{USAGE}"))
         .and_then(|command| execute(command, input).map_err(|error| error.to_string()));
@@ -411,7 +409,7 @@ mod tests {
         raw.extend(arguments.iter().map(|value| (*value).to_owned()));
         // A missing option value must not consume the JSON flag.
         raw.push("--json".to_owned());
-        let (code, output) = run(raw, &mut Cursor::new(input));
+        let (code, output) = run(raw, true, &mut Cursor::new(input));
         assert_eq!(code, expected_code, "{arguments:?}: {output}");
         serde_json::from_str(&output).expect("one JSON document")
     }

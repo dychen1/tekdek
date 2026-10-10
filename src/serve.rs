@@ -15,19 +15,24 @@
 //! `Routes` maps a request path onto an embedded asset or a store file.
 //! `Catalog allowlist` decides which store files the viewer can read.
 //! `Source route` serves the function source of one flow.
-//! `Safe reads` reads one store file without following a link.
+//! `Read failures` maps link and file errors onto replies.
+//!
+//! The `files` module reads one store file or one project file without
+//! following a link.
+
+mod files;
 
 use std::{
     borrow::Cow,
     fs, io,
-    io::Read,
     path::{Path, PathBuf},
 };
 
+use self::files::{read_project, read_store};
 use crate::{
     catalog::{build_catalog, readable_files},
     flow::{
-        lineage::read_current,
+        lineage::{LineageError, read_current},
         models::{FlowId, is_flow_id},
     },
     source_view::{SourceDocument, flow_sources},
@@ -162,6 +167,15 @@ impl Reply {
         }
     }
 
+    fn json(body: Vec<u8>) -> Self {
+        Self {
+            status: 200,
+            content_type: JSON,
+            body: Cow::Owned(body),
+            location: None,
+        }
+    }
+
     fn failure(status: u16, message: &str) -> Self {
         Self {
             status,
@@ -265,33 +279,16 @@ fn route(store: &Path, parts: &[String], query: Option<&str>) -> Result<Reply, R
             .map(|(_, bytes)| Reply::asset("font/woff2", bytes))
             .ok_or_else(not_found),
         // Serve the catalog that the server builds from the store.
-        ["artifacts", "index.json"] => Ok(Reply {
-            status: 200,
-            content_type: JSON,
-            body: Cow::Owned(catalog_document(store)?),
-            location: None,
-        }),
+        ["artifacts", "index.json"] => Ok(Reply::json(catalog_document(store)?)),
         // Serve the store files that the catalog lists.
         ["artifacts", rest @ ..] if !rest.is_empty() => {
-            let file = rest.join("/");
-            if !listed(&catalog_files(store)?, &file) {
+            if !catalog_files(store)?.contains(&rest.join("/")) {
                 return Err(not_found());
             }
-            let bytes = read_safe(store, rest)?;
-            Ok(Reply {
-                status: 200,
-                content_type: JSON,
-                body: Cow::Owned(bytes),
-                location: None,
-            })
+            Ok(Reply::json(read_store(store, rest)?))
         }
         // Serve the source of every step function of one flow.
-        ["source"] => Ok(Reply {
-            status: 200,
-            content_type: JSON,
-            body: Cow::Owned(source_document(store, query)?),
-            location: None,
-        }),
+        ["source"] => Ok(Reply::json(source_document(store, query)?)),
         // Reject every other path.
         _ => Err(not_found()),
     }
@@ -368,66 +365,46 @@ fn catalog_failure(error: &io::Error) -> Reply {
     }
 }
 
-/// True when the catalog lists the file: a graph file, or a current flow generation under `flows/`.
-fn listed(files: &[String], file: &str) -> bool {
-    let named = match file.strip_prefix("flows/") {
-        Some(path) => generation_file(path),
-        None => graph_name(file),
-    };
-    named && files.iter().any(|listed| listed == file)
-}
-
 /// Accepts a graph file name: one store entry that ends in `.json`, does not start with a dot, and is not the index.
 fn graph_name(name: &str) -> bool {
     !name.starts_with('.') && check_graph_name(name).is_ok()
-}
-
-/// Accepts a generation path: `<flow ID>/generations/<ordinal>-<digest12>.json`.
-fn generation_file(path: &str) -> bool {
-    let parts: Vec<&str> = path.split('/').collect();
-    let [id, "generations", name] = parts.as_slice() else {
-        return false;
-    };
-    let Some((ordinal, digest)) = name
-        .strip_suffix(".json")
-        .and_then(|stem| stem.split_once('-'))
-    else {
-        return false;
-    };
-    is_flow_id(id)
-        && (1..=9).contains(&ordinal.len())
-        && !ordinal.starts_with('0')
-        && ordinal.bytes().all(|byte| byte.is_ascii_digit())
-        && digest.len() == 12
-        && digest
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
 // -----------------------------------------------------------------------------
 // Source route
 // -----------------------------------------------------------------------------
 
-/// The largest project file that the source route reads.
-const MAX_SOURCE_BYTES: u64 = 2 * 1024 * 1024;
-
 /// Returns the source JSON of every step function of one flow.
 ///
-/// The flow must be in the catalog under the named graph. File paths come
-/// from the graph, never from the query, and stay inside the project folder
-/// that holds the store.
+/// The current generation of the flow must bind the named graph. A missing or
+/// linked lineage or graph file is a 404. A lineage that cannot be read for any
+/// other reason is a 500. File paths come from the graph, never from the query,
+/// and stay inside the project folder that holds the store.
 fn source_document(store: &Path, query: Option<&str>) -> Result<Vec<u8>, Reply> {
     let (artifact, flow) = source_query(query)?;
     check_link(store)?;
-    let catalog = build_catalog(store).map_err(|error| catalog_failure(&error))?;
-    if catalog.graph_of_flow(&flow) != Some(artifact.as_str()) {
-        return Err(not_found());
-    }
-    let (graph, _) = read_graph(store, &artifact).map_err(|error| read_failure(&error))?;
     let flow_id = FlowId::try_from(flow.as_str()).map_err(|_| not_found())?;
-    let current = read_current(store, &flow_id)
-        .map_err(|_| Reply::failure(500, "Cannot read the flow."))?
-        .ok_or_else(not_found)?;
+    let current = match read_current(store, &flow_id) {
+        Ok(current) => current,
+        Err(LineageError::Io(error))
+            if matches!(
+                error.kind(),
+                io::ErrorKind::NotFound | io::ErrorKind::InvalidInput
+            ) =>
+        {
+            None
+        }
+        Err(_) => return Err(Reply::failure(500, "Cannot read the flow.")),
+    }
+    .filter(|current| current.artifact.facts.binding.graph_artifact == artifact)
+    .ok_or_else(not_found)?;
+    let (graph, _) = read_graph(store, &artifact).map_err(|error| {
+        if error.kind() == io::ErrorKind::InvalidInput {
+            not_found()
+        } else {
+            read_failure(&error)
+        }
+    })?;
     let store = fs::canonicalize(store).map_err(|error| read_failure(&error))?;
     let root = store
         .parent()
@@ -470,102 +447,9 @@ fn source_query(query: Option<&str>) -> Result<(String, String), Reply> {
     Ok((artifact, flow))
 }
 
-/// Reads one project file as UTF-8 text, or returns why it cannot.
-///
-/// No component of the path can be a symbolic link.
-fn read_project(root: &Path, relative: &str) -> Result<String, String> {
-    let cannot = |what: &str| format!("the file cannot be {what}");
-    if !project_path(relative) {
-        return Err("the path leaves the project".to_owned());
-    }
-    let mut path = root.to_path_buf();
-    for part in relative.split('/') {
-        path.push(part);
-        match fs::symlink_metadata(&path) {
-            // Refuse a symbolic link at any component.
-            Ok(metadata) if metadata.file_type().is_symlink() => {
-                return Err("the path holds a symbolic link".to_owned());
-            }
-            // Keep walking when the component exists.
-            Ok(_) => {}
-            // Report a component that does not exist.
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                return Err("the file is missing".to_owned());
-            }
-            // Report any other failure.
-            Err(_) => return Err(cannot("opened")),
-        }
-    }
-    let mut options = fs::OpenOptions::new();
-    options.read(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-
-        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
-    }
-    let file = options.open(&path).map_err(|_| cannot("opened"))?;
-    let metadata = file.metadata().map_err(|_| cannot("opened"))?;
-    if !metadata.is_file() {
-        return Err("the path is not a regular file".to_owned());
-    }
-    if metadata.len() > MAX_SOURCE_BYTES {
-        return Err("the file is larger than 2 MiB".to_owned());
-    }
-    let mut bytes = Vec::new();
-    file.take(MAX_SOURCE_BYTES + 1)
-        .read_to_end(&mut bytes)
-        .map_err(|_| cannot("read"))?;
-    // The file can grow between the metadata call and the read.
-    if bytes.len() as u64 > MAX_SOURCE_BYTES {
-        return Err("the file is larger than 2 MiB".to_owned());
-    }
-    String::from_utf8(bytes).map_err(|_| "the file is not UTF-8 text".to_owned())
-}
-
-/// Accepts a relative path with no empty, `.`, or `..` component, no backslash, and no colon.
-fn project_path(path: &str) -> bool {
-    !path.is_empty()
-        && !path.starts_with('/')
-        && !path.contains(['\\', ':'])
-        && path
-            .split('/')
-            .all(|part| !part.is_empty() && part != "." && part != "..")
-}
-
 // -----------------------------------------------------------------------------
-// Safe reads
+// Read failures
 // -----------------------------------------------------------------------------
-
-/// Reads one regular store file. No component of the path can be a symbolic link.
-fn read_safe(store: &Path, parts: &[&str]) -> Result<Vec<u8>, Reply> {
-    let mut path = store.to_path_buf();
-    check_link(&path)?;
-    for part in parts {
-        path.push(part);
-        check_link(&path)?;
-    }
-    let mut options = fs::OpenOptions::new();
-    options.read(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-
-        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
-    }
-    let mut file = options.open(&path).map_err(|error| read_failure(&error))?;
-    if !file
-        .metadata()
-        .map_err(|error| read_failure(&error))?
-        .is_file()
-    {
-        return Err(Reply::failure(403, "The path must be a regular file."));
-    }
-    let mut bytes = Vec::new();
-    file.read_to_end(&mut bytes)
-        .map_err(|error| read_failure(&error))?;
-    Ok(bytes)
-}
 
 fn check_link(path: &Path) -> Result<(), Reply> {
     match reject_symlink(path) {
@@ -603,9 +487,7 @@ mod tests {
         path::Path,
     };
 
-    use super::{
-        JSON, MAX_SOURCE_BYTES, PAGE, Reply, ViewerServer, answer, project_path, read_project,
-    };
+    use super::{JSON, PAGE, Reply, ViewerServer, answer};
     use crate::flow::fixtures::{self, frozen, import, output};
 
     const HOST: &str = "127.0.0.1:9";
@@ -1008,6 +890,37 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn rejects_source_requests_for_a_missing_or_linked_graph_or_lineage() {
+        let url = "/source?artifact=graph.json&flow=demo-flow";
+        let project = source_fixture();
+        let store = project.path().join(".tekdek");
+        fs::rename(store.join("graph.json"), project.path().join("graph.json")).expect("move");
+        assert_error(&get(&store, url), 404);
+        std::os::unix::fs::symlink(project.path().join("graph.json"), store.join("graph.json"))
+            .expect("link graph");
+        assert_error(&get(&store, url), 404);
+
+        let project = source_fixture();
+        let store = project.path().join(".tekdek");
+        let lineage = store.join("flows/demo-flow");
+        fs::rename(&lineage, project.path().join("lineage")).expect("move lineage");
+        std::os::unix::fs::symlink(project.path().join("lineage"), &lineage).expect("link lineage");
+        assert_error(&get(&store, url), 404);
+    }
+
+    #[test]
+    fn fails_source_requests_for_a_flow_that_cannot_be_read() {
+        let project = source_fixture();
+        let store = project.path().join(".tekdek");
+        fs::write(store.join("flows/demo-flow/current.json"), "{").expect("pointer");
+        assert_error(
+            &get(&store, "/source?artifact=graph.json&flow=demo-flow"),
+            500,
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn refuses_source_behind_a_symbolic_link() {
         let project = source_fixture();
         let source = project.path().join("src");
@@ -1023,121 +936,5 @@ mod tests {
             body["functions"][0]["reason"],
             "the path holds a symbolic link"
         );
-    }
-
-    #[test]
-    fn project_path_accepts_only_plain_relative_paths() {
-        for path in [
-            "main.rs",
-            "src/main.rs",
-            "a/b/c.rs",
-            "src/.hidden/a.rs",
-            "src/...rs",
-        ] {
-            assert!(project_path(path), "{path} must be accepted");
-        }
-        for path in [
-            "",
-            "/src/main.rs",
-            "src//main.rs",
-            "src/",
-            ".",
-            "./main.rs",
-            "src/./main.rs",
-            "..",
-            "../outside.rs",
-            "src/../main.rs",
-            "src\\main.rs",
-            "C:/main.rs",
-            "src/a:b.rs",
-        ] {
-            assert!(!project_path(path), "{path:?} must be refused");
-        }
-    }
-
-    #[test]
-    fn read_project_returns_the_text_or_why_it_cannot_read_a_file() {
-        let root = tempfile::tempdir().expect("root");
-        let root = root.path();
-        fs::create_dir(root.join("src")).expect("src");
-        fs::write(root.join("src/main.rs"), "fn main() {}\n").expect("main");
-        let limit = usize::try_from(MAX_SOURCE_BYTES).expect("limit");
-        fs::write(root.join("limit.rs"), vec![b'a'; limit]).expect("limit file");
-        fs::write(root.join("large.rs"), vec![b'a'; limit + 1]).expect("large file");
-        fs::write(root.join("binary.rs"), [0xff, 0xfe, b'a']).expect("binary file");
-        assert_eq!(
-            read_project(root, "src/main.rs"),
-            Ok("fn main() {}\n".to_owned())
-        );
-        assert_eq!(
-            read_project(root, "limit.rs").map(|text| text.len()),
-            Ok(limit)
-        );
-        assert_eq!(
-            read_project(root, "large.rs"),
-            Err("the file is larger than 2 MiB".to_owned())
-        );
-        assert_eq!(
-            read_project(root, "binary.rs"),
-            Err("the file is not UTF-8 text".to_owned())
-        );
-        for path in ["missing.rs", "src/missing.rs", "nowhere/missing.rs"] {
-            assert_eq!(
-                read_project(root, path),
-                Err("the file is missing".to_owned()),
-                "{path}"
-            );
-        }
-        for path in [
-            "",
-            "/main.rs",
-            "src//main.rs",
-            "./src/main.rs",
-            "../main.rs",
-            "src\\main.rs",
-            "C:/main.rs",
-        ] {
-            assert_eq!(
-                read_project(root, path),
-                Err("the path leaves the project".to_owned()),
-                "{path:?}"
-            );
-        }
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn read_project_refuses_folders_links_and_pipes() {
-        let root = tempfile::tempdir().expect("root");
-        let outside = tempfile::tempdir().expect("outside");
-        let (root, outside) = (root.path(), outside.path());
-        fs::create_dir(root.join("src")).expect("src");
-        fs::write(root.join("src/main.rs"), "fn main() {}\n").expect("main");
-        fs::write(outside.join("secret.rs"), "fn secret() {}\n").expect("secret");
-        std::os::unix::fs::symlink(root.join("src/main.rs"), root.join("inside.rs"))
-            .expect("inside link");
-        std::os::unix::fs::symlink(outside.join("secret.rs"), root.join("outside.rs"))
-            .expect("outside link");
-        std::os::unix::fs::symlink(outside, root.join("away")).expect("folder link");
-        let made = std::process::Command::new("mkfifo")
-            .arg(root.join("pipe.rs"))
-            .status()
-            .expect("mkfifo");
-        assert!(made.success(), "mkfifo must create the pipe");
-        assert_eq!(
-            read_project(root, "src"),
-            Err("the path is not a regular file".to_owned())
-        );
-        assert_eq!(
-            read_project(root, "pipe.rs"),
-            Err("the path is not a regular file".to_owned())
-        );
-        for path in ["inside.rs", "outside.rs", "away/secret.rs"] {
-            assert_eq!(
-                read_project(root, path),
-                Err("the path holds a symbolic link".to_owned()),
-                "{path}"
-            );
-        }
     }
 }
