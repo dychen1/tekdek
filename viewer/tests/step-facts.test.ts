@@ -1,10 +1,10 @@
-// Tests for the step facts: transition sentences, call lists, visits, and source notes.
+// Tests for the step facts: transition sentences, call lists, visits, source notes, and code line numbers.
 
 import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { DeckFunction } from "../src/data/models.ts";
-import { calleesOf, callersOf, callRefs, oneLineSignature, otherVisits, sourceNote, transitionFact } from "../src/layout/step-facts.ts";
+import { calleesOf, callersOf, callRefs, lineSpan, oneLineSignature, otherVisits, sourceNote, transitionFact, whole } from "../src/layout/step-facts.ts";
 
 test("each transition reads as one sentence, with a tag at the flow start and at a gap", () => {
   assert.deepEqual(transitionFact("flow_start", null, "main"), { tag: "flow start", text: "" });
@@ -49,6 +49,29 @@ test("a missing, changed, unreadable, or rangeless source becomes one note in pl
     "This function cannot be shown: the graph has no source range for it.",
   );
   assert.equal(sourceNote(undefined), "This file cannot be read: the viewer server did not send it.");
+});
+
+test("an ok source with no lines becomes the unreadable note", () => {
+  assert.equal(sourceNote({ key: "k", status: "ok" }), "This file cannot be read: the viewer server sent no lines.");
+  assert.equal(sourceNote({ key: "k", status: "ok", lines: [] }), "This file cannot be read: the viewer server sent no lines.");
+});
+
+test("a line number from the source answer is a whole number, else the fallback", () => {
+  assert.equal(whole(12, 1), 12);
+  assert.equal(whole(1.5, 1), 1);
+  assert.equal(whole("12", 1), 1);
+  assert.equal(whole(undefined, 0), 0);
+});
+
+test("a line range maps to the shown lines and stops at the last one", () => {
+  assert.deepEqual(lineSpan([12, 14], 10, 20), { from: 2, to: 4 });
+  assert.deepEqual(lineSpan([12, 40], 10, 5), { from: 2, to: 4 });
+  assert.deepEqual(lineSpan([10, 10], 10, 5), { from: 0, to: 0 });
+  assert.equal(lineSpan([8, 12], 10, 5), null, "a range that starts above the shown lines");
+  assert.equal(lineSpan([16, 18], 10, 5), null, "a range that starts below the shown lines");
+  assert.equal(lineSpan([14, 12], 10, 5), null, "a range that ends before it starts");
+  assert.equal(lineSpan(null, 10, 5), null);
+  assert.equal(lineSpan(undefined, 10, 5), null);
 });
 
 test("a signature reads on one line with no padding inside the parentheses", () => {

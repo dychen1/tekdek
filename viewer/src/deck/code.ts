@@ -7,7 +7,7 @@ import type { DeckStep, SourceView } from "../data/models.ts";
 import { displayName } from "../data/adapt.ts";
 import { highlight } from "../layout/highlight.ts";
 import { nearestStep } from "../layout/plan.ts";
-import { callRefs, calleesOf, callersOf, oneLineSignature, otherVisits, sourceNote, transitionFact, type CallRef } from "../layout/step-facts.ts";
+import { callRefs, calleesOf, callersOf, lineSpan, oneLineSignature, otherVisits, sourceNote, transitionFact, whole, type CallRef } from "../layout/step-facts.ts";
 import { clamp, plural } from "../layout/util.ts";
 import { esc, md } from "./markup.ts";
 import { $, type CodeColumn, type DeckContext } from "./context.ts";
@@ -30,9 +30,6 @@ function whereHtml(path: string, line: number | null): string {
   return `<span class="dir">${esc(path.slice(0, cut))}</span>${esc(path.slice(cut))}${line === null ? "" : `<span class="at">:${esc(line)}</span>`}`;
 }
 
-/** A line number or a count from the `/source` answer, as a whole number. Anything else gives the fallback. */
-const whole = (value: unknown, fallback: number) => (Number.isSafeInteger(value) ? value as number : fallback);
-
 /** A call list: names as the graph gives them, file hints dimmed, never merged. A current cluster member takes its color and goes to its step. */
 function refList(refs: readonly CallRef[]): string {
   if (!refs.length) return '<span class="none">none</span>';
@@ -41,13 +38,6 @@ function refList(refs: readonly CallRef[]): string {
     if (ref.step !== null) return `<button class="ref hit" type="button" data-step="${ref.step}" title="Go to step ${ref.step}">${label}</button>`;
     return `<span class="ref${ref.inCluster ? " hit" : ""}">${label}</span>`;
   }).join(SEP);
-}
-
-/** The note that replaces code, or null when the code shows. An `ok` answer with no lines counts as unreadable. */
-function codeNote(view: SourceView | undefined): string | null {
-  const note = sourceNote(view);
-  if (note !== null || !view || view.lines?.length) return note;
-  return sourceNote({ ...view, status: "unreadable", reason: "the viewer server sent no lines" });
 }
 
 export function createCode(ctx: DeckContext): CodeColumn {
@@ -107,9 +97,9 @@ export function createCode(ctx: DeckContext): CodeColumn {
     const gut = codeEl.querySelector(".gut")!, els = codeEl.querySelectorAll<HTMLElement>(".cl");
     /** Draws one margin mark over a line range. Returns false when the range is not in the lines. */
     const mark = (range: readonly [number, number] | null | undefined, name: "doc" | "signature"): boolean => {
-      if (!Array.isArray(range)) return false;
-      const from = whole(range[0], -1) - first, to = Math.min(whole(range[1], -1) - first, lines.length - 1), count = to - from + 1;
-      if (from < 0 || count < 1) return false;
+      const span = lineSpan(range, first, lines.length);
+      if (!span) return false;
+      const { from, to } = span, count = to - from + 1;
       const a = els[from], b = els[to];
       const m = document.createElement("div");
       m.className = "mark";
@@ -151,7 +141,7 @@ export function createCode(ctx: DeckContext): CodeColumn {
       codeEl.innerHTML = noteHtml(sourceNote({ key: step.node, status: "missing" }) ?? "");
     } else {
       const view = model.sources.get(step.node), path = view?.path ?? fn.file;
-      const note = codeNote(view);
+      const note = sourceNote(view);
       let marks = { doc: false, sig: false };
       if (note !== null || !view?.lines) {
         whereEl.innerHTML = whereHtml(path, null);
