@@ -109,7 +109,10 @@ fn project_graph_file(directory: &Path) -> Option<String> {
 
 fn select_default(directory: &Path, files: &[String]) -> io::Result<String> {
     let first = files.first().ok_or_else(|| {
-        io::Error::new(io::ErrorKind::InvalidInput, "the store has no graph file")
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("the store {} has no graph file", directory.display()),
+        )
     })?;
     if files.len() == 1 {
         return Ok(first.clone());

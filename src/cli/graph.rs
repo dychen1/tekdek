@@ -129,7 +129,7 @@ fn execute(command: Command) -> Result<(u8, String), Box<dyn Error>> {
     let file = match command.graph {
         Some(file) => file,
         None => catalog::default_artifact(&store)
-            .map_err(|error| format!("cannot select a graph in {}: {error}", store.display()))?,
+            .map_err(|error| format!("cannot select a graph: {error}"))?,
     };
     let (graph, _) = read_graph(&store, &file)?;
     match command.action {
@@ -314,6 +314,22 @@ mod tests {
         assert_eq!(shown["graph"], "app.json");
         assert_eq!(shown["callees"][0]["key"], "src/main.rs::callable:start");
         assert_eq!(shown["callers"], serde_json::json!([]));
+    }
+
+    #[test]
+    fn names_the_store_once_when_no_graph_can_be_selected() {
+        let directory = tempfile::tempdir().expect("folder");
+        let empty = directory.path().join("empty");
+        fs::create_dir(&empty).expect("empty store");
+        for store in [directory.path().join("no-store"), empty] {
+            let failed = execute(&store, &["search", "main"], 2);
+            let message = failed["error"].as_str().expect("message");
+            assert_eq!(
+                message.matches(&store.display().to_string()).count(),
+                1,
+                "{message}"
+            );
+        }
     }
 
     #[test]
