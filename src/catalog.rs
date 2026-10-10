@@ -124,7 +124,7 @@ fn select_default(directory: &Path, files: &[String]) -> io::Result<String> {
 // -----------------------------------------------------------------------------
 
 /// Lists the graph files of the store in name order: every regular `*.json` file
-/// that does not start with a dot, except `index.json`.
+/// whose name passes `check_graph_name`.
 ///
 /// An `index.json` file from an older tekdek is not a graph file, and the catalog ignores it.
 /// A symbolic link is not a regular file.
@@ -149,7 +149,7 @@ fn artifact_files(directory: &Path) -> io::Result<Vec<String>> {
             continue;
         }
         match name.into_string() {
-            Ok(name) if !name.starts_with('.') && !name.eq_ignore_ascii_case("index.json") => {
+            Ok(name) if check_graph_name(&name).is_ok() => {
                 files.push(name);
             }
             Ok(_) => {}
@@ -344,6 +344,19 @@ mod tests {
         assert_eq!(document["artifacts"][1]["file"], "zeta.json");
         assert_eq!(document["artifacts"].as_array().map(Vec::len), Some(2));
         assert!(document["artifacts"][0].get("flows").is_none());
+    }
+
+    #[test]
+    fn lists_only_graph_files_that_the_store_can_read() {
+        let directory = tempfile::tempdir().expect("store");
+        for file in ["app.json", "a:b.json", " app.json", ".hidden.json"] {
+            fs::write(directory.path().join(file), "{}").expect("artifact");
+        }
+
+        assert_eq!(
+            readable_files(directory.path()).expect("files"),
+            ["app.json"]
+        );
     }
 
     #[test]

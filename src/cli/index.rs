@@ -25,7 +25,10 @@ use tekdek::{
         config::{ConfigError, apply_cli_overrides, configured_profiles},
         language::Language,
     },
-    store::{PROJECT_STORE, create_project_store, find_project_store, graph::GraphArtifact},
+    store::{
+        PROJECT_STORE, create_project_store, find_project_store,
+        graph::{GraphArtifact, check_graph_name},
+    },
 };
 
 use super::split_arguments;
@@ -285,8 +288,7 @@ fn artifact_destination(arguments: &Arguments) -> Result<Destination, String> {
             (root.clone(), root.join(PROJECT_STORE), name, true)
         }
     };
-    validate_artifact_name(&name)?;
-    let file = format!("{name}.json");
+    let file = artifact_file(&name)?;
 
     Ok(Destination {
         root,
@@ -312,24 +314,22 @@ fn folder_name(root: &Path) -> Result<String, String> {
     }
 }
 
-/// Validates one artifact file stem.
+/// Returns the graph file of one artifact name.
 ///
 /// # Errors
 ///
-/// Returns a message if the name is not one normal path component.
-fn validate_artifact_name(name: &str) -> Result<(), String> {
-    let path = Path::new(name);
-    if name.is_empty()
-        || name.eq_ignore_ascii_case("index")
-        || name.contains('\\')
-        || path
-            .extension()
-            .is_some_and(|extension| extension.eq_ignore_ascii_case("json"))
-        || path.file_name().and_then(|part| part.to_str()) != Some(name)
+/// Returns a message if the name already ends with `.json`, or if its graph
+/// file fails the store rule of `check_graph_name`.
+fn artifact_file(name: &str) -> Result<String, String> {
+    let file = format!("{name}.json");
+    if Path::new(name)
+        .extension()
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("json"))
+        || check_graph_name(&file).is_err()
     {
         return Err(format!("invalid artifact name: {name}"));
     }
-    Ok(())
+    Ok(file)
 }
 
 // -----------------------------------------------------------------------------
@@ -346,7 +346,7 @@ mod tests {
 
     #[cfg(feature = "rust")]
     use super::pipeline_config;
-    use super::{Arguments, Destination, artifact_destination, validate_artifact_name};
+    use super::{Arguments, Destination, artifact_destination, artifact_file, run};
 
     fn parse(arguments: &[&str]) -> Result<Arguments, String> {
         Arguments::parse(arguments.iter().map(|value| (*value).to_owned()))
@@ -601,9 +601,22 @@ mod tests {
     }
 
     #[test]
+    fn refuses_a_graph_name_that_the_store_cannot_read_before_the_analysis() {
+        let store = tempfile::tempdir().expect("store");
+        let store = store.path().to_str().expect("path");
+        for name in ["a:b", " app", ".hidden", "index", "app.json"] {
+            let error = run(["no-such-root", "--name", name, "--store", store]
+                .into_iter()
+                .map(str::to_owned))
+            .expect_err("an invalid name");
+            assert_eq!(error, format!("invalid artifact name: {name}"));
+        }
+    }
+
+    #[test]
     fn reserves_the_artifact_index_name() {
         assert_eq!(
-            validate_artifact_name("INDEX"),
+            artifact_file("INDEX"),
             Err("invalid artifact name: INDEX".to_owned())
         );
     }

@@ -365,14 +365,16 @@ impl ArtifactGraph {
 
 /// Checks that a graph file name is one store entry that ends with `.json`.
 ///
+/// This is the only graph-name rule. Index, the catalog, the reader, and the
+/// server use it, so every graph that index writes is readable and listed.
+///
 /// # Errors
-/// Returns `InvalidInput` for a path, a control character, outer whitespace,
-/// another extension, or the reserved name `index.json`.
+/// Returns `InvalidInput` for a path, a leading dot, a control character, outer
+/// whitespace, another extension, or the reserved name `index.json`.
 pub fn check_graph_name(file: &str) -> io::Result<()> {
     let invalid = |message: String| io::Error::new(io::ErrorKind::InvalidInput, message);
     if file.is_empty()
-        || file == "."
-        || file == ".."
+        || file.starts_with('.')
         || file
             .chars()
             .any(|ch| ch.is_control() || matches!(ch, '/' | '\\' | ':'))
@@ -464,7 +466,15 @@ mod tests {
 
         assert_eq!(graph.nodes.len(), 2);
         assert_eq!(digest, crate::store::digest_of(&bytes));
-        for name in ["index.json", "../app.json", "app.txt", " app.json", ""] {
+        for name in [
+            "index.json",
+            "../app.json",
+            "app.txt",
+            " app.json",
+            "",
+            ".hidden.json",
+            "a:b.json",
+        ] {
             assert!(check_graph_name(name).is_err(), "{name:?}");
         }
     }

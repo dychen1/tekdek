@@ -365,11 +365,6 @@ fn catalog_failure(error: &io::Error) -> Reply {
     }
 }
 
-/// Accepts a graph file name: one store entry that ends in `.json`, does not start with a dot, and is not the index.
-fn graph_name(name: &str) -> bool {
-    !name.starts_with('.') && check_graph_name(name).is_ok()
-}
-
 // -----------------------------------------------------------------------------
 // Source route
 // -----------------------------------------------------------------------------
@@ -443,7 +438,7 @@ fn source_query(query: Option<&str>) -> Result<(String, String), Reply> {
     let (Some(artifact), Some(flow)) = (artifact, flow) else {
         return Err(invalid());
     };
-    if !graph_name(&artifact) || !is_flow_id(&flow) {
+    if check_graph_name(&artifact).is_err() || !is_flow_id(&flow) {
         return Err(not_found());
     }
     Ok((artifact, flow))
