@@ -132,7 +132,7 @@ The agent names 1 to 8 clusters for the phases of a flow and labels each step wi
 
 ## Lift Deck
 
-The viewer has four parts. The explorer at left shows the files of the codebase. The current file's functions branch out of the explorer into a file box. The current cluster's functions sit on a pinned deck, and the current step's function is tethered to its slot in the file box. The code column at right shows the step title, its annotation, the transition from the step before, the callers and callees, and the whole function source. The bottom bar shows the cluster description and a strip of every step.
+The viewer has five parts. The explorer at left shows the files of the codebase. The current file's functions branch out of the explorer into a file box. The current cluster's functions sit on a pinned deck, and the current step's function is tethered to its slot in the file box. The code column at right shows the step title, its annotation, the transition from the step before, the callers and callees, and the whole function source. The bottom bar shows the cluster description and a strip of every step.
 
 | Key | Action |
 | --- | --- |
@@ -143,7 +143,7 @@ The viewer has four parts. The explorer at left shows the files of the codebase.
 | Esc | Close the key, then leave full screen, then clear the flow |
 | ? | Show or hide the key |
 
-The URL keeps the graph, the flow, and the step: `?artifact=<file>&flow=<name>&step=<n>`. `tekdek serve` binds to the loopback address, serves the viewer from the binary, and reads only the store files that its catalog lists. It also reads the source files of a flow's step functions, inside the project folder that holds the store. A function whose file changed after the last index shows a note in place of its source.
+The URL keeps the graph, the flow, and the step: `?artifact=<file>&flow=<name>&step=<n>`. `tekdek serve` binds to the loopback address, serves the viewer from the binary, and reads only the store files that its catalog lists. It also reads the source files of a flow's step functions, inside the project folder that holds the store. A function whose source changed after the last index shows a note in place of its source.
 
 ## Language Analysis
 
