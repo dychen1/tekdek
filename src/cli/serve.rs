@@ -10,6 +10,7 @@ use std::{
 };
 
 use tekdek::{catalog::build_catalog, serve::ViewerServer};
+use url::Url;
 
 use super::{split_arguments, store_directory};
 
@@ -83,25 +84,17 @@ fn flow_url(base: &str, store: &Path, flow: &str) -> Result<String, String> {
     let artifact = catalog
         .graph_of_flow(flow)
         .ok_or_else(|| format!("the store lists no flow named {flow}: run `tekdek flow list`"))?;
-    Ok(viewer_url(base, artifact, flow))
+    viewer_url(base, artifact, flow)
 }
 
 /// Returns the viewer URL of one flow under one graph file.
-fn viewer_url(base: &str, artifact: &str, flow: &str) -> String {
-    format!("{base}?artifact={}&flow={}", encode(artifact), encode(flow))
-}
-
-/// Percent-encodes every byte except the unreserved URL characters.
-fn encode(text: &str) -> String {
-    text.bytes()
-        .map(|byte| {
-            if byte.is_ascii_alphanumeric() || b"-._~".contains(&byte) {
-                char::from(byte).to_string()
-            } else {
-                format!("%{byte:02X}")
-            }
-        })
-        .collect()
+fn viewer_url(base: &str, artifact: &str, flow: &str) -> Result<String, String> {
+    let mut url =
+        Url::parse(base).map_err(|error| format!("invalid viewer URL {base}: {error}"))?;
+    url.query_pairs_mut()
+        .append_pair("artifact", artifact)
+        .append_pair("flow", flow);
+    Ok(url.into())
 }
 
 /// Opens the URL with the browser of the operating system.
@@ -152,7 +145,7 @@ mod tests {
     fn builds_the_url_of_a_flow_and_rejects_an_unlisted_flow() {
         assert_eq!(
             viewer_url("http://127.0.0.1:1/viewer/", "my app.json", "request-flow"),
-            "http://127.0.0.1:1/viewer/?artifact=my%20app.json&flow=request-flow"
+            Ok("http://127.0.0.1:1/viewer/?artifact=my+app.json&flow=request-flow".to_owned())
         );
         let store = tempfile::tempdir().expect("store");
         std::fs::write(store.path().join("app.json"), "{}").expect("graph");

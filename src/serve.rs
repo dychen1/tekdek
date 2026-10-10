@@ -162,6 +162,15 @@ impl Reply {
         }
     }
 
+    fn json(body: Vec<u8>) -> Self {
+        Self {
+            status: 200,
+            content_type: JSON,
+            body: Cow::Owned(body),
+            location: None,
+        }
+    }
+
     fn failure(status: u16, message: &str) -> Self {
         Self {
             status,
@@ -265,33 +274,17 @@ fn route(store: &Path, parts: &[String], query: Option<&str>) -> Result<Reply, R
             .map(|(_, bytes)| Reply::asset("font/woff2", bytes))
             .ok_or_else(not_found),
         // Serve the catalog that the server builds from the store.
-        ["artifacts", "index.json"] => Ok(Reply {
-            status: 200,
-            content_type: JSON,
-            body: Cow::Owned(catalog_document(store)?),
-            location: None,
-        }),
+        ["artifacts", "index.json"] => Ok(Reply::json(catalog_document(store)?)),
         // Serve the store files that the catalog lists.
         ["artifacts", rest @ ..] if !rest.is_empty() => {
             let file = rest.join("/");
             if !listed(&catalog_files(store)?, &file) {
                 return Err(not_found());
             }
-            let bytes = read_safe(store, rest)?;
-            Ok(Reply {
-                status: 200,
-                content_type: JSON,
-                body: Cow::Owned(bytes),
-                location: None,
-            })
+            Ok(Reply::json(read_safe(store, rest)?))
         }
         // Serve the source of every step function of one flow.
-        ["source"] => Ok(Reply {
-            status: 200,
-            content_type: JSON,
-            body: Cow::Owned(source_document(store, query)?),
-            location: None,
-        }),
+        ["source"] => Ok(Reply::json(source_document(store, query)?)),
         // Reject every other path.
         _ => Err(not_found()),
     }
