@@ -109,10 +109,7 @@ fn check(arguments: Vec<String>) -> Result<(u8, String), String> {
         Some(root) => {
             let mut pipeline = PipelineConfig::new(root.clone());
             pipeline.profiles.clone_from(&profiles);
-            Some(
-                detect_project_languages(&pipeline)
-                    .map_err(|error| format!("cannot read {}: {error}", root.display()))?,
-            )
+            Some(detect_project_languages(&pipeline).map_err(|error| error.to_string())?)
         }
         None => None,
     };
@@ -365,6 +362,17 @@ mod tests {
                 .as_str()
                 .is_some_and(|text| !text.is_empty())
         );
+    }
+
+    #[test]
+    fn names_a_root_that_cannot_be_read_once() {
+        let directory = tempfile::tempdir().expect("folder");
+        let missing = directory.path().join("no-root").display().to_string();
+
+        let error = check(vec![missing.clone()]).expect_err("a missing root");
+
+        assert!(error.starts_with("cannot read the codebase: "), "{error}");
+        assert_eq!(error.matches(&missing).count(), 1, "{error}");
     }
 
     #[test]
