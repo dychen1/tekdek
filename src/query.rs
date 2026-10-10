@@ -190,9 +190,13 @@ fn is_test(key: &str) -> bool {
 
 fn kind_order(kind: NodeKind) -> u8 {
     match kind {
+        // Rank callables first.
         NodeKind::Callable => 0,
+        // Rank types after callables.
         NodeKind::Type => 1,
+        // Rank modules after types.
         NodeKind::Module => 2,
+        // Rank fields last.
         NodeKind::Field => 3,
     }
 }
@@ -233,12 +237,17 @@ pub fn show(graph: &ArtifactGraph, key: &str) -> Option<NodeDetail> {
     let mut called = BTreeSet::new();
     for edge in &graph.edges {
         match edge.kind {
+            // Record the node that contains this node.
             RelationKind::Contains if edge.target == node.id => container = reference(edge.source),
+            // Record a node that this node contains.
             RelationKind::Contains if edge.source == node.id => {
                 members.extend(reference(edge.target));
             }
+            // Record a caller of this node.
             RelationKind::Calls if edge.target == node.id => calling.extend(reference(edge.source)),
+            // Record a node that this node calls.
             RelationKind::Calls if edge.source == node.id => called.extend(reference(edge.target)),
+            // Skip every other edge.
             _ => {}
         }
     }

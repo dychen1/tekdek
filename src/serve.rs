@@ -381,7 +381,9 @@ fn source_document(store: &Path, query: Option<&str>) -> Result<Vec<u8>, Reply> 
     check_link(store)?;
     let flow_id = FlowId::try_from(flow.as_str()).map_err(|_| not_found())?;
     let current = match read_current(store, &flow_id) {
+        // Keep the current generation, or none for a flow without a lineage.
         Ok(current) => current,
+        // Treat a missing, linked, or non-regular lineage file as no flow.
         Err(LineageError::Io(error))
             if matches!(
                 error.kind(),
@@ -390,7 +392,9 @@ fn source_document(store: &Path, query: Option<&str>) -> Result<Vec<u8>, Reply> 
         {
             None
         }
+        // Treat a lineage folder that holds another flow as no flow.
         Err(LineageError::FlowMismatch { .. }) => None,
+        // Fail for any other lineage error.
         Err(_) => return Err(Reply::failure(500, "Cannot read the flow.")),
     }
     .filter(|current| current.artifact.facts.binding.graph_artifact == artifact)
