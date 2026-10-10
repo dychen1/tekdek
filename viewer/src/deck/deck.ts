@@ -48,9 +48,13 @@ export function createDeck(options: DeckOptions): DeckInstance {
   let alive = true;
   /** The cluster whose deck shows, or null. */
   let deckCluster: string | null = null;
+  // The page shell holds these elements. `place` and `kick` read them, so they come before the parts.
+  const cv = $("#cv"), fileblk = $("#fileblk"), frameEl = $("#frame"), card = $("#card");
+  let drawUntil = 0, drawRaf = 0;
   // The boot class keeps the first frames still: no fade, no transition. It also covers a URL step.
   document.body.classList.add("booting");
   // Every module reads the others through `ctx.parts` at call time, so the creation order is free.
+  // A part may call `ctx.kick` while it is created. It may call `ctx.place` only after all parts exist.
   const parts = ctx.parts;
   parts.explorer = createExplorer(ctx);
   parts.fileBox = createFileBox(ctx);
@@ -61,7 +65,6 @@ export function createDeck(options: DeckOptions): DeckInstance {
   parts.tools = createTools(ctx);
   parts.input = createInput(ctx);
   const { explorer, fileBox, clusterDeck, links, code, bar, tools } = parts;
-  const cv = $("#cv"), fileblk = $("#fileblk"), frameEl = $("#frame"), card = $("#card");
 
   // ============ stepping ============
   // Nothing on the canvas moves between steps: each step sets the file box, the deck, and the connectors at their
@@ -133,7 +136,6 @@ export function createDeck(options: DeckOptions): DeckInstance {
   // ============ draw loop ============
   // Draw every frame while something can still move (layout, fonts), then stop.
 
-  let drawUntil = 0, drawRaf = 0;
   function kick(ms: number) {
     drawUntil = Math.max(drawUntil, performance.now() + (ctx.reducedMotion ? 0 : ms));
     if (!drawRaf) drawRaf = requestAnimationFrame(loop);

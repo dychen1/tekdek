@@ -3,8 +3,10 @@
 //! This module serves the Lift Deck on the loopback address. The viewer page,
 //! its script, its stylesheet, and its fonts come from the binary. Store files
 //! come from one store directory, and only when its catalog lists them. The
-//! server builds the catalog from the store for each request and never writes. A store directory and a port are the inputs. HTTP
-//! responses are the output.
+//! `/source` route also reads the source files of the step functions of a flow.
+//! It reads them inside the project folder that holds the store. The server
+//! builds the catalog from the store for each request and never writes. A store
+//! directory and a port are the inputs. HTTP responses are the output.
 //!
 //! # Sections
 //!
@@ -514,6 +516,10 @@ fn read_project(root: &Path, relative: &str) -> Result<String, String> {
     file.take(MAX_SOURCE_BYTES + 1)
         .read_to_end(&mut bytes)
         .map_err(|_| cannot("read"))?;
+    // The file can grow between the metadata call and the read.
+    if bytes.len() as u64 > MAX_SOURCE_BYTES {
+        return Err("the file is larger than 2 MiB".to_owned());
+    }
     String::from_utf8(bytes).map_err(|_| "the file is not UTF-8 text".to_owned())
 }
 

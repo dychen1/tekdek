@@ -44,6 +44,10 @@ test("a missing, changed, or unreadable source becomes one note in place of code
   assert.equal(sourceNote({ key: "k", status: "changed", path: "src/a.rs" }), "This file changed after the last index. Run `tekdek index` to see this function.");
   assert.equal(sourceNote({ key: "k", status: "unreadable", reason: "the file is missing" }), "This file cannot be read: the file is missing.");
   assert.equal(sourceNote({ key: "k", status: "unreadable" }), "This file cannot be read: unknown reason.");
+  assert.equal(
+    sourceNote({ key: "k", status: "unreadable", reason: "the graph has no source range for this function" }),
+    "This function cannot be shown: the graph has no source range for it.",
+  );
   assert.equal(sourceNote(undefined), "This file cannot be read: the viewer server did not send it.");
 });
 
