@@ -408,6 +408,23 @@ mod tests {
     }
 
     #[test]
+    fn sends_doc_lines_as_null_when_a_cut_has_none() {
+        let name = at(PYTHON, "load(");
+        let body = (at(PYTHON, "\"\"\""), end(PYTHON, "(path)"));
+        let node = node(
+            PYTHON,
+            "python",
+            (name, name + 4),
+            (at(PYTHON, "def"), body.1),
+            body,
+        );
+        let cut = cut(PYTHON, &node).expect("cut");
+        assert_eq!(cut.doc_lines, None);
+        let json = serde_json::to_value(&cut).expect("json");
+        assert_eq!(json.get("docLines"), Some(&serde_json::Value::Null));
+    }
+
+    #[test]
     fn drops_carriage_returns_and_keeps_multi_byte_text_whole() {
         let text = RUST
             .replace("Reads the file.", "Reads the café file.")
