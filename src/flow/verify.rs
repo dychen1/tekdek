@@ -36,26 +36,22 @@ pub struct VerifyReport {
 pub fn verify_flow(directory: &Path, name: &str) -> Result<VerifyReport, FlowError> {
     let current = current_flow(directory, name)?;
     let artifact = &current.artifact;
-    let mut issues = Vec::new();
-    let parent = match &artifact.generation.parent_digest {
-        Some(digest) => match lineage::read_generation(
-            directory,
-            &artifact.flow_id,
-            artifact.generation.ordinal.saturating_sub(1),
-            digest,
-        ) {
-            Ok(parent) => Some(parent.artifact),
-            Err(error) => {
-                issues.push(FlowIssue::error(
-                    IssueCode::UnknownGeneration,
-                    format!("cannot read the parent generation: {error}"),
-                ));
-                None
-            }
-        },
-        None => None,
-    };
-    issues.extend(validate::verify_artifact(artifact, parent.as_ref()));
+    // A parent that cannot be read gives `unknown_generation` in `verify_artifact`.
+    let parent = artifact
+        .generation
+        .parent_digest
+        .as_ref()
+        .and_then(|digest| {
+            lineage::read_generation(
+                directory,
+                &artifact.flow_id,
+                artifact.generation.ordinal.saturating_sub(1),
+                digest,
+            )
+            .ok()
+        });
+    let mut issues =
+        validate::verify_artifact(artifact, parent.as_ref().map(|parent| &parent.artifact));
     let binding = &artifact.facts.binding;
     let stale = match read_graph(directory, &binding.graph_artifact) {
         Ok((graph, digest)) if digest == binding.graph_digest.as_str() => {
@@ -104,6 +100,7 @@ mod tests {
         FlowError,
         fixtures::{self, frozen, import, output},
         models::IssueCode,
+        validate::verify_artifact,
     };
 
     #[test]
@@ -159,7 +156,7 @@ mod tests {
     }
 
     #[test]
-    fn verify_reports_a_missing_parent_once_and_skips_the_view_check() {
+    fn a_revision_without_its_parent_reports_unknown_generation_once() {
         let directory = fixtures::store();
         let path = directory.path();
         let first = frozen(import(path, "demo-flow", &output()));
@@ -181,12 +178,16 @@ mod tests {
             step["clusterKey"] = "write-result".into();
         }
         frozen(import(path, "demo-flow", &revised));
+        let revision = fixtures::current(path, "demo-flow");
         std::fs::remove_file(path.join("flows").join(first.file)).expect("remove the parent");
 
         let report = verify_flow(path, "demo-flow").expect("verify");
 
         let codes: Vec<_> = report.issues.iter().map(|issue| issue.code).collect();
         assert_eq!(codes, [IssueCode::UnknownGeneration], "{:?}", report.issues);
+        let alone = verify_artifact(&revision, None);
+        let codes: Vec<_> = alone.iter().map(|issue| issue.code).collect();
+        assert_eq!(codes, [IssueCode::UnknownGeneration], "{alone:?}");
     }
 
     #[test]
