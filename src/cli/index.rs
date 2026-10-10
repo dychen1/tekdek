@@ -28,6 +28,8 @@ use tekdek::{
     store::{PROJECT_STORE, create_project_store, find_project_store, graph::GraphArtifact},
 };
 
+use super::split_arguments;
+
 // -----------------------------------------------------------------------------
 // Entry
 // -----------------------------------------------------------------------------
@@ -123,67 +125,46 @@ impl Arguments {
     /// Returns a message if a second positional value exists, an option is
     /// invalid, or `--output` appears with `--name` or `--store`.
     fn parse(arguments: impl Iterator<Item = String>) -> Result<Self, String> {
-        let mut root = None;
-        let mut output = None;
-        let mut name = None;
-        let mut store = None;
-        let mut config = None;
-        let mut servers = Vec::new();
-        let mut server_arguments = BTreeMap::<Language, Vec<String>>::new();
-        let mut arguments = arguments.peekable();
-
-        while let Some(argument) = arguments.next() {
-            match argument.as_str() {
-                // Set the indexed artifact name.
-                "--name" => {
-                    name = Some(next_value(&mut arguments, "--name")?);
-                }
-                // Set the store of the indexed artifact.
-                "--store" => {
-                    store = Some(PathBuf::from(next_value(&mut arguments, "--store")?));
-                }
-                // Set the artifact path.
-                "--output" => {
-                    output = Some(PathBuf::from(next_value(&mut arguments, "--output")?));
-                }
-                // Set the user configuration path.
-                "--config" => {
-                    config = Some(PathBuf::from(next_value(&mut arguments, "--config")?));
-                }
-                // Set the language server.
-                "--server" => {
-                    let value = next_value(&mut arguments, "--server")?;
-                    servers.push(parse_language_value(
-                        &value,
-                        "--server",
-                        "<language>=<program>",
-                        "program",
-                    )?);
-                }
-                // Add one language server argument.
-                "--server-arg" => {
-                    let value = next_value(&mut arguments, "--server-arg")?;
-                    let (language, value) = parse_language_value(
-                        &value,
-                        "--server-arg",
-                        "<language>=<argument>",
-                        "argument",
-                    )?;
-                    server_arguments.entry(language).or_default().push(value);
-                }
-                // Reject an unknown option.
-                value if value.starts_with("--") => {
-                    return Err(format!("unknown option: {value}"));
-                }
-                // Set the codebase root.
-                value if root.is_none() => root = Some(PathBuf::from(value)),
-                // Reject a second positional value.
-                value => return Err(format!("unexpected argument: {value}")),
-            }
+        let (operands, mut options, repeated) = split_arguments(
+            arguments,
+            &["--name", "--store", "--output", "--config"],
+            &["--server", "--server-arg"],
+        )?;
+        let root = match operands.as_slice() {
+            [] => None,
+            [root] => Some(PathBuf::from(root)),
+            [_, extra, ..] => return Err(format!("unexpected argument: {extra}")),
+        };
+        let output = options.remove("--output").map(PathBuf::from);
+        let name = options.remove("--name");
+        let store = options.remove("--store").map(PathBuf::from);
+        let config = options.remove("--config").map(PathBuf::from);
+        if let Some(option) = options.keys().next() {
+            return Err(format!("unexpected option: {option}"));
         }
-
         if output.is_some() && (name.is_some() || store.is_some()) {
             return Err("--output cannot be used with --name or --store".to_owned());
+        }
+
+        let mut servers = Vec::new();
+        let mut server_arguments = BTreeMap::<Language, Vec<String>>::new();
+        for (option, value) in repeated {
+            if option == "--server" {
+                servers.push(parse_language_value(
+                    &value,
+                    "--server",
+                    "<language>=<program>",
+                    "program",
+                )?);
+            } else {
+                let (language, value) = parse_language_value(
+                    &value,
+                    "--server-arg",
+                    "<language>=<argument>",
+                    "argument",
+                )?;
+                server_arguments.entry(language).or_default().push(value);
+            }
         }
 
         Ok(Self {
@@ -221,20 +202,6 @@ fn parse_language_value(
     }
     let language = Language::parse(language)?;
     Ok((language, value.to_owned()))
-}
-
-/// Consumes and returns the next option value.
-///
-/// # Errors
-///
-/// Returns a message if the option has no value.
-fn next_value(
-    arguments: &mut impl Iterator<Item = String>,
-    option: &str,
-) -> Result<String, String> {
-    arguments
-        .next()
-        .ok_or_else(|| format!("{option} needs a value"))
 }
 
 // -----------------------------------------------------------------------------
@@ -603,6 +570,34 @@ mod tests {
             artifact_destination(&parse(&["project", "--output", "other.json"]).expect("args"))
                 .expect("destination");
         assert_eq!(explicit.indexed, None);
+    }
+
+    #[test]
+    fn accepts_inline_option_values() {
+        let arguments =
+            parse(&["--name=sample", "--store=demo", "--server=rust=ra"]).expect("args");
+
+        assert_eq!(arguments.name.as_deref(), Some("sample"));
+        assert_eq!(arguments.store, Some(PathBuf::from("demo")));
+        assert_eq!(arguments.servers, [(Language::Rust, "ra".to_owned())]);
+    }
+
+    #[test]
+    fn rejects_a_short_option_as_an_unknown_option() {
+        assert_eq!(
+            parse(&["-h"]).expect_err("-h is not a root"),
+            "unknown option: -h"
+        );
+    }
+
+    #[test]
+    fn rejects_a_repeated_single_value_option() {
+        for option in ["--name", "--store", "--output", "--config"] {
+            assert_eq!(
+                parse(&[option, "a", option, "b"]).expect_err("a repeated option"),
+                format!("duplicate option: {option}")
+            );
+        }
     }
 
     #[test]

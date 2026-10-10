@@ -97,17 +97,23 @@ pub fn run(arguments: Vec<String>, input: &mut impl Read) -> ExitCode {
 /// The options that take no value. Each command removes the flags it accepts.
 const FLAGS: [&str; 3] = ["--json", "--check", "--open"];
 
+/// The operands, the single options, and the repeated options of one command line.
+type SplitArguments = (Vec<String>, BTreeMap<String, String>, Vec<(String, String)>);
+
 /// Separates options from command operands.
 ///
-/// Each option in `FLAGS` takes no value. Each option in `value_options` takes one value, as
-/// `--option value` or `--option=value`. A separate value cannot start with a
-/// hyphen, except `-` itself.
+/// Each option in `FLAGS` takes no value. Each option in `value_options` or
+/// `repeatable` takes one value, as `--option value` or `--option=value`. A
+/// separate value cannot start with a hyphen, except `-` itself. Only an option
+/// in `repeatable` can repeat. Its values come back in input order.
 fn split_arguments(
     mut arguments: impl Iterator<Item = String>,
     value_options: &[&str],
-) -> Result<(Vec<String>, BTreeMap<String, String>), String> {
+    repeatable: &[&str],
+) -> Result<SplitArguments, String> {
     let mut operands = Vec::new();
     let mut options = BTreeMap::new();
+    let mut repeated = Vec::new();
     while let Some(argument) = arguments.next() {
         if !argument.starts_with('-') {
             if argument.trim().is_empty() {
@@ -129,7 +135,7 @@ fn split_arguments(
                 return Err(format!("{argument} does not accept a value"));
             }
             String::new()
-        } else if value_options.contains(&argument) {
+        } else if value_options.contains(&argument) || repeatable.contains(&argument) {
             let value = if let Some(value) = inline {
                 value.to_owned()
             } else {
@@ -148,9 +154,13 @@ fn split_arguments(
         } else {
             return Err(format!("unknown option: {argument}"));
         };
-        options.insert(argument.to_owned(), value);
+        if repeatable.contains(&argument) {
+            repeated.push((argument.to_owned(), value));
+        } else {
+            options.insert(argument.to_owned(), value);
+        }
     }
-    Ok((operands, options))
+    Ok((operands, options, repeated))
 }
 
 /// Returns the store of a command: the `--store` value, or the nearest project store.

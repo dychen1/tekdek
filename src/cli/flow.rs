@@ -87,7 +87,7 @@ struct AuthorOptions {
 impl Command {
     /// Parses the arguments after `flow` without file access.
     fn parse(arguments: impl Iterator<Item = String>) -> Result<Self, String> {
-        let (operands, mut options) = split_arguments(arguments, VALUE_OPTIONS)?;
+        let (operands, mut options, _) = split_arguments(arguments, VALUE_OPTIONS, &[])?;
         let json = options.remove("--json").is_some();
         let store = options.remove("--store").map(PathBuf::from);
         let words: Vec<_> = operands.iter().map(String::as_str).collect();

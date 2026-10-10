@@ -50,7 +50,7 @@ pub(super) fn run(raw: impl Iterator<Item = String>) -> Result<(), String> {
 
 /// Parses the arguments after `serve`.
 fn parse(raw: impl Iterator<Item = String>) -> Result<Arguments, String> {
-    let (operands, mut options) = split_arguments(raw, &["--store", "--port", "--flow"])?;
+    let (operands, mut options, _) = split_arguments(raw, &["--store", "--port", "--flow"], &[])?;
     if let Some(operand) = operands.first() {
         return Err(format!("unexpected argument: {operand}"));
     }
