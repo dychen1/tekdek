@@ -1,8 +1,8 @@
 //! Semantic edge construction.
 //!
 //! Adds call, type, and reference edges from the semantic facts of one
-//! language. The syntax graph and the semantic facts are the input. Semantic
-//! edges are the output.
+//! language. The graph with its syntax nodes and the semantic facts are the
+//! input. Semantic edges are the output.
 //!
 //! # Sections
 //!
@@ -11,13 +11,13 @@
 
 use std::collections::{HashMap, HashSet};
 
-use super::{build::SyntaxGraph, lookup::SyntaxGraphIndex};
+use super::lookup::SyntaxGraphIndex;
 use crate::analysis::{
     fact::{
         AnalysisError, EntityKind, RelationEvidence, RelationKind, ReportedLocation,
         ResolutionFallback, SemanticFact, SymbolAnchor, TypeKind,
     },
-    graph::{Edge, NodeId, Provenance, ProvenanceOrigin},
+    graph::{Edge, Graph, NodeId, Provenance, ProvenanceOrigin},
     language::Language,
     source::SourceSpan,
 };
@@ -32,11 +32,11 @@ use crate::analysis::{
 ///
 /// Returns an error if a selected semantic position has no permitted node.
 pub(super) fn build_semantic_edges(
-    syntax_graph: &SyntaxGraph,
+    graph: &Graph,
     language: Language,
     semantic_facts: &[SemanticFact],
 ) -> Result<Vec<Edge>, AnalysisError> {
-    let lookup = SyntaxGraphIndex::new(syntax_graph);
+    let lookup = SyntaxGraphIndex::new(graph);
     let call_positions = collect_call_positions(semantic_facts);
     let mut edges = SemanticEdgeAccumulator::new();
 
@@ -616,8 +616,7 @@ mod tests {
             EntityFact, EntityKind, RelationKind, ResolutionFallback, SemanticFact, SyntaxFacts,
         },
         graph::{
-            NodeId, ProvenanceOrigin,
-            build::SyntaxGraph,
+            Graph, NodeId, ProvenanceOrigin,
             fixtures::{
                 anchor, class, constructor, entity, field, function, locations, relation, span,
                 to_syntax_graph,
@@ -777,7 +776,7 @@ mod tests {
         );
     }
 
-    fn rust_semantic_validation_graph() -> SyntaxGraph {
+    fn rust_semantic_validation_graph() -> Graph {
         to_syntax_graph(
             Language::Rust,
             SyntaxFacts {
@@ -1089,7 +1088,7 @@ mod tests {
     }
 
     /// Builds the syntax graph for signature tests.
-    fn signature_syntax_graph() -> SyntaxGraph {
+    fn signature_syntax_graph() -> Graph {
         to_syntax_graph(
             Language::Python,
             SyntaxFacts {
@@ -1128,7 +1127,7 @@ mod tests {
         .expect("the syntax fixture must materialize")
     }
 
-    fn semantic_edge_syntax_graph() -> SyntaxGraph {
+    fn semantic_edge_syntax_graph() -> Graph {
         to_syntax_graph(
             Language::Python,
             SyntaxFacts {

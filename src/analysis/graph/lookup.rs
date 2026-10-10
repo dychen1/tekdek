@@ -8,10 +8,9 @@
 
 use std::collections::HashMap;
 
-use super::build::SyntaxGraph;
 use crate::analysis::{
     fact::{CallableKind, EntityKind, RelationKind},
-    graph::{Node, NodeId},
+    graph::{Graph, Node, NodeId},
     language::Language,
     source::SourceRange,
 };
@@ -38,7 +37,7 @@ impl SignatureRole {
 }
 
 pub(super) struct SyntaxGraphIndex<'a> {
-    graph: &'a SyntaxGraph,
+    graph: &'a Graph,
     paths: HashMap<(Language, &'a str), PathRanges>,
     constructors: HashMap<NodeId, NodeId>,
     import_ranges: HashMap<(Language, &'a str), Vec<SourceRange>>,
@@ -55,7 +54,7 @@ struct PathRanges {
 }
 
 impl<'a> SyntaxGraphIndex<'a> {
-    pub(super) fn new(graph: &'a SyntaxGraph) -> Self {
+    pub(super) fn new(graph: &'a Graph) -> Self {
         let mut paths = HashMap::<(Language, &str), PathRanges>::new();
 
         for (id, node) in graph.identified_nodes() {
@@ -179,10 +178,10 @@ impl<'a> SyntaxGraphIndex<'a> {
 }
 
 /// Indexes the last direct constructor of each class.
-fn constructors_by_class(graph: &SyntaxGraph) -> HashMap<NodeId, NodeId> {
+fn constructors_by_class(graph: &Graph) -> HashMap<NodeId, NodeId> {
     let mut constructors = HashMap::<NodeId, NodeId>::new();
 
-    for edge in &graph.syntax_edges {
+    for edge in &graph.edges {
         if edge.kind != RelationKind::Contains {
             continue;
         }
@@ -205,10 +204,10 @@ fn constructors_by_class(graph: &SyntaxGraph) -> HashMap<NodeId, NodeId> {
 }
 
 /// Returns every import observation range, grouped by source path.
-fn import_ranges_by_path(graph: &SyntaxGraph) -> HashMap<(Language, &str), Vec<SourceRange>> {
+fn import_ranges_by_path(graph: &Graph) -> HashMap<(Language, &str), Vec<SourceRange>> {
     let mut import_ranges = HashMap::<(Language, &str), Vec<SourceRange>>::new();
 
-    for edge in &graph.syntax_edges {
+    for edge in &graph.edges {
         if edge.kind != RelationKind::Imports {
             continue;
         }
@@ -240,8 +239,7 @@ mod tests {
     use crate::analysis::{
         fact::EntityKind,
         graph::{
-            NodeId,
-            build::SyntaxGraph,
+            Graph, NodeId,
             fixtures::{function, node},
         },
         language::Language,
@@ -249,13 +247,13 @@ mod tests {
 
     #[test]
     fn finds_exact_declarations_and_deepest_body_owners() {
-        let graph = SyntaxGraph {
+        let graph = Graph {
             nodes: vec![
                 node(0, "app.py", EntityKind::Module, Vec::new(), Some((0, 100))),
                 node(1, "app.py", function(), vec![(10, 15)], Some((20, 90))),
                 node(2, "app.py", function(), vec![(30, 35)], Some((40, 80))),
             ],
-            syntax_edges: Vec::new(),
+            edges: Vec::new(),
         };
         let lookup = SyntaxGraphIndex::new(&graph);
 

@@ -3,10 +3,7 @@
 //! Builds the facts, nodes, anchors, and syntax graphs that the `build`,
 //! `semantic`, and `lookup` tests share.
 
-use super::{
-    Node, Provenance, ProvenanceOrigin,
-    build::{SyntaxGraph, build_graph},
-};
+use super::{Graph, Node, Provenance, ProvenanceOrigin, build::build_graph};
 use crate::analysis::{
     fact::{
         AnalysisError, CallableData, CallableKind, EntityEvidence, EntityFact, EntityKey,
@@ -17,7 +14,7 @@ use crate::analysis::{
     source::{SourceRange, SourceSpan},
 };
 
-/// Builds a syntax graph from syntax facts.
+/// Builds a graph from the syntax facts of one language.
 ///
 /// # Errors
 ///
@@ -25,12 +22,8 @@ use crate::analysis::{
 pub(super) fn to_syntax_graph(
     language: Language,
     facts: SyntaxFacts,
-) -> Result<SyntaxGraph, AnalysisError> {
-    let graph = build_graph(vec![FactSet::new(language, facts, Vec::new())], &[])?;
-    Ok(SyntaxGraph {
-        nodes: graph.nodes,
-        syntax_edges: graph.edges,
-    })
+) -> Result<Graph, AnalysisError> {
+    build_graph(vec![FactSet::new(language, facts, Vec::new())], &[])
 }
 
 pub(super) fn fixture_key(id: u32) -> EntityKey {

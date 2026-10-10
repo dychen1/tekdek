@@ -7,8 +7,7 @@
 //! # Sections
 //!
 //! `Construction` assembles the graph.
-//! `Syntax Graph` holds the intermediate graph.
-//! `Syntax Materialization` builds the syntax graph.
+//! `Syntax Materialization` adds the syntax nodes and edges.
 
 use std::collections::HashMap;
 
@@ -39,9 +38,9 @@ pub fn build_graph(
     fact_sets: Vec<FactSet>,
     documents: &[DocumentSnapshot],
 ) -> Result<Graph, AnalysisError> {
-    let mut syntax_graph = SyntaxGraph {
+    let mut graph = Graph {
         nodes: Vec::new(),
-        syntax_edges: Vec::new(),
+        edges: Vec::new(),
     };
     let mut node_ids = HashMap::<EntityKey, NodeId>::new();
     let mut edge_indexes = HashMap::<(NodeId, NodeId, RelationKind), usize>::new();
@@ -54,7 +53,7 @@ pub fn build_graph(
     } in fact_sets
     {
         materialize_syntax(
-            &mut syntax_graph,
+            &mut graph,
             &mut node_ids,
             &mut edge_indexes,
             language,
@@ -62,19 +61,16 @@ pub fn build_graph(
         )?;
         semantic_batches.push((language, semantic));
     }
-    normalize_edge_evidence(&mut syntax_graph.syntax_edges)?;
+    normalize_edge_evidence(&mut graph.edges)?;
 
     for (language, semantic) in semantic_batches {
-        let semantic_edges = build_semantic_edges(&syntax_graph, language, &semantic)?;
-        syntax_graph.syntax_edges.extend(semantic_edges);
+        let semantic_edges = build_semantic_edges(&graph, language, &semantic)?;
+        graph.edges.extend(semantic_edges);
     }
 
-    hash_content(&mut syntax_graph.nodes, documents);
+    hash_content(&mut graph.nodes, documents);
 
-    Ok(Graph {
-        nodes: syntax_graph.nodes,
-        edges: syntax_graph.syntax_edges,
-    })
+    Ok(graph)
 }
 
 /// Fills the content hash of every node that has a derivable range.
@@ -113,26 +109,11 @@ fn content_span(node: &Node) -> Option<SourceRange> {
 }
 
 // -----------------------------------------------------------------------------
-// Syntax Graph
-// -----------------------------------------------------------------------------
-
-pub(super) struct SyntaxGraph {
-    pub(super) nodes: Vec<Node>,
-    pub(super) syntax_edges: Vec<Edge>,
-}
-
-impl SyntaxGraph {
-    pub(super) fn identified_nodes(&self) -> impl Iterator<Item = (NodeId, &Node)> {
-        (0u32..).map(NodeId).zip(&self.nodes)
-    }
-}
-
-// -----------------------------------------------------------------------------
 // Syntax Materialization
 // -----------------------------------------------------------------------------
 
 fn materialize_syntax(
-    syntax_graph: &mut SyntaxGraph,
+    graph: &mut Graph,
     node_ids: &mut HashMap<EntityKey, NodeId>,
     edge_indexes: &mut HashMap<(NodeId, NodeId, RelationKind), usize>,
     language: Language,
@@ -149,11 +130,11 @@ fn materialize_syntax(
         mut evidence,
     } in entities
     {
-        let id = NodeId(u32::try_from(syntax_graph.nodes.len()).map_err(|_| {
+        let id = NodeId(u32::try_from(graph.nodes.len()).map_err(|_| {
             AnalysisError::new("the syntax has too many entities for u32 identities")
         })?);
         if let Some(existing) = node_ids.get(&key).copied() {
-            let qualifier = if syntax_graph.nodes[existing.index()].language == language {
+            let qualifier = if graph.nodes[existing.index()].language == language {
                 ""
             } else {
                 " across languages"
@@ -168,7 +149,7 @@ fn materialize_syntax(
             .sort_by_key(|range| (range.start, range.end));
         evidence.declarations.dedup();
 
-        syntax_graph.nodes.push(Node {
+        graph.nodes.push(Node {
             language,
             key,
             name,
@@ -188,20 +169,20 @@ fn materialize_syntax(
         evidence,
     } in relations
     {
-        let source = resolve_endpoint_key(syntax_graph, node_ids, language, &source)?;
-        let target = resolve_endpoint_key(syntax_graph, node_ids, language, &target)?;
+        let source = resolve_endpoint_key(graph, node_ids, language, &source)?;
+        let target = resolve_endpoint_key(graph, node_ids, language, &target)?;
 
         let key = (source, target, kind);
         if let Some(index) = edge_indexes.get(&key).copied() {
-            syntax_graph.syntax_edges[index].weight += 1;
-            syntax_graph.syntax_edges[index]
+            graph.edges[index].weight += 1;
+            graph.edges[index]
                 .provenance
                 .evidence
                 .observations
                 .extend(evidence.observations);
         } else {
-            let index = syntax_graph.syntax_edges.len();
-            syntax_graph.syntax_edges.push(Edge {
+            let index = graph.edges.len();
+            graph.edges.push(Edge {
                 source: key.0,
                 target: key.1,
                 kind: key.2,
@@ -224,7 +205,7 @@ fn materialize_syntax(
 ///
 /// Returns an error if no entity fact declared that key.
 fn resolve_endpoint_key(
-    syntax_graph: &SyntaxGraph,
+    graph: &Graph,
     node_ids: &HashMap<EntityKey, NodeId>,
     language: Language,
     key: &EntityKey,
@@ -232,7 +213,7 @@ fn resolve_endpoint_key(
     let id = node_ids.get(key).copied().ok_or_else(|| {
         AnalysisError::new(format!("a syntax relation names an unknown entity: {key}"))
     })?;
-    let node = syntax_graph.nodes.get(id.index()).ok_or_else(|| {
+    let node = graph.nodes.get(id.index()).ok_or_else(|| {
         AnalysisError::new("a syntax relation resolved to an invalid node identity")
     })?;
     if node.language != language {
@@ -307,13 +288,10 @@ mod tests {
 
         assert_eq!(syntax.nodes.len(), 3);
         assert_eq!(syntax.nodes[2].key, fixture_key(2));
-        assert_eq!(syntax.syntax_edges.len(), 2);
-        assert!(matches!(
-            syntax.syntax_edges[0].kind,
-            RelationKind::Contains
-        ));
-        assert!(matches!(syntax.syntax_edges[1].kind, RelationKind::Imports));
-        assert_eq!(syntax.syntax_edges[1].weight, 2);
+        assert_eq!(syntax.edges.len(), 2);
+        assert!(matches!(syntax.edges[0].kind, RelationKind::Contains));
+        assert!(matches!(syntax.edges[1].kind, RelationKind::Imports));
+        assert_eq!(syntax.edges[1].weight, 2);
     }
 
     #[test]
