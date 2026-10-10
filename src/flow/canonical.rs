@@ -11,7 +11,6 @@ use std::{fmt, io::Write as _};
 
 use serde::Serialize;
 use serde_json::Value;
-use sha2::{Digest, Sha256};
 
 use super::models::Sha256Digest;
 
@@ -40,7 +39,7 @@ pub fn digest(value: &impl Serialize) -> Result<Sha256Digest, CanonicalError> {
 /// Returns the SHA-256 digest of raw bytes.
 #[must_use]
 pub fn digest_bytes(bytes: &[u8]) -> Sha256Digest {
-    Sha256Digest::from_hash(&Sha256::digest(bytes))
+    Sha256Digest::of_bytes(bytes)
 }
 
 /// Returns the lowercase hex SHA-256 of the canonical form of one value.
