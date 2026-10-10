@@ -7,7 +7,7 @@ import { esc, PTR } from "./markup.ts";
 import { $, type ClusterDeck, type ClusterView, type DeckContext } from "./model.ts";
 
 /** One lifted box and the elements that the deck reads. */
-interface BoxView { key: string; name: string; file: string; steps: readonly number[]; el: HTMLElement; lid: HTMLElement; btn: HTMLButtonElement }
+interface BoxView { key: string; name: string; file: string; steps: readonly number[]; el: HTMLElement; lid: HTMLElement; btn: HTMLButtonElement; badge: HTMLElement }
 
 /** The deck of one cluster. */
 interface DeckView { cam: HTMLElement; slab: HTMLElement; top: HTMLElement; boxes: BoxView[]; byKey: Map<string, BoxView> }
@@ -29,7 +29,7 @@ export function createClusterDeck(ctx: DeckContext): ClusterDeck {
     el.innerHTML = `<div class="face fshadow"></div><div class="riser"><div class="face front"></div><div class="face lid">${PTR}` +
       `<button class="tmain" type="button" tabindex="-1"${steps.length ? ` data-step="${steps[0]}"` : ""}><span class="lp">${esc(fn.file)}</span><span class="ln">${esc(fn.name)}</span></button>` +
       `<span class="sn">${steps.join(" ")}</span><span class="stepno">${steps[0] ?? ""}</span></div></div>`;
-    return { key, name: fn.name, file: fn.file, steps, el, lid: el.querySelector<HTMLElement>(".lid")!, btn: el.querySelector<HTMLButtonElement>(".tmain")! };
+    return { key, name: fn.name, file: fn.file, steps, el, lid: el.querySelector<HTMLElement>(".lid")!, btn: el.querySelector<HTMLButtonElement>(".tmain")!, badge: el.querySelector<HTMLElement>(".stepno")! };
   }
 
   /** Builds the deck of a cluster, flat on the base plane. `pin` puts it; `rise` lifts it. */
@@ -81,6 +81,7 @@ export function createClusterDeck(ctx: DeckContext): ClusterDeck {
       const focus = box.key === step.node, away = box.file !== file;
       box.el.classList.toggle("focus", focus);
       box.el.classList.toggle("away", away);
+      if (focus) box.badge.textContent = String(state.cur);
       box.el.style.setProperty("--lw", boxWidth(box.name, box.file, box.steps, away) + "px");
       box.btn.tabIndex = 0;
       box.btn.setAttribute("aria-label", `${box.name}${away ? " in " + box.file : ""}, step ${box.steps.join(", ")}${focus ? ", the current step" : ""}`);
