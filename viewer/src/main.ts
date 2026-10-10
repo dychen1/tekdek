@@ -1,45 +1,54 @@
 /* Viewer page. This module owns page boot, the codebase and flow pickers, the loading and error states,
-   and the URL state (`?artifact=&flow=&step=`). It creates one deck for the selected codebase and flow,
-   and replaces it on a change.
+   the source load, and the URL state (`?artifact=&flow=&step=`). It creates one deck for the selected
+   codebase and flow, and replaces it on a change.
    # Sections
    status, loading, pickers, URL state, boot */
-import type { ArtifactEntry, ArtifactIndex, DeckFlow, DeckGraph, FlowEntry } from "./data/models.ts";
+import type { ArtifactEntry, ArtifactIndex, DeckFlow, DeckGraph, FlowEntry, SourceView } from "./data/models.ts";
 import { deckFlow, deckGraph, pickFlow, frozenFlows } from "./data/adapt.ts";
-import { loadFlow, loadGraph, loadIndex, LoadError, type LoadReason } from "./data/load.ts";
+import { loadFlow, loadGraph, loadIndex, loadSource, LoadError, type LoadReason } from "./data/load.ts";
 import { createDeck, type DeckInstance } from "./deck/deck.ts";
-import { codebasePicker, esc, flowPicker, icon } from "./deck/panels.ts";
+import { codebasePicker, esc, flowPicker, icon } from "./deck/markup.ts";
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 
 // ============ status ============
 
-/** Shows one loading line with a cursor in the map area, or hides it. */
+/** Shows one loading line with a cursor at the top of the code column, or hides it. The code viewer hides while it shows. */
 function showLoading(line: string | null) {
   const status = $("status");
   status.hidden = line === null;
   if (line === null) { status.replaceChildren(); return; }
+  showReader(false);
   status.innerHTML = `<div class="st-line"><span>${esc(line)}</span><i class="cursor" aria-hidden="true"></i></div>`;
 }
 
-/** Fills the panes and controls while no deck is loaded. The chrome stays visible and inert. */
+/** Shows or hides the code header and the code viewer. They hide while no deck is loaded. */
+function showReader(visible: boolean) {
+  for (const id of ["codeHead", "code"]) $(id).style.display = visible ? "" : "none";
+}
+
+/** Fills the code column, the bar, and the flow band while no deck is loaded. The chrome stays visible and inert. */
 function showShell(badge: string, color: string, desc: string, meta: string) {
-  document.body.style.setProperty("--cc", color);
-  $("callout").innerHTML = `<span class="pbadge" style="--c:${color}"><span>${esc(badge)}</span></span>` +
-    `<p class="co-desc">${desc}</p>` + (meta ? `<p class="co-meta">${meta}</p>` : "");
-  $("dock").innerHTML = `<div class="dk-head"><span class="pbadge">Extracted stack</span></div><p class="dk-empty">Nothing is lifted.</p>`;
+  document.documentElement.style.setProperty("--cc", color);
+  $("cdHead").innerHTML = `<span class="pbadge" style="--c:${esc(color)}"><span>${esc(badge)}</span></span>`;
+  $("cdStep").innerHTML = `<p class="cd-ann">${desc}</p>` + (meta ? `<p class="cd-empty">${meta}</p>` : "");
+  showReader(false);
+  $("where").replaceChildren();
+  $("code").replaceChildren();
   $("counter").textContent = "Step 0 / 0";
   $("chip").classList.add("none");
   $("chipText").textContent = "No flow";
-  $("cTitle").textContent = badge;
-  $("cNode").textContent = "";
-  $("cAnn").textContent = "";
+  $("cMeta").textContent = "";
+  $("cDesc").textContent = "";
   $("ticks").replaceChildren();
+  $("flowPick").outerHTML = '<span id="flowPick"></span>';
+  $("fhMeta").replaceChildren();
   setChrome(false);
 }
 
 /** Enables or disables every control that needs a deck. */
 function setChrome(enabled: boolean) {
-  for (const id of ["prevBtn", "nextBtn", "clearBtn", "annBtn", "fitBtn", "zoomOut", "zoomIn", "keyBtn"]) {
+  for (const id of ["prevBtn", "nextBtn", "clearBtn", "compactBtn", "zoomOut", "zoomIn", "keyBtn", "fullBtn"]) {
     $<HTMLButtonElement>(id).disabled = !enabled;
   }
 }
@@ -53,7 +62,7 @@ const RECOVERY: Record<LoadReason, string> = {
   empty: "Index a codebase with <code>cargo run -- &lt;path&gt;</code>, then reload this page.",
 };
 
-/** Shows a load failure in the callout, with one recovery step. */
+/** Shows a load failure in the code column, with one recovery step. */
 function fail(error: unknown) {
   deck?.destroy(); deck = null;
   showLoading(null);
@@ -88,13 +97,17 @@ async function openArtifact(file: string, flowName: string | null, step: number)
   await openFlow(pickFlow(frozenFlows(entry.flows), flowName), step);
 }
 
-/** Loads one flow of the current codebase and replaces the deck. */
+/** Loads one flow of the current codebase and the source of its step functions, then replaces the deck.
+ *  A failed source load still plays the flow: every code viewer shows the unreadable note. */
 async function openFlow(next: FlowEntry | null, step: number) {
   const mine = ++ticket;
   let flow: DeckFlow | null = null;
+  let sources: ReadonlyMap<string, SourceView> = new Map();
   if (next) {
     showLoading(`loading flow ${next.name}`);
     const artifact = await loadFlow(next);
+    if (mine !== ticket) return;
+    sources = await loadSource(entry!.file, next.name).catch(() => new Map<string, SourceView>());
     if (mine !== ticket) return;
     try { flow = deckFlow(artifact, graph!, entry!.digest, next); }
     catch (error) {
@@ -105,8 +118,9 @@ async function openFlow(next: FlowEntry | null, step: number) {
   deck?.destroy();
   showLoading(null);
   setChrome(true);
+  showReader(true);
   deck = createDeck({
-    graph: graph!, flow, flowCount: frozenFlows(entry!.flows).length,
+    graph: graph!, flow, sources, flowCount: frozenFlows(entry!.flows).length,
     onFlowPick: anchor => openPicker(anchor, "flow"),
     onStep: n => writeUrl(n),
   });
@@ -181,10 +195,10 @@ function renderRepoBadge() {
   const head = $("sbHead");
   const name = esc(entry?.label ?? entry?.file ?? "codebase");
   if ((index?.artifacts.length ?? 0) > 1) {
-    head.innerHTML = `<button class="sb-title" id="sbRepo" type="button" aria-haspopup="dialog" aria-expanded="false" aria-label="Codebase ${name}. Choose another codebase">${name}${icon("chev")}</button>`;
-    const button = $("sbRepo");
+    head.innerHTML = `<button class="sb-title" id="repoPick" type="button" aria-haspopup="dialog" aria-expanded="false" aria-label="Codebase ${name}. Choose another codebase">${name}${icon("chev")}</button>`;
+    const button = $("repoPick");
     button.addEventListener("click", () => openPicker(button, "codebase"));
-  } else head.innerHTML = `<span class="sb-title" id="sbRepo">${name}</span>`;
+  } else head.innerHTML = `<span class="sb-title" id="repoPick">${name}</span>`;
 }
 
 // ============ URL state ============

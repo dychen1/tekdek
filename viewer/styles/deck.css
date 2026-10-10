@@ -367,6 +367,9 @@ button.ref:hover{text-decoration:underline;text-underline-offset:3px}
   font:var(--fs-ui-s)/14px var(--font-code);color:var(--ink-2);vertical-align:1px}
 .tag.gap{border-color:var(--warn);color:var(--warn)}
 .cd-empty{margin:0;font:var(--fs-ui)/1.6 var(--font-code);color:var(--ink-2)}
+/* A note in place of code keeps the column's side padding. */
+.code .cd-empty{padding:0 16px}
+.cd-step p+p{margin-top:8px}
 /* Loading: one terminal line at the top of the code column. */
 .status{flex:0 0 auto;display:grid;justify-items:start;padding:13px 16px 0;text-align:left;font:var(--fs-ui)/1.6 var(--font-code);color:var(--ink-2)}
 .status[hidden]{display:none}
