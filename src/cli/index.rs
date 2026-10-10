@@ -327,16 +327,17 @@ fn folder_name(root: &Path) -> Result<String, String> {
 /// # Errors
 ///
 /// Returns a message if the name already ends with `.json`, or if its graph
-/// file fails the store rule of `check_graph_name`.
+/// file fails the store rule of `check_graph_name`. That message gives the
+/// reason of the rule.
 fn artifact_file(name: &str) -> Result<String, String> {
-    let file = format!("{name}.json");
     if Path::new(name)
         .extension()
         .is_some_and(|extension| extension.eq_ignore_ascii_case("json"))
-        || check_graph_name(&file).is_err()
     {
         return Err(format!("invalid artifact name: {name}"));
     }
+    let file = format!("{name}.json");
+    check_graph_name(&file).map_err(|error| format!("invalid artifact name: {name}: {error}"))?;
     Ok(file)
 }
 
@@ -661,7 +662,13 @@ mod tests {
                 .into_iter()
                 .map(str::to_owned))
             .expect_err("an invalid name");
-            assert_eq!(error, format!("invalid artifact name: {name}"));
+            assert!(
+                error.starts_with(&format!("invalid artifact name: {name}")),
+                "{error}"
+            );
+            if name.starts_with('.') {
+                assert!(error.contains("cannot start with a dot"), "{error}");
+            }
         }
     }
 
@@ -704,7 +711,10 @@ mod tests {
     fn reserves_the_artifact_index_name() {
         assert_eq!(
             artifact_file("INDEX"),
-            Err("invalid artifact name: INDEX".to_owned())
+            Err(
+                "invalid artifact name: INDEX: the graph file must end with .json and must not be index.json"
+                    .to_owned()
+            )
         );
     }
 }

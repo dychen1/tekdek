@@ -418,7 +418,6 @@ impl ArtifactGraph {
 pub fn check_graph_name(file: &str) -> io::Result<()> {
     let invalid = |message: String| io::Error::new(io::ErrorKind::InvalidInput, message);
     if file.is_empty()
-        || file.starts_with('.')
         || file
             .chars()
             .any(|ch| ch.is_control() || matches!(ch, '/' | '\\' | ':'))
@@ -426,6 +425,11 @@ pub fn check_graph_name(file: &str) -> io::Result<()> {
     {
         return Err(invalid(format!(
             "invalid store name {file:?}: use one path component"
+        )));
+    }
+    if file.starts_with('.') {
+        return Err(invalid(format!(
+            "invalid store name {file:?}: a graph file name cannot start with a dot"
         )));
     }
     if file.strip_suffix(".json").is_none() || file.eq_ignore_ascii_case("index.json") {
@@ -566,6 +570,8 @@ mod tests {
         ] {
             assert!(check_graph_name(name).is_err(), "{name:?}");
         }
+        let dot = check_graph_name(".hidden.json").expect_err("a leading dot");
+        assert!(dot.to_string().contains("cannot start with a dot"), "{dot}");
     }
 
     #[test]
