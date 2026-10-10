@@ -11,7 +11,7 @@ export function createLinks(ctx: DeckContext): Links {
   const guideG = $("#guideG"), guideEl = $("#guidePath");
   const tetherG = $("#tetherG"), tetherEl = $("#tetherPath"), tetherDot = $("#tetherDot");
   const arrowG = $("#arrowG"), arrEl = $("#arrPath"), arrHead = $("#arrHead"), arrDot = $("#arrDot");
-  const sbTree = $("#sbTree"), codeHead = $("#codeHead");
+  const sbTree = $("#sbTree"), codeHead = $("#codeHead"), frameEl = $("#frame");
 
   /** Draws the guide from the end of the explorer row straight across to the file node. */
   function drawGuide(): boolean {
@@ -22,7 +22,8 @@ export function createLinks(ctx: DeckContext): Links {
     const ends = [".snm", ".dots", ".dnote"].map(q => row.querySelector(q)).filter((el): el is Element => !!el && el.getBoundingClientRect().width > 0);
     if (!ends.length) return false;
     const sx = Math.max(...ends.map(el => el.getBoundingClientRect().right)) + 6;
-    guideEl.setAttribute("d", guidePath(sx, y, node.getBoundingClientRect(), state.zoom));
+    const fr = frameEl.getBoundingClientRect();
+    guideEl.setAttribute("d", guidePath(sx, y, node.getBoundingClientRect(), state.zoom, fr.width > 0 ? fr : undefined));
     return true;
   }
 

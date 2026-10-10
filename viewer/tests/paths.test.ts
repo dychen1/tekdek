@@ -61,3 +61,46 @@ test("an arrow needs more than 24 px of room to show", () => {
   assert.equal(arrowPath({ x: 800, y: 240 }, 900, { x: 824, y: 280 }).ok, false);
   assert.equal(arrowPath({ x: 800, y: 240 }, 900, { x: 825, y: 280 }).ok, true);
 });
+
+test("a guide row below the frame puts its gutter 8 px left of the frame", () => {
+  const frame = { left: 244, top: 52, bottom: 630 };
+  assert.equal(
+    guidePath(200, 700, { left: 330, top: 290, height: 20 }, 1, frame),
+    "M200.0,700.0 L232.0,700.0 Q236.0,700.0 236.0,696.0 L236.0,304.0 Q236.0,300.0 240.0,300.0 L330.0,300.0",
+  );
+});
+
+test("a guide row above the frame puts its gutter 8 px left of the frame", () => {
+  const frame = { left: 244, top: 52, bottom: 630 };
+  assert.equal(
+    guidePath(200, 30, { left: 330, top: 290, height: 20 }, 1, frame),
+    "M200.0,30.0 L232.0,30.0 Q236.0,30.0 236.0,34.0 L236.0,296.0 Q236.0,300.0 240.0,300.0 L330.0,300.0",
+  );
+});
+
+test("a guide row outside the frame keeps its gutter left of the frame at 60% zoom", () => {
+  const frame = { left: 244, top: 52, bottom: 630 };
+  assert.equal(
+    guidePath(135, 721, { left: 274, top: 505, height: 12 }, 0.6, frame),
+    "M135.0,721.0 L232.0,721.0 Q236.0,721.0 236.0,717.0 L236.0,515.0 Q236.0,511.0 240.0,511.0 L274.0,511.0",
+  );
+});
+
+test("a guide row inside the frame range keeps the gutter at the file box", () => {
+  const frame = { left: 244, top: 52, bottom: 630 };
+  const node = { left: 330, top: 290, height: 20 };
+  const inside = "M200.0,500.0 L312.0,500.0 Q316.0,500.0 316.0,496.0 L316.0,304.0 Q316.0,300.0 320.0,300.0 L330.0,300.0";
+  assert.equal(guidePath(200, 500, node, 1, frame), inside);
+  assert.equal(guidePath(200, 500, node, 1), inside);
+  assert.equal(guidePath(200, 630, node, 1, frame), guidePath(200, 630, node, 1));
+  assert.equal(guidePath(200, 52, node, 1, frame), guidePath(200, 52, node, 1));
+});
+
+test("a guide to a level file node stays straight whatever the frame", () => {
+  assert.equal(guidePath(200, 300, { left: 330, top: 290, height: 20 }, 1, { left: 244, top: 52, bottom: 630 }), "M200.0,300.0 H330.0");
+});
+
+test("a guide row that ends right of the frame gutter never turns back", () => {
+  const d = guidePath(240, 700, { left: 330, top: 290, height: 20 }, 1, { left: 244, top: 52, bottom: 630 });
+  assert.ok(d.startsWith("M240.0,700.0 L242.0,700.0 Q244.0,700.0 244.0,698.0"));
+});

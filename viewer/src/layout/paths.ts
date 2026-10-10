@@ -17,11 +17,16 @@ export function ortho(pts: Pt[]): string {
   return d + ` L${P2(...pts[pts.length - 1])}`;
 }
 
-/** The guide: straight across to a level file node, else one tree elbow in the gutter left of the box. */
-export function guidePath(sx: number, sy: number, node: { left: number; top: number; height: number }, k: number): string {
+/** The guide: straight across to a level file node, else one tree elbow in the gutter left of the box.
+ *  A row outside the frame's height range puts the gutter 8 px left of the frame, so the guide clears the bars. */
+export function guidePath(
+  sx: number, sy: number, node: { left: number; top: number; height: number }, k: number,
+  frame?: { left: number; top: number; bottom: number },
+): string {
   const ny = node.top + node.height / 2;
   if (Math.abs(sy - ny) <= node.height / 2 - 1) return `M${P2(sx, sy)} H${f1(node.left)}`;
-  const gx = node.left - 14 * k;
+  const outside = frame !== undefined && (sy < frame.top || sy > frame.bottom);
+  const gx = outside ? Math.max(frame.left - 8, sx + 4) : node.left - 14 * k;
   return ortho([[sx, sy], [gx, sy], [gx, ny], [node.left, ny]]);
 }
 
