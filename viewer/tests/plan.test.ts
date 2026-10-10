@@ -27,8 +27,12 @@ test("members follow their first visit, and a file click goes to its next step",
     assert.deepEqual(firsts, [...firsts].sort((a, b) => a - b));
     assert.ok(rangesOf(plan, cluster.id).length > 0);
   }
-  const [file, steps] = must([...plan.flowFiles][0]);
-  assert.equal(nextStepOfFile(plan, file, 0), steps[0]);
-  assert.equal(nextStepOfFile(plan, file, steps[steps.length - 1]), steps[0]);
+  const [file, s] = must([...plan.flowFiles].find(([, steps]) => steps.length >= 3), "file with three steps");
+  assert.equal(nextStepOfFile(plan, file, 0), s[0]);
+  assert.equal(nextStepOfFile(plan, file, s[0]), s[1]);
+  assert.equal(nextStepOfFile(plan, file, s[1]), s[2]);
+  assert.equal(nextStepOfFile(plan, file, s[s.length - 1]), s[0]);
+  const gap = s.findIndex((step, k) => k + 1 < s.length && s[k + 1] > step + 1);
+  if (gap >= 0) assert.equal(nextStepOfFile(plan, file, s[gap] + 1), s[gap + 1]);
   assert.equal(nextStepOfFile(plan, "src/none.rs", 0), null);
 });
