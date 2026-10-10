@@ -29,10 +29,7 @@ use crate::analysis::{
     source::{DocumentSnapshot, Sources},
 };
 
-pub use profile::{
-    CapabilityPolicy, Language, LanguageProfile, RequiredCapability, ServerCommand,
-    builtin_profiles,
-};
+pub use profile::{Language, LanguageProfile, ServerCommand, builtin_profiles};
 #[cfg(feature = "python")]
 pub use python::PythonAdapter;
 #[cfg(feature = "rust")]

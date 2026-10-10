@@ -1,8 +1,7 @@
 //! Source analysis.
 //!
 //! This module owns the indexer: it turns one codebase root into one code graph.
-//! A pipeline configuration is the input. A graph and its detected languages are
-//! the output.
+//! A pipeline configuration is the input. A graph is the output.
 //!
 //! # Modules
 //!
@@ -22,6 +21,7 @@ pub mod config;
 pub mod fact;
 pub mod graph;
 pub mod language;
+#[cfg(any(feature = "python", feature = "rust"))]
 pub mod lsp;
 #[cfg(any(feature = "python", feature = "rust"))]
 mod pipeline;
@@ -31,8 +31,5 @@ pub mod program;
 pub mod source;
 
 #[cfg(any(feature = "python", feature = "rust"))]
-pub use pipeline::{
-    PipelineConfig, PipelineError, PipelineOutputError, PipelineResult, detect_project_languages,
-    run, run_and_write,
-};
+pub use pipeline::{PipelineConfig, PipelineError, PipelineResult, detect_project_languages, run};
 pub use program::{find_program, find_sibling_program};

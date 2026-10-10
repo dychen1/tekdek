@@ -144,7 +144,8 @@ pub fn load_documents(
 
 /// # Errors
 ///
-/// Returns an error if the walk cannot read a directory or source file.
+/// Returns an error that names the directory or source file that the walk
+/// cannot read. A source file that is not UTF-8 is an error.
 fn load_directory(
     root: &Path,
     directory: &Path,
@@ -152,12 +153,16 @@ fn load_directory(
     excluded_directories: &[&str],
     documents: &mut Vec<DocumentSnapshot>,
 ) -> io::Result<()> {
-    let mut entries = fs::read_dir(directory)?.collect::<io::Result<Vec<_>>>()?;
+    let mut entries = fs::read_dir(directory)
+        .and_then(Iterator::collect::<io::Result<Vec<_>>>)
+        .map_err(|error| read_error(directory, &error))?;
     entries.sort_by_key(fs::DirEntry::path);
 
     for entry in entries {
         let path = entry.path();
-        let file_type = entry.file_type()?;
+        let file_type = entry
+            .file_type()
+            .map_err(|error| read_error(&path, &error))?;
 
         if is_hidden(&path) {
             continue;
@@ -176,13 +181,21 @@ fn load_directory(
             .map_err(io::Error::other)?
             .to_path_buf();
 
+        let content = fs::read_to_string(&path).map_err(|error| read_error(&path, &error))?;
         documents.push(DocumentSnapshot {
             path: relative_path,
-            content: fs::read_to_string(path)?,
+            content,
         });
     }
 
     Ok(())
+}
+
+fn read_error(path: &Path, error: &io::Error) -> io::Error {
+    io::Error::new(
+        error.kind(),
+        format!("cannot read {}: {error}", path.display()),
+    )
 }
 
 fn is_hidden(path: &Path) -> bool {
@@ -197,7 +210,6 @@ fn is_excluded(path: &Path, excluded_directories: &[&str]) -> bool {
         .is_some_and(|name| excluded_directories.contains(&name))
 }
 
-#[cfg(any(feature = "python", feature = "rust", test))]
 pub(crate) fn document_has_extension(document: &DocumentSnapshot, extensions: &[String]) -> bool {
     has_extension(&document.path, extensions)
 }
@@ -214,11 +226,14 @@ fn has_extension(path: &Path, extensions: &[String]) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use std::path::{Path, PathBuf};
+    use std::{
+        fs, io,
+        path::{Path, PathBuf},
+    };
 
     use super::{
         ContentHash, DEFAULT_EXCLUDED_DIRECTORIES, DocumentSnapshot, SourceRange,
-        document_has_extension, has_extension, is_excluded, is_hidden,
+        document_has_extension, has_extension, is_excluded, is_hidden, load_documents,
     };
 
     fn document(content: &str) -> DocumentSnapshot {
@@ -310,5 +325,22 @@ mod tests {
 
         assert!(document_has_extension(&document, &["custom".to_owned()]));
         assert!(!document_has_extension(&document, &["rs".to_owned()]));
+    }
+
+    #[test]
+    fn names_a_source_file_that_is_not_utf8() {
+        let directory = tempfile::tempdir().expect("the test folder should be created");
+        let path = directory.path().join("latin1.py");
+        fs::write(&path, b"name = '\xe9'\n").expect("the source file should be written");
+
+        let Err(error) = load_documents(directory.path(), &["py".to_owned()], &[]) else {
+            panic!("a file that is not UTF-8 should stop the load");
+        };
+
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert!(
+            error.to_string().contains(&path.display().to_string()),
+            "the error should name the file: {error}"
+        );
     }
 }

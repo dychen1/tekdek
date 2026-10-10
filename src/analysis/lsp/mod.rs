@@ -1,8 +1,10 @@
 //! Language Server Protocol integration.
 //!
 //! This module owns shared capture models, the resolution policy, and LSP
-//! errors. `client` transports messages and converts coordinates. `capture`
-//! requests and normalizes semantic facts.
+//! errors. `client` runs the server process and transports messages.
+//! `session` runs one server from start to shutdown. `capture` sends the
+//! document requests. `normalize` checks the capture and converts it into
+//! semantic facts.
 //!
 //! # Sections
 //!
@@ -10,30 +12,26 @@
 //! `Policy` defines resolution fallback selection.
 //! `Errors` defines transport and protocol errors.
 
-#[cfg(any(feature = "python", feature = "rust"))]
 pub(crate) mod capture;
 mod client;
-#[cfg(any(feature = "python", feature = "rust"))]
+#[cfg(test)]
+pub(crate) mod fake_server;
+mod normalize;
 pub(crate) mod session;
 
 use std::{error::Error, fmt, io};
 
-#[cfg(any(feature = "python", feature = "rust"))]
 use lsp_types::{DocumentSymbol, Location, Range, SymbolKind, Uri};
 
-#[cfg(any(feature = "python", feature = "rust"))]
 use crate::analysis::fact::ResolutionFallback;
 
-#[cfg(any(feature = "python", feature = "rust"))]
-pub(crate) use client::position_to_byte_offset;
-pub use client::{LspClient, file_uri, uri_path};
+pub(crate) use client::{LspClient, file_uri, uri_path};
 
 // -----------------------------------------------------------------------------
 // Captured Facts
 // -----------------------------------------------------------------------------
 
 /// Preserves protocol values, response grouping, and fact order until normalization.
-#[cfg(any(feature = "python", feature = "rust"))]
 pub(crate) struct SemanticCapture {
     pub(crate) documents: Vec<CapturedDocument>,
     pub(crate) facts: Vec<CapturedSemanticFact>,
@@ -41,7 +39,6 @@ pub(crate) struct SemanticCapture {
 
 /// The relative path identifies the document, exactly as it does in a source
 /// snapshot. Normalization joins the two on that path.
-#[cfg(any(feature = "python", feature = "rust"))]
 pub(crate) struct CapturedDocument {
     pub(crate) path: String,
     pub(crate) uri: Uri,
@@ -51,7 +48,6 @@ pub(crate) struct CapturedDocument {
 /// A protocol symbol site that later becomes a `SymbolAnchor`.
 ///
 /// The selection covers the declared name.
-#[cfg(any(feature = "python", feature = "rust"))]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct ProtocolSymbolSite {
     pub(crate) uri: Uri,
@@ -61,7 +57,6 @@ pub(crate) struct ProtocolSymbolSite {
 }
 
 /// The vectors preserve each grouped protocol response.
-#[cfg(any(feature = "python", feature = "rust"))]
 #[derive(Debug, PartialEq)]
 pub(crate) enum CapturedSemanticFact {
     Call {
@@ -84,7 +79,6 @@ pub(crate) enum CapturedSemanticFact {
 // -----------------------------------------------------------------------------
 
 /// Returns the resolution fallback for one captured protocol symbol.
-#[cfg(any(feature = "python", feature = "rust"))]
 pub(crate) type FallbackPolicy = fn(&ProtocolSymbolSite) -> ResolutionFallback;
 
 // -----------------------------------------------------------------------------
@@ -103,7 +97,6 @@ impl LspError {
         }
     }
 
-    #[cfg(any(feature = "python", feature = "rust"))]
     pub(crate) fn into_message(self) -> String {
         self.message
     }
