@@ -27,7 +27,7 @@ use std::{collections::BTreeSet, io, path::Path};
 
 use serde::{Deserialize, Serialize};
 
-use super::{digest_of, lock_store, read_bytes, reject_symlink, write_json};
+use super::{digest_of, lock_store, read_bytes, reject_symlink, write_bytes};
 use crate::analysis::{
     fact::{EntityKind, RelationKind},
     graph::{Edge, Graph, Node, NodeId, ProvenanceOrigin},
@@ -289,7 +289,18 @@ impl GraphArtifact {
         Ok(artifact)
     }
 
-    /// Writes compact JSON followed by one newline, under the store lock.
+    /// Returns the document as compact JSON followed by one newline.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if serialization fails.
+    pub fn to_bytes(&self) -> io::Result<Vec<u8>> {
+        let mut document = serde_json::to_vec(self).map_err(io::Error::other)?;
+        document.push(b'\n');
+        Ok(document)
+    }
+
+    /// Writes the document into one store file, under the store lock.
     ///
     /// # Errors
     ///
@@ -300,7 +311,7 @@ impl GraphArtifact {
             .filter(|parent| !parent.as_os_str().is_empty())
             .unwrap_or(Path::new("."));
         let _lock = lock_store(directory)?;
-        write_json(path, self)
+        write_bytes(path, &self.to_bytes()?)
     }
 }
 

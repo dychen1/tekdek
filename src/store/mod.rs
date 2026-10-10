@@ -22,7 +22,6 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use serde::Serialize;
 use sha2::{Digest, Sha256};
 
 // -----------------------------------------------------------------------------
@@ -173,23 +172,32 @@ pub(crate) fn read_bytes(path: &Path) -> io::Result<Vec<u8>> {
 // Writes
 // -----------------------------------------------------------------------------
 
-/// Writes compact JSON followed by one newline, atomically.
-pub(crate) fn write_json(path: &Path, value: &impl Serialize) -> io::Result<()> {
-    let mut document = serde_json::to_vec(value).map_err(io::Error::other)?;
-    document.push(b'\n');
-    write_bytes(path, &document)
-}
-
-/// Replaces one file atomically through a synced temporary file in the same directory.
+/// Replaces one store file atomically. The file and its folder must not be symbolic links.
 pub(crate) fn write_bytes(path: &Path, document: &[u8]) -> io::Result<()> {
     if let Some(directory) = path
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
     {
         reject_symlink(directory)?;
-        fs::create_dir_all(directory)?;
     }
     reject_symlink(path)?;
+    atomic_write(path, document)
+}
+
+/// Replaces one file atomically through a synced temporary file in the same folder.
+///
+/// This write takes no store lock and checks no link. It creates a missing folder.
+///
+/// # Errors
+///
+/// Returns an error if the folder, the temporary file, or the rename fails.
+pub fn atomic_write(path: &Path, document: &[u8]) -> io::Result<()> {
+    if let Some(directory) = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
+        fs::create_dir_all(directory)?;
+    }
     let temporary = path.with_extension(format!("{}.tmp", temporary_suffix()));
     let mut file = fs::OpenOptions::new()
         .write(true)

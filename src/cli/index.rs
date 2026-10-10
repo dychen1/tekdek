@@ -15,7 +15,7 @@
 
 use std::{
     collections::BTreeMap,
-    fs,
+    fs, io,
     path::{Path, PathBuf},
 };
 
@@ -26,7 +26,7 @@ use tekdek::{
         language::Language,
     },
     store::{
-        PROJECT_STORE, create_project_store, find_project_store,
+        PROJECT_STORE, atomic_write, create_project_store, find_project_store,
         graph::{GraphArtifact, check_graph_name},
     },
 };
@@ -67,8 +67,7 @@ pub(super) fn run(raw: impl Iterator<Item = String>) -> Result<(), String> {
             .map_err(|error| format!("cannot create the store {}: {error}", store.display()))?;
         println!("created the store {}", store.display());
     }
-    GraphArtifact::new(&result.graph)
-        .write(&destination.output)
+    write_graph(&destination, &GraphArtifact::new(&result.graph))
         .map_err(|error| format!("cannot write {}: {error}", destination.output.display()))?;
 
     println!(
@@ -78,6 +77,15 @@ pub(super) fn run(raw: impl Iterator<Item = String>) -> Result<(), String> {
         destination.output.display()
     );
     Ok(())
+}
+
+/// Writes the graph file: under the store lock into a store, or as one plain file for `--output`.
+fn write_graph(destination: &Destination, artifact: &GraphArtifact) -> io::Result<()> {
+    if destination.indexed.is_some() {
+        artifact.write(&destination.output)
+    } else {
+        atomic_write(&destination.output, &artifact.to_bytes()?)
+    }
 }
 
 /// Builds pipeline configuration from files and command-line overrides.
@@ -342,11 +350,14 @@ mod tests {
     use std::fs;
     use std::path::PathBuf;
 
-    use tekdek::analysis::language::Language;
+    use tekdek::{
+        analysis::{graph::Graph, language::Language},
+        store::graph::GraphArtifact,
+    };
 
     #[cfg(feature = "rust")]
     use super::pipeline_config;
-    use super::{Arguments, Destination, artifact_destination, artifact_file, run};
+    use super::{Arguments, Destination, artifact_destination, artifact_file, run, write_graph};
 
     fn parse(arguments: &[&str]) -> Result<Arguments, String> {
         Arguments::parse(arguments.iter().map(|value| (*value).to_owned()))
@@ -570,6 +581,47 @@ mod tests {
             artifact_destination(&parse(&["project", "--output", "other.json"]).expect("args"))
                 .expect("destination");
         assert_eq!(explicit.indexed, None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn writes_an_output_file_through_a_linked_folder_and_takes_no_store_lock() {
+        let directory = tempfile::tempdir().expect("folder");
+        let real = directory.path().join("real");
+        std::fs::create_dir(&real).expect("real folder");
+        let linked = directory.path().join("linked");
+        std::os::unix::fs::symlink(&real, &linked).expect("folder link");
+        let artifact = GraphArtifact::new(&Graph {
+            nodes: Vec::new(),
+            edges: Vec::new(),
+        });
+        let names = |folder: &std::path::Path| -> Vec<String> {
+            std::fs::read_dir(folder)
+                .expect("list")
+                .map(|entry| {
+                    entry
+                        .expect("entry")
+                        .file_name()
+                        .into_string()
+                        .expect("name")
+                })
+                .collect()
+        };
+
+        for (output, folder) in [
+            (linked.join("graph.json"), real.clone()),
+            (linked.join("out/graph.json"), real.join("out")),
+        ] {
+            let arguments =
+                parse(&["project", "--output", output.to_str().expect("path")]).expect("args");
+            let destination = artifact_destination(&arguments).expect("destination");
+            write_graph(&destination, &artifact).expect("write through the link");
+            assert!(names(&folder).contains(&"graph.json".to_owned()));
+            assert!(
+                !names(&folder).contains(&".store.lock".to_owned()),
+                "{folder:?}"
+            );
+        }
     }
 
     #[test]
