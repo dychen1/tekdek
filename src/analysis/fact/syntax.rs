@@ -32,21 +32,36 @@ impl SyntaxFactBuilder {
 
     /// Adds one module under its relative source path.
     ///
+    /// The module scope and body cover the whole source. Content hashes and
+    /// position lookups rely on this rule.
+    ///
     /// # Errors
     ///
-    /// Returns an error if the path already names a module.
-    pub fn add_module(
-        &mut self,
-        path: &str,
-        evidence: EntityEvidence,
-    ) -> Result<EntityKey, AnalysisError> {
+    /// Returns an error if the path already names a module or the source is
+    /// too large.
+    pub fn add_module(&mut self, path: &str, source: &str) -> Result<EntityKey, AnalysisError> {
         let key = EntityKey::module(path);
         if self.entity_positions.contains_key(&key) {
             return Err(AnalysisError::new(format!(
                 "duplicate source module: {key}"
             )));
         }
-        self.push_entity(key.clone(), path.to_owned(), EntityKind::Module, evidence);
+        let end = u32::try_from(source.len())
+            .map_err(|_| AnalysisError::new(format!("the {path} source is too large")))?;
+        let whole_source = Some(SourceRange { start: 0, end });
+        self.push_entity(
+            key.clone(),
+            path.to_owned(),
+            EntityKind::Module,
+            EntityEvidence {
+                path: path.to_owned(),
+                declarations: Vec::new(),
+                scope: whole_source,
+                body: whole_source,
+                type_inputs: Vec::new(),
+                type_outputs: Vec::new(),
+            },
+        );
         Ok(key)
     }
 
@@ -198,7 +213,7 @@ mod tests {
     fn assigns_ordinals_after_entity_key_collisions() {
         let mut facts = SyntaxFactBuilder::new();
         let module = facts
-            .add_module("app.py", evidence())
+            .add_module("app.py", "")
             .expect("the module key must be unique");
 
         let first = facts.add_entity(&module, "Router".to_owned(), class(), evidence());

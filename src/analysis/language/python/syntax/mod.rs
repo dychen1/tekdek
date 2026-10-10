@@ -11,7 +11,7 @@
 //!
 //! `Entry Points` defines source selection and fact extraction.
 //! `Source Model` defines parsed documents, scopes, and extraction state.
-//! `Document Parsing` validates paths, derives module names, and parses documents.
+//! `Document Parsing` derives module names and parses documents.
 //! `Fact Construction` registers modules before statement traversal.
 //! `Statement Traversal` processes Python suites.
 //! `Fields` extracts class and instance fields.
@@ -28,7 +28,6 @@ mod signature;
 use std::{
     collections::{HashMap, HashSet},
     ffi::OsStr,
-    path::Component,
 };
 
 use rustpython_parser::{
@@ -45,6 +44,7 @@ use crate::analysis::{
         AnalysisError, CallableData, CallableKind, EntityEvidence, EntityKey, EntityKind,
         RelationKind, SyntaxFactBuilder, SyntaxFacts, TypeData, TypeKind,
     },
+    language::document_path,
     source::{DocumentSnapshot, SourceRange, SourceSpan, Sources, document_has_extension},
 };
 
@@ -232,41 +232,6 @@ fn parse_document(document: &DocumentSnapshot) -> Result<ParsedDocument<'_>, Ana
     })
 }
 
-/// Returns one strict relative UTF-8 document path.
-///
-/// # Errors
-///
-/// Returns an error if the document path is absolute or has an invalid part.
-fn document_path(document: &DocumentSnapshot) -> Result<&str, AnalysisError> {
-    if document.path.is_absolute() {
-        return Err(AnalysisError {
-            message: format!(
-                "the document path must be relative: {}",
-                document.path.display()
-            ),
-        });
-    }
-    if document
-        .path
-        .components()
-        .any(|component| !matches!(component, Component::Normal(_)))
-    {
-        return Err(AnalysisError {
-            message: format!(
-                "the document path must contain only normal components: {}",
-                document.path.display()
-            ),
-        });
-    }
-
-    document.path.to_str().ok_or_else(|| AnalysisError {
-        message: format!(
-            "the document path is not valid UTF-8: {}",
-            document.path.display()
-        ),
-    })
-}
-
 // -----------------------------------------------------------------------------
 // Fact Construction
 // -----------------------------------------------------------------------------
@@ -286,20 +251,12 @@ fn produce_document_facts(documents: &[ParsedDocument<'_>]) -> Result<SyntaxFact
         walker.add_module(document)?;
     }
     for document in documents {
-        let module = walker
-            .module_keys
-            .get(&document.module_name)
-            .cloned()
-            .ok_or_else(|| {
-                AnalysisError::new(format!(
-                    "the {} module was not registered",
-                    document.module_name
-                ))
-            })?;
         walker.scan_statements(
             document,
             &document.syntax_tree,
-            &Scope::Module { node: module },
+            &Scope::Module {
+                node: EntityKey::module(&document.path),
+            },
         )?;
     }
 
@@ -320,20 +277,7 @@ impl SyntaxWalker {
     ///
     /// Returns an error if the module name repeats or the source is too large.
     fn add_module(&mut self, document: &ParsedDocument<'_>) -> Result<(), AnalysisError> {
-        let end = u32::try_from(document.source.len()).map_err(|_| {
-            AnalysisError::new(format!("the {} source is too large", document.path))
-        })?;
-        let module = self.builder.add_module(
-            &document.path,
-            EntityEvidence {
-                path: document.path.clone(),
-                declarations: Vec::new(),
-                scope: Some(SourceRange { start: 0, end }),
-                body: Some(SourceRange { start: 0, end }),
-                type_inputs: Vec::new(),
-                type_outputs: Vec::new(),
-            },
-        )?;
+        let module = self.builder.add_module(&document.path, document.source)?;
         if self.module_keys.contains_key(&document.module_name) {
             return Err(AnalysisError::new(format!(
                 "duplicate source unit: {}",
@@ -655,7 +599,7 @@ impl SyntaxWalker {
         declared_type: Option<String>,
     ) -> Result<(), AnalysisError> {
         match target {
-            // Record a direct class field.
+            // Record a direct class field. The parser limits a name range to the name.
             Expr::Name(target) => {
                 if let Some(class) = scope.direct_class() {
                     self.builder.add_or_extend_field(
@@ -663,7 +607,7 @@ impl SyntaxWalker {
                         target.id.as_str(),
                         &document.path,
                         declared_type,
-                        assigned_name_range(target.range),
+                        text_range(target.range),
                     );
                 }
             }
@@ -776,10 +720,7 @@ impl SyntaxWalker {
 fn source_span(path: &str, range: TextRange) -> SourceSpan {
     SourceSpan {
         path: path.to_owned(),
-        range: SourceRange {
-            start: range.start().to_u32(),
-            end: range.end().to_u32(),
-        },
+        range: text_range(range),
     }
 }
 
@@ -808,10 +749,7 @@ fn class_or_callable_evidence(
             definition_range,
             name,
         )?],
-        scope: Some(SourceRange {
-            start: definition_range.start().to_u32(),
-            end: definition_range.end().to_u32(),
-        }),
+        scope: Some(text_range(definition_range)),
         body: owned_suite_range(source, body)?,
         type_inputs: Vec::new(),
         type_outputs: Vec::new(),
@@ -847,11 +785,7 @@ fn callable_annotations(callable: &CallableSyntax<'_>) -> CallableAnnotations {
 /// Adds one annotation range when the annotation exists.
 fn push_annotation_range(ranges: &mut Vec<SourceRange>, annotation: Option<&Expr>) {
     if let Some(annotation) = annotation {
-        let range = annotation.range();
-        ranges.push(SourceRange {
-            start: range.start().to_u32(),
-            end: range.end().to_u32(),
-        });
+        ranges.push(text_range(annotation.range()));
     }
 }
 
@@ -879,13 +813,10 @@ fn instance_field_name_range(
     })
 }
 
-/// Returns the declaration range for one assigned `Expr::Name` target.
-///
-/// `RustPython` limits this syntax range to the exact assigned name.
-fn assigned_name_range(name_range: TextRange) -> SourceRange {
+fn text_range(range: TextRange) -> SourceRange {
     SourceRange {
-        start: name_range.start().to_u32(),
-        end: name_range.end().to_u32(),
+        start: range.start().to_u32(),
+        end: range.end().to_u32(),
     }
 }
 
