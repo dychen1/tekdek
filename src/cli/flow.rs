@@ -17,12 +17,14 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use tekdek::flow::{
-    AGENT_OUTPUT_SCHEMA, current_flow,
-    import::{self, ImportOutcome, ImportRequest},
-    lineage,
-    models::{Author, FlowArtifact, FlowIssue, wire_name},
-    verify,
+use tekdek::{
+    catalog,
+    flow::{
+        AGENT_OUTPUT_SCHEMA, current_flow,
+        import::{self, ImportOutcome, ImportRequest},
+        models::{Author, FlowArtifact, FlowIssue, wire_name},
+        verify,
+    },
 };
 
 use super::{failure, render, required, split_arguments, store_directory};
@@ -194,7 +196,7 @@ fn execute(command: Command, input: &mut impl Read) -> Result<(u8, String), Box<
 
 /// Lists flows with their freshness.
 fn list(directory: &Path, json: bool, graph: Option<&str>) -> Result<(u8, String), Box<dyn Error>> {
-    let listings = lineage::list_flows(directory, graph)?;
+    let listings = catalog::list_flows(directory, graph)?;
     let lines: Vec<_> = listings
         .iter()
         .map(|item| {

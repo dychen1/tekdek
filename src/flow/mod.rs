@@ -7,7 +7,7 @@
 //!
 //! # Modules
 //! `models` the serde types. `import` freezes one agent output. `verify` checks
-//! the current generation. `lineage` owns the store layout and listings.
+//! the current generation. `lineage` owns the store layout.
 //! `validate`, `assign`, and `derive` hold the rules; `canonical` and `text` the
 //! canonical forms.
 //!

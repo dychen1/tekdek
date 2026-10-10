@@ -1,16 +1,15 @@
 //! Flow lineages in the store.
 //!
-//! This module owns the store layout of frozen flows, their reads and atomic
-//! writes, and their listings. The store directory is the input.
+//! This module owns the store layout of frozen flows, and their reads and atomic
+//! writes. The store directory is the input.
 //!
 //! Layout:
 //! `flows/<flowId>/generations/<ordinal>-<digest12>.json` holds one frozen
 //! generation. `flows/<flowId>/current.json` names the current generation.
 //!
 //! # Sections
-//! `Reads` reads the current or a named generation.
+//! `Reads` reads the current or a named generation, and lists the lineages.
 //! `Writes` freezes one generation and moves the pointer.
-//! `Listings` lists lineages for the catalog and the CLI.
 //! `Errors` reports failures.
 
 use std::{
@@ -21,10 +20,7 @@ use std::{
 use serde::{Deserialize, Serialize};
 
 use super::models::{FLOW_ARTIFACT_SCHEMA_VERSION, FlowArtifact, FlowId, Sha256Digest};
-use crate::store::{
-    graph::{check_graph_name, read_graph},
-    reject_symlink, write_bytes,
-};
+use crate::store::{reject_symlink, write_bytes};
 
 /// Names the current generation of one flow.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -140,6 +136,38 @@ pub fn parse_artifact(bytes: &[u8]) -> Result<FlowArtifact, LineageError> {
     Ok(serde_json::from_slice(bytes)?)
 }
 
+/// Lists the flow IDs that have a current pointer, in name order.
+///
+/// # Errors
+/// Returns an error for a link or a directory failure.
+pub fn lineage_ids(directory: &Path) -> io::Result<Vec<FlowId>> {
+    let flows = directory.join("flows");
+    reject_symlink(&flows)?;
+    let entries = match fs::read_dir(&flows) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(vec![]),
+        Err(error) => return Err(error),
+    };
+    let mut ids = Vec::new();
+    for entry in entries {
+        let entry = entry?;
+        if !entry.file_type()?.is_dir() {
+            continue;
+        }
+        let Ok(name) = entry.file_name().into_string() else {
+            continue;
+        };
+        let Ok(id) = FlowId::try_from(name) else {
+            continue;
+        };
+        if entry.path().join("current.json").is_file() {
+            ids.push(id);
+        }
+    }
+    ids.sort();
+    Ok(ids)
+}
+
 // -----------------------------------------------------------------------------
 // Writes
 // -----------------------------------------------------------------------------
@@ -180,123 +208,6 @@ pub fn write_current(directory: &Path, artifact: &FlowArtifact) -> Result<String
     pointer_bytes.push(b'\n');
     write_bytes(&lineage.join("current.json"), &pointer_bytes)?;
     Ok(file)
-}
-
-// -----------------------------------------------------------------------------
-// Listings
-// -----------------------------------------------------------------------------
-
-/// One flow listing. `file` is relative to `flows/`.
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct FlowListing {
-    pub name: String,
-    pub file: String,
-    pub schema_version: u32,
-    pub behavior: String,
-    pub step_count: usize,
-    pub cluster_count: usize,
-    pub stale: bool,
-}
-
-/// One listing and the graph binding that decides its freshness.
-pub struct LineageListing {
-    pub graph_artifact: String,
-    pub graph_digest: String,
-    pub listing: FlowListing,
-}
-
-/// Lists the current generation of every lineage. An invalid lineage produces a warning.
-///
-/// `stale` stays false: the caller compares `graph_digest` with the graph it holds.
-///
-/// # Errors
-/// Returns an error for a link or a directory failure.
-pub fn lineage_listings(directory: &Path) -> io::Result<Vec<LineageListing>> {
-    let mut listings = Vec::new();
-    for id in lineage_ids(directory)? {
-        let current = match read_current(directory, &id) {
-            Ok(Some(current)) => current,
-            Ok(None) => continue,
-            Err(error) => {
-                eprintln!("warning: skipping the flow {id}: {error}");
-                continue;
-            }
-        };
-        let artifact = current.artifact;
-        listings.push(LineageListing {
-            graph_artifact: artifact.facts.binding.graph_artifact.clone(),
-            graph_digest: artifact.facts.binding.graph_digest.to_string(),
-            listing: FlowListing {
-                name: id.to_string(),
-                file: current.file,
-                schema_version: FLOW_ARTIFACT_SCHEMA_VERSION,
-                behavior: artifact.intent.behavior,
-                step_count: artifact.intent.steps.len(),
-                cluster_count: artifact.intent.clusters.len(),
-                stale: false,
-            },
-        });
-    }
-    Ok(listings)
-}
-
-/// Lists flows in name order, with an optional graph filter.
-///
-/// A flow is stale when its bound graph changed or is missing.
-///
-/// # Errors
-/// Returns an error for an invalid graph name, a link, or a directory failure.
-pub fn list_flows(directory: &Path, graph_file: Option<&str>) -> io::Result<Vec<FlowListing>> {
-    if let Some(file) = graph_file {
-        check_graph_name(file)?;
-    }
-    let mut result = Vec::new();
-    for lineage in lineage_listings(directory)? {
-        if graph_file.is_some_and(|file| file != lineage.graph_artifact) {
-            continue;
-        }
-        let stale = read_graph(directory, &lineage.graph_artifact)
-            .map_or(true, |(_, digest)| digest != lineage.graph_digest);
-        result.push(FlowListing {
-            stale,
-            ..lineage.listing
-        });
-    }
-    result.sort_by(|left, right| left.name.cmp(&right.name));
-    Ok(result)
-}
-
-/// Lists the flow IDs that have a current pointer, in name order.
-///
-/// # Errors
-/// Returns an error for a link or a directory failure.
-pub fn lineage_ids(directory: &Path) -> io::Result<Vec<FlowId>> {
-    let flows = directory.join("flows");
-    reject_symlink(&flows)?;
-    let entries = match fs::read_dir(&flows) {
-        Ok(entries) => entries,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(vec![]),
-        Err(error) => return Err(error),
-    };
-    let mut ids = Vec::new();
-    for entry in entries {
-        let entry = entry?;
-        if !entry.file_type()?.is_dir() {
-            continue;
-        }
-        let Ok(name) = entry.file_name().into_string() else {
-            continue;
-        };
-        let Ok(id) = FlowId::try_from(name) else {
-            continue;
-        };
-        if entry.path().join("current.json").is_file() {
-            ids.push(id);
-        }
-    }
-    ids.sort();
-    Ok(ids)
 }
 
 fn flows_path(directory: &Path) -> io::Result<PathBuf> {
