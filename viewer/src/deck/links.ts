@@ -12,6 +12,8 @@ export function createLinks(ctx: DeckContext): Links {
   const tetherG = $("#tetherG"), tetherEl = $("#tetherPath"), tetherDot = $("#tetherDot");
   const arrowG = $("#arrowG"), arrEl = $("#arrPath"), arrHead = $("#arrHead"), arrDot = $("#arrDot");
   const sbTree = $("#sbTree"), codeHead = $("#codeHead"), frameEl = $("#frame");
+  /** Hides every connector. */
+  const hideAll = () => { for (const g of [guideG, tetherG, arrowG]) g.classList.add("away"); };
 
   /** Draws the guide from the end of the explorer row straight across to the file node. */
   function drawGuide(): boolean {
@@ -53,18 +55,12 @@ export function createLinks(ctx: DeckContext): Links {
 
   function draw() {
     links.style.setProperty("--lk", clamp(state.zoom, 0.6, 1.4).toFixed(2));
-    if (state.full) {
-      guideG.style.display = "none"; tetherG.style.display = "none"; arrowG.classList.add("away");
-      return;
-    }
+    if (state.full) { hideAll(); return; }
     const lid = ctx.parts.clusterDeck.currentLid();
-    guideG.style.display = drawGuide() ? "inline" : "none";
-    tetherG.style.display = drawTether(lid) ? "inline" : "none";
+    guideG.classList.toggle("away", !drawGuide());
+    tetherG.classList.toggle("away", !drawTether(lid));
     arrowG.classList.toggle("away", !drawArrow(lid));
   }
 
-  return {
-    draw,
-    destroy() { guideG.style.display = "none"; tetherG.style.display = "none"; arrowG.classList.add("away"); },
-  };
+  return { draw, destroy: hideAll };
 }

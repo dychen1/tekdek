@@ -39,7 +39,7 @@ export function createClusterDeck(ctx: DeckContext): ClusterDeck {
     if (!cluster) return null;
     const keys = model.members.get(id) ?? [];
     const cam = document.createElement("div");
-    cam.className = "deckcam noanim"; cam.style.setProperty("--c", cluster.cv);
+    cam.className = "deckcam noanim"; cam.style.setProperty("--c", cluster.cv); cam.style.setProperty("--deck-z", `${DECK_Z}px`);
     cam.innerHTML = `<div class="slab" style="width:${model.deckSize.width}px;height:${deckHeight(keys.length)}px"><div class="shadow"></div><div class="deck"><div class="dfront"></div>` +
       `<div class="dtop"><div class="dlabel"><span class="dname">flow functions in this cluster</span></div></div></div></div>`;
     const boxes = keys.map((key, i) => {

@@ -7,7 +7,9 @@ import { clamp, f1, mono } from "./util.ts";
 // ============ constants ============
 
 export const TILT = 15, COS = Math.cos(TILT * Math.PI / 180), SIN = Math.sin(TILT * Math.PI / 180);
-export const DECK_Z = 170, BOX_H = 28, FOCUS_DZ = 30, DECK_IN = 26, BAND = 56, PITCH = 40, SHADOW = 12;
+/** The deck's height above the base plane. The deck camera passes it to CSS as `--deck-z`. */
+export const DECK_Z = 170;
+export const DECK_IN = 26, BAND = 56, PITCH = 40, SHADOW = 12;
 /** The pinned deck: its top edge sits DECK_TOP below the frame top, and its right edge leaves ARROW_GAP for the arrow's curve. */
 export const DECK_TOP = 120, ARROW_GAP = 90, MIN_DECK_W = 272;
 /** The file box's left edge, from the frame's left edge. */

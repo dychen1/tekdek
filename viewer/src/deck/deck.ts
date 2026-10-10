@@ -193,10 +193,7 @@ export function createDeck(options: DeckOptions): DeckInstance {
   }
 
   /** The `d` attribute of a connector path, or null when the connector is hidden. */
-  const pathOf = (group: string, path: string, hidden: (g: SVGGElement) => boolean) => {
-    const g = $<SVGGElement>(group);
-    return hidden(g) ? null : $<SVGPathElement>(path).getAttribute("d");
-  };
+  const pathOf = (group: string, path: string) => ($(group).classList.contains("away") ? null : $(path).getAttribute("d"));
 
   return {
     go, destroy,
@@ -210,9 +207,9 @@ export function createDeck(options: DeckOptions): DeckInstance {
       deckRect: () => rectOf(cv.querySelector(".deckcam")),
       fileNodeRect: () => rectOf(fileBox.nodeEl()),
       paths: () => ({
-        guide: pathOf("#guideG", "#guidePath", g => g.style.display === "none"),
-        tether: pathOf("#tetherG", "#tetherPath", g => g.style.display === "none"),
-        arrow: pathOf("#arrowG", "#arrPath", g => g.classList.contains("away")),
+        guide: pathOf("#guideG", "#guidePath"),
+        tether: pathOf("#tetherG", "#tetherPath"),
+        arrow: pathOf("#arrowG", "#arrPath"),
       }),
     },
   };

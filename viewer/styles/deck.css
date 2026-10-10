@@ -65,8 +65,8 @@
   --key-lift-shadow:0 5px 6px color-mix(in srgb,var(--tn-black) 85%,transparent);
   --front-mix:44%;
   --icon-stroke:1.5;
-  /* geometry: a straight 15 degree pitch, no yaw; the script reads the same numbers */
-  --deck-z:170px; --deck-t:30px; --box-h:28px; --focus-dz:30px; --shadow-dy:28px; --bh:32px;
+  /* geometry of the deck and its boxes; the deck camera sets --deck-z from DECK_Z in layout/deck-geometry.ts */
+  --deck-t:30px; --box-h:28px; --focus-dz:30px; --shadow-dy:28px; --bh:32px;
   --ease-lift:cubic-bezier(.45,.05,.25,1);
   --ease-rise:cubic-bezier(.22,1.22,.42,1);
   --ease-sink:cubic-bezier(.55,0,.85,.35);
@@ -197,15 +197,15 @@ code{font:inherit;color:var(--keyword)}
 
 /* ============ connectors: three at most, in screen space, from the rects they join ============ */
 .links{position:fixed;inset:0;width:100vw;height:100vh;z-index:7;pointer-events:none;overflow:visible;--lk:1}
+/* a connector that cannot be drawn carries .away */
+.links .away{display:none}
 /* (a) guide: the explorer row's tree guide, continued straight into the file box */
-.guide{display:none}
 .guide path{fill:none;stroke:var(--line);stroke-width:1px;stroke-linecap:butt;stroke-linejoin:round}
 /* (b) tether: the current slot to the current box, the arrow's curve and stroke in the cluster color */
-.tether{display:none;--c:var(--cc)}
+.tether{--c:var(--cc)}
 .tether .tp{fill:none;stroke:var(--c);stroke-width:1.5;stroke-linecap:butt}
 .tether .td{fill:var(--c)}
 /* (c) stack arrow: the current box to the code header, in the accent. Connectors never animate: drawn at their final shape. */
-.arrowg.away{display:none}
 .arrowg .arr{fill:none;stroke:var(--accent);stroke-width:1.5;stroke-linecap:butt}
 .arrowg .head,.arrowg .dot{fill:var(--accent)}
 
