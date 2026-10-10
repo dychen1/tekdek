@@ -58,7 +58,7 @@ pub(super) fn run(raw: impl Iterator<Item = String>) -> Result<(), String> {
     }
     let config =
         pipeline_config(&arguments, &destination.root).map_err(|error| error.to_string())?;
-    let result = analysis::run(&config).map_err(|error| error.to_string())?;
+    let graph = analysis::run(&config).map_err(|error| error.to_string())?;
     // Create a new store only after the analysis succeeds, so a failed first index leaves no store.
     if destination.create_store
         && let Some((store, _)) = &destination.indexed
@@ -67,13 +67,13 @@ pub(super) fn run(raw: impl Iterator<Item = String>) -> Result<(), String> {
             .map_err(|error| format!("cannot create the store {}: {error}", store.display()))?;
         println!("created the store {}", store.display());
     }
-    write_graph(&destination, &GraphArtifact::new(&result.graph))
+    write_graph(&destination, &GraphArtifact::new(&graph))
         .map_err(|error| format!("cannot write {}: {error}", destination.output.display()))?;
 
     println!(
         "{} nodes, {} edges -> {}",
-        result.graph.nodes.len(),
-        result.graph.edges.len(),
+        graph.nodes.len(),
+        graph.edges.len(),
         destination.output.display()
     );
     Ok(())

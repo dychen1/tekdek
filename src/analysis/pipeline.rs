@@ -6,7 +6,6 @@
 //!
 //! `Stages` runs the analysis.
 //! `Configuration` defines the required root and optional settings.
-//! `Result` names every output.
 //! `Errors` reports a failure from any stage.
 
 use std::{
@@ -38,7 +37,7 @@ use super::{
 /// # Errors
 ///
 /// Returns an error if loading, fact production, or graph construction fails.
-pub fn run(config: &PipelineConfig) -> Result<PipelineResult, PipelineError> {
+pub fn run(config: &PipelineConfig) -> Result<Graph, PipelineError> {
     let documents = load_documents(config)?;
     let profiles = detect_required_languages(&documents, &config.profiles)?;
     preflight_server_programs(&profiles)?;
@@ -48,8 +47,7 @@ pub fn run(config: &PipelineConfig) -> Result<PipelineResult, PipelineError> {
         fact_sets.push(produce_facts(&config.root, profile, &documents)?);
     }
 
-    let graph = build_graph(fact_sets, &documents).map_err(PipelineError::Graph)?;
-    Ok(PipelineResult { graph })
+    build_graph(fact_sets, &documents).map_err(PipelineError::Graph)
 }
 
 /// Returns the enabled languages that have source files under the root, in stable order.
@@ -122,14 +120,6 @@ impl PipelineConfig {
             profiles: builtin_profiles(),
         }
     }
-}
-
-// -----------------------------------------------------------------------------
-// Result
-// -----------------------------------------------------------------------------
-
-pub struct PipelineResult {
-    pub graph: Graph,
 }
 
 // -----------------------------------------------------------------------------
@@ -216,8 +206,8 @@ mod tests {
         let server = FakeServer::new();
         let config = pipeline_config(&repository, &server, "serve");
 
-        let result = run(&config).expect("both fake language servers should complete");
-        let artifact = GraphArtifact::new(&result.graph);
+        let graph = run(&config).expect("both fake language servers should complete");
+        let artifact = GraphArtifact::new(&graph);
         let artifact =
             serde_json::to_value(artifact).expect("the artifact should serialize to JSON");
 
