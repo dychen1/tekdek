@@ -17,7 +17,7 @@
 mod paths;
 mod signature;
 
-use std::{collections::HashMap, path::Component};
+use std::collections::HashMap;
 
 use paths::{ModulePath, crate_roots, module_path, relative_module_path};
 use signature::{
@@ -36,6 +36,7 @@ use crate::analysis::{
         AnalysisError, CallableData, CallableKind, EntityEvidence, EntityKey, EntityKind,
         FieldData, RelationKind, SyntaxFactBuilder, SyntaxFacts, TypeData, TypeKind,
     },
+    language::document_path,
     source::{DocumentSnapshot, SourceRange, SourceSpan, Sources, document_has_extension},
 };
 
@@ -91,7 +92,7 @@ fn parse_document(document: &DocumentSnapshot) -> Result<ParsedDocument<'_>, Ana
     let path = document_path(document)?.to_owned();
     let syntax = syn::parse_file(&document.content)
         .map_err(|error| AnalysisError::new(format!("cannot parse Rust source {path}: {error}")))?;
-    let lines = LineIndex::new(&document.content)?;
+    let lines = LineIndex::new(&document.content);
 
     Ok(ParsedDocument {
         path,
@@ -99,33 +100,6 @@ fn parse_document(document: &DocumentSnapshot) -> Result<ParsedDocument<'_>, Ana
         syntax,
         lines,
         module_path: ModulePath::default(),
-    })
-}
-
-/// Returns one strict relative UTF-8 document path.
-fn document_path(document: &DocumentSnapshot) -> Result<&str, AnalysisError> {
-    if document.path.is_absolute() {
-        return Err(AnalysisError::new(format!(
-            "the document path must be relative: {}",
-            document.path.display()
-        )));
-    }
-    if document
-        .path
-        .components()
-        .any(|component| !matches!(component, Component::Normal(_)))
-    {
-        return Err(AnalysisError::new(format!(
-            "the document path must contain only normal components: {}",
-            document.path.display()
-        )));
-    }
-
-    document.path.to_str().ok_or_else(|| {
-        AnalysisError::new(format!(
-            "the document path is not valid UTF-8: {}",
-            document.path.display()
-        ))
     })
 }
 
@@ -165,9 +139,7 @@ struct LineIndex {
 }
 
 impl LineIndex {
-    fn new(source: &str) -> Result<Self, AnalysisError> {
-        u32::try_from(source.len())
-            .map_err(|_| AnalysisError::new("the Rust source is too large"))?;
+    fn new(source: &str) -> Self {
         // The parser removes a byte order mark before it counts line-1 columns.
         let mut starts = vec![if source.starts_with('\u{feff}') {
             '\u{feff}'.len_utf8()
@@ -180,10 +152,10 @@ impl LineIndex {
                 .enumerate()
                 .filter_map(|(offset, byte)| (byte == b'\n').then_some(offset + 1)),
         );
-        Ok(Self {
+        Self {
             starts,
             source_len: source.len(),
-        })
+        }
     }
 
     /// Converts a parser location to one UTF-8 byte offset.
@@ -304,19 +276,7 @@ impl RustSyntaxWalker {
 
     /// Registers one file module before item traversal starts.
     fn register_file_module(&mut self, document: &ParsedDocument<'_>) -> Result<(), AnalysisError> {
-        let end = u32::try_from(document.source.len())
-            .map_err(|_| AnalysisError::new("the Rust source is too large"))?;
-        let module = self.builder.add_module(
-            &document.path,
-            EntityEvidence {
-                path: document.path.clone(),
-                declarations: Vec::new(),
-                scope: Some(SourceRange { start: 0, end }),
-                body: Some(SourceRange { start: 0, end }),
-                type_inputs: Vec::new(),
-                type_outputs: Vec::new(),
-            },
-        )?;
+        let module = self.builder.add_module(&document.path, document.source)?;
         self.modules
             .entry(document.module_path.clone())
             .or_default()
