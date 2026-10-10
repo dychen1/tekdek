@@ -233,3 +233,52 @@ fn contains(range: SourceRange, offset: u32) -> bool {
 fn range_width(range: SourceRange) -> u32 {
     range.end.saturating_sub(range.start)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::SyntaxGraphIndex;
+    use crate::analysis::{
+        fact::EntityKind,
+        graph::{
+            NodeId,
+            build::SyntaxGraph,
+            fixtures::{function, node},
+        },
+        language::Language,
+    };
+
+    #[test]
+    fn finds_exact_declarations_and_deepest_body_owners() {
+        let graph = SyntaxGraph {
+            nodes: vec![
+                node(0, "app.py", EntityKind::Module, Vec::new(), Some((0, 100))),
+                node(1, "app.py", function(), vec![(10, 15)], Some((20, 90))),
+                node(2, "app.py", function(), vec![(30, 35)], Some((40, 80))),
+            ],
+            syntax_edges: Vec::new(),
+        };
+        let lookup = SyntaxGraphIndex::new(&graph);
+
+        assert_eq!(
+            lookup.declaration_at(Language::Python, "app.py", 32),
+            Some(NodeId(2))
+        );
+        assert_eq!(
+            lookup.body_owner_at(Language::Python, "app.py", 50),
+            Some(NodeId(2))
+        );
+        assert_eq!(
+            lookup.body_owner_at(Language::Python, "app.py", 32),
+            Some(NodeId(1))
+        );
+        assert_eq!(
+            lookup.scope_owner_at(Language::Python, "app.py", 12),
+            Some(NodeId(1))
+        );
+        assert_eq!(
+            lookup.callable_or_module_body_owner_at(Language::Python, "app.py", 12),
+            Some(NodeId(0))
+        );
+        assert_eq!(lookup.body_owner_at(Language::Python, "other.py", 50), None);
+    }
+}
