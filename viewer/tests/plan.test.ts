@@ -8,7 +8,7 @@ import { buildPlan, memberOrder, nextStepOfFile, rangesOf } from "../src/layout/
 
 import { artifact, DIGEST, graphDocument, must } from "./fixtures.ts";
 
-const graph = deckGraph(graphDocument(), "demo");
+const graph = deckGraph(graphDocument());
 const flow = deckFlow(artifact, graph, DIGEST);
 const fileOf = (key: string) => graph.functions.find(fn => fn.id === key)?.file;
 const plan = buildPlan(flow, fileOf);

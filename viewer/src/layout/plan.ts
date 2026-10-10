@@ -54,7 +54,7 @@ export function buildPlan(flow: DeckFlow, fileOf: (key: string) => string | unde
 // ============ runs and visits ============
 
 /** Returns the run that holds a step, or null. */
-export const runAt = (plan: FlowPlan, index: number) => plan.runs.find(run => index >= run.start && index <= run.end) ?? null;
+const runAt = (plan: FlowPlan, index: number) => plan.runs.find(run => index >= run.start && index <= run.end) ?? null;
 
 /** Returns the step ranges of a cluster, for example "1–4, 15–20, 37". */
 export const rangesOf = (plan: FlowPlan, cluster: string) => plan.runs.filter(run => run.cluster === cluster)

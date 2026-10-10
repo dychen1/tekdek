@@ -5,8 +5,6 @@
 import type { ArtifactEntry, FlowEntry } from "../data/models.ts";
 import { esc, plural } from "../layout/util.ts";
 
-export { esc } from "../layout/util.ts";
-
 // ============ helpers ============
 
 export const icon = (name: string) => `<svg class="ic" aria-hidden="true"><use href="#i-${name}"/></svg>`;

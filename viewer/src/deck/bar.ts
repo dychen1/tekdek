@@ -4,8 +4,8 @@
    # Sections
    step strip, explainer, buttons */
 import { rangesOf } from "../layout/plan.ts";
-import { clamp, f1, plural } from "../layout/util.ts";
-import { esc, md } from "./markup.ts";
+import { clamp, esc, f1, plural } from "../layout/util.ts";
+import { md } from "./markup.ts";
 import { $, type Bar, type DeckContext } from "./context.ts";
 
 export function createBar(ctx: DeckContext): Bar {

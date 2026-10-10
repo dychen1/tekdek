@@ -2,8 +2,8 @@
    a cast shadow, and one lifted box for each member in first-visit order. A cluster change replaces the deck in one frame.
    A box goes to its first step. */
 import { boxWidth, deckHeight, deckTransform, DECK_Z, home } from "../layout/deck-geometry.ts";
-import { f1 } from "../layout/util.ts";
-import { esc, PTR } from "./markup.ts";
+import { esc, f1 } from "../layout/util.ts";
+import { PTR } from "./markup.ts";
 import type { ClusterView } from "../layout/model.ts";
 import { $, type ClusterDeck, type DeckContext } from "./context.ts";
 

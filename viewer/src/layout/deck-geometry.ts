@@ -6,12 +6,15 @@ import { clamp, f1, mono } from "./util.ts";
 
 // ============ constants ============
 
-export const TILT = 15, COS = Math.cos(TILT * Math.PI / 180), SIN = Math.sin(TILT * Math.PI / 180);
+const TILT = 15;
+export const COS = Math.cos(TILT * Math.PI / 180), SIN = Math.sin(TILT * Math.PI / 180);
 /** The deck's height above the base plane. The deck camera passes it to CSS as `--deck-z`. */
 export const DECK_Z = 170;
-export const DECK_IN = 26, BAND = 56, PITCH = 40, SHADOW = 12;
+const DECK_IN = 26, BAND = 56, PITCH = 40;
+export const SHADOW = 12;
 /** The pinned deck: its top edge sits DECK_TOP below the frame top, and its right edge leaves ARROW_GAP for the arrow's curve. */
-export const DECK_TOP = 120, ARROW_GAP = 90, MIN_DECK_W = 272;
+const DECK_TOP = 120, ARROW_GAP = 90;
+export const MIN_DECK_W = 272;
 /** The file box's left edge, from the frame's left edge. */
 export const FILE_X = 30;
 

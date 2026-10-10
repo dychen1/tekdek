@@ -4,11 +4,11 @@ import type { DeckFunction } from "../data/models.ts";
 import { mono } from "./util.ts";
 
 /** Row height and pitch for each kind of row. */
-export const ROW = { flow: [20, 26], named: [16, 22], stub: [3, 7] } as const;
+const ROW = { flow: [20, 26], named: [16, 22], stub: [3, 7] } as const;
 /** Longest shown name of a row outside the flow, in characters. */
-export const NAME_CAP = 30;
+const NAME_CAP = 30;
 /** The first row sits below the file node. */
-export const FILE_TOP = 28;
+const FILE_TOP = 28;
 
 export interface FileRow {
   key: string; name: string; short: string; steps: number[]; cluster: string | null;

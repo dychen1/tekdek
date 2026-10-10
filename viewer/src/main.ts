@@ -7,7 +7,8 @@ import type { ArtifactEntry, ArtifactIndex, DeckFlow, DeckGraph, FlowEntry, Sour
 import { deckFlow, deckGraph, pickArtifact, pickFlow, frozenFlows } from "./data/adapt.ts";
 import { loadFlow, loadGraph, loadIndex, loadSource, LoadError, type LoadReason } from "./data/load.ts";
 import { createDeck, type DeckInstance } from "./deck/deck.ts";
-import { codebasePicker, esc, flowPicker, icon } from "./deck/markup.ts";
+import { codebasePicker, flowPicker, icon } from "./deck/markup.ts";
+import { esc } from "./layout/util.ts";
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -88,7 +89,7 @@ async function openArtifact(file: string, flowName: string | null, step: number)
     showLoading(`loading ${name}`);
     const document = await loadGraph(entry);
     if (mine !== ticket) return;
-    graph = deckGraph(document, entry.label ?? entry.file.replace(/\.json$/, ""));
+    graph = deckGraph(document);
     await openFlow(pickFlow(frozenFlows(entry.flows), flowName), step);
   } catch (error) {
     fail(error, mine);

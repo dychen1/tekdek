@@ -46,11 +46,9 @@ export function guideKinds(row: ExplorerRow): GuideKind[] {
 
 // ============ open state ============
 
-/** Opens every directory above a row. Returns true when the open state changes. */
-export function openTo(open: Set<string>, row: ExplorerRow): boolean {
-  let changed = false;
-  for (let a = row.parent; a; a = a.parent) if (!open.has(a.path)) { open.add(a.path); changed = true; }
-  return changed;
+/** Opens every directory above a row. */
+export function openTo(open: Set<string>, row: ExplorerRow) {
+  for (let a = row.parent; a; a = a.parent) open.add(a.path);
 }
 
 /** True when every directory above the row is open. */

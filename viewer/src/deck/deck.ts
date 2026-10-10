@@ -17,7 +17,6 @@ import { createLinks } from "./links.ts";
 import { $, type DeckContext, type DeckOptions, type DeckParts } from "./context.ts";
 import { createTools } from "./tools.ts";
 
-export type { DeckOptions } from "./context.ts";
 
 export interface DeckInstance {
   go(step: number): void;
@@ -42,7 +41,7 @@ export function createDeck(options: DeckOptions): DeckInstance {
   const model = buildModel(options.graph, options.flow, options.sources);
   const state = initialState(model);
   const ctx: DeckContext = {
-    options, model, state, parts: {} as DeckParts, signal: abort.signal, go, place, placeSoon,
+    model, state, parts: {} as DeckParts, signal: abort.signal, go, place, placeSoon,
   };
   let alive = true;
   /** The cluster whose deck shows, or null. */

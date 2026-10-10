@@ -3,8 +3,8 @@
    # Sections
    key popover, theme variant, map tools, full screen, top band */
 import { rangesOf } from "../layout/plan.ts";
-import { clamp } from "../layout/util.ts";
-import { esc, icon } from "./markup.ts";
+import { clamp, esc } from "../layout/util.ts";
+import { icon } from "./markup.ts";
 import { $, type DeckContext, type Tools } from "./context.ts";
 
 const VARIANTS = ["night", "storm", "moon"];
@@ -123,7 +123,7 @@ export function createTools(ctx: DeckContext): Tools {
   }
 
   return {
-    sync, layoutTop, setFull, toggleCompact, setZoom, keyOpen, setKey,
+    sync, layoutTop, setFull, toggleCompact, keyOpen, setKey,
     destroy() {
       setKey(false);
       kpClusters.replaceChildren();

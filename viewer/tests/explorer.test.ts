@@ -22,8 +22,8 @@ test("the explorer lists files before subdirectories, with tree guides", () => {
 test("opening a path shows the row, and a closed directory anchors its files", () => {
   const open = new Set<string>();
   assert.equal(isShown(row("src/cli/flow.rs"), open), false);
-  assert.equal(openTo(open, row("src/cli/flow.rs")), true);
-  assert.equal(openTo(open, row("src/cli/flow.rs")), false);
+  openTo(open, row("src/cli/flow.rs"));
+  openTo(open, row("src/cli/flow.rs"));
   assert.deepEqual([...open].sort(), ["src/", "src/cli/"]);
   assert.equal(isShown(row("src/cli/flow.rs"), open), true);
   assert.equal(anchorRow(row("src/store/graph.rs"), open), row("src/store/"));

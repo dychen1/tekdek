@@ -8,8 +8,8 @@ import { displayName } from "../data/adapt.ts";
 import { highlight } from "../layout/highlight.ts";
 import { nearestStep } from "../layout/plan.ts";
 import { callRefs, calleesOf, callersOf, lineSpan, oneLineSignature, otherVisits, sourceNote, transitionFact, whole, type CallRef } from "../layout/step-facts.ts";
-import { clamp, plural } from "../layout/util.ts";
-import { esc, md } from "./markup.ts";
+import { clamp, esc, plural } from "../layout/util.ts";
+import { md } from "./markup.ts";
 import { $, type CodeColumn, type DeckContext } from "./context.ts";
 
 // ============ markup ============

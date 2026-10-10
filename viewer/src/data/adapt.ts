@@ -16,7 +16,7 @@ export function displayName(key: string, fallback: string): string {
 /** Builds the deck graph from a verified graph document.
  *  Files come from module nodes and callable paths. Functions keep source order in each file.
  *  Calls are the distinct `calls` edges between two different callables. */
-export function deckGraph(document: GraphDocument, repo: string): DeckGraph {
+export function deckGraph(document: GraphDocument): DeckGraph {
   const nodes = document.graph.nodes;
   const byId = new Map(nodes.map(node => [node.id, node]));
   const files = new Set<string>();
@@ -36,8 +36,7 @@ export function deckGraph(document: GraphDocument, repo: string): DeckGraph {
     seen.add(id);
     calls.push({ source: source.key, target: target.key });
   }
-  const sorted = [...files].sort();
-  return { repo, files: sorted, tree: fileTree(sorted), functions, calls };
+  return { tree: fileTree([...files].sort()), functions, calls };
 }
 
 /** Builds the directory tree. In each directory, files come first, then subdirectories, each in name order. */

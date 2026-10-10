@@ -182,7 +182,7 @@ code{font:inherit;color:var(--keyword)}
 .mbox.focus .lid{border-color:var(--light);box-shadow:var(--face-light-hot);outline:1px solid var(--c);outline-offset:2px}
 
 /* ============ connectors: three at most, in screen space, from the rects they join ============ */
-.links{position:fixed;inset:0;width:100vw;height:100vh;z-index:7;pointer-events:none;overflow:visible;--lk:1}
+.links{position:fixed;inset:0;width:100vw;height:100vh;z-index:7;pointer-events:none;overflow:visible}
 /* a connector that cannot be drawn carries .away */
 .links .away{display:none}
 /* (a) guide: the explorer row's tree guide, continued straight into the file box */
@@ -287,9 +287,8 @@ button.pbadge:hover{filter:brightness(1.12)}
 .kp-lift::after{content:"";position:absolute;left:-1px;right:-1px;top:100%;height:4px;border-radius:0 0 var(--r-xs) var(--r-xs);background:color-mix(in srgb,var(--ink-2) 40%,var(--tn-black))}
 .kp-g{margin-top:5px;overflow:visible}
 .kp-g .g1{stroke:var(--line);stroke-width:1;fill:none}
-.kp-g .g2{stroke:color-mix(in srgb,var(--ink-2) 80%,var(--light));stroke-width:2;fill:none}
 .kp-g .g3{stroke:var(--accent);stroke-width:1.5;fill:none}
-.kp-g circle{fill:var(--ink-2)} .kp-g .h3{fill:var(--accent)}
+.kp-g .h3{fill:var(--accent)}
 .kp-keys{margin:10px 0 0;padding:10px 0 0;border-top:1px solid var(--line-faint);display:grid;grid-template-columns:48px 1fr;gap:3px 10px;font:var(--fs-ui-s)/18px var(--font-code);color:var(--ink-2)}
 .kp-keys dt{display:flex;align-items:center;gap:1px}
 .kp-keys dd{margin:0}
@@ -338,7 +337,7 @@ kbd{display:inline-flex;align-items:center;gap:1px;height:16px;padding:0 4px;bor
 .cursor{flex:0 0 auto;width:8px;height:15px;margin-left:3px;border-radius:1px;background:var(--accent);animation:blink var(--blink) steps(1,end) infinite}
 @keyframes blink{50%{opacity:0}}
 .cd-step{flex:0 0 auto;padding:8px 16px 12px}
-.cd-step.swap,.code.swap{animation:swap 240ms var(--ease-out)}
+.cd-step.swap,.code.swap{animation:swap var(--dur-state) var(--ease-out)}
 .cd-ann{margin:0;font:var(--fs-ui)/1.6 var(--font-code);color:var(--ink)}
 .cd-facts{margin:10px 0 0;display:grid;grid-template-columns:var(--lab) minmax(0,1fr);gap:2px 0;font:var(--fs-ui-s)/1.6 var(--font-code);font-variant-ligatures:none}
 .cd-facts dt{color:var(--dim)}
@@ -390,7 +389,7 @@ button.ref:hover{text-decoration:underline;text-underline-offset:3px}
 .c1{display:flex;align-items:center;gap:5px;min-width:0}
 .counter{flex:0 0 auto;margin:0 6px 0 8px;font:var(--fs-ui) var(--font-code);color:var(--ink-2);white-space:nowrap}
 .cexpl{flex:1 1 auto;min-width:0;display:flex;align-items:center;gap:10px}
-.cexpl.swap,.c-desc.swap{animation:swap 240ms var(--ease-out)}
+.cexpl.swap,.c-desc.swap{animation:swap var(--dur-state) var(--ease-out)}
 .chip{flex:0 1 auto;min-width:0;display:flex;align-items:center;white-space:nowrap;font:var(--fw-bold) var(--fs-ui-s) var(--font-code)}
 .chip span{min-width:0;max-width:100%;height:19px;padding:0 7px;display:block;overflow:hidden;text-overflow:ellipsis;line-height:19px;border-radius:var(--r-s);background:var(--c);color:var(--on-accent)}
 .chip.none span{padding:0 6px;background:transparent;border:1px dashed var(--line-strong);line-height:17px;color:var(--dim);font-weight:400}

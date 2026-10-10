@@ -54,16 +54,16 @@ test("the file tree lists files before subdirectories, each in name order", () =
 });
 
 test("the deck graph keeps distinct calls between two callables and drops self calls", () => {
-  const graph = deckGraph(graphDocument(), "tekdek");
+  const graph = deckGraph(graphDocument());
   const keys = graph.calls.map(call => `${call.source}>${call.target}`);
   assert.equal(new Set(keys).size, keys.length);
   assert.ok(graph.calls.every(call => call.source !== call.target));
-  assert.ok(graph.files.includes("src/extra.rs"));
+  assert.ok("extra.rs" in must(graph.tree["src/"]));
   assert.equal(must(graph.functions.find(fn => fn.id.endsWith("callable:open"))).name, "Store::open");
 });
 
 test("a frozen flow gives its clusters in intent order with frozen colors and assigned members", () => {
-  const graph = deckGraph(graphDocument(), "tekdek");
+  const graph = deckGraph(graphDocument());
   const flow = deckFlow(artifact, graph, DIGEST);
   assert.equal(flow.name, "flow-generation");
   assert.equal(flow.steps.length, 25);
@@ -75,7 +75,7 @@ test("a frozen flow gives its clusters in intent order with frozen colors and as
 
 test("a step whose function left the graph is marked missing and leaves the members", () => {
   const gone = must(artifact.intent.steps[0], "first step").nodeKey;
-  const graph = deckGraph(graphDocument({ drop: [gone] }), "tekdek");
+  const graph = deckGraph(graphDocument({ drop: [gone] }));
   const flow = deckFlow(artifact, graph, "sha256:other");
   assert.equal(must(flow.steps[0], "first step").missing, true);
   assert.ok(!flow.clusters.some(cluster => cluster.members.includes(gone)));
@@ -83,7 +83,7 @@ test("a step whose function left the graph is marked missing and leaves the memb
 });
 
 test("a file that is not a frozen schema 3 flow is rejected", () => {
-  const graph = deckGraph(graphDocument(), "tekdek");
+  const graph = deckGraph(graphDocument());
   assert.throws(() => deckFlow({ ...artifact, schemaVersion: 2 }, graph, DIGEST), /schema 3/);
 });
 
@@ -109,7 +109,7 @@ test("the page opens the requested codebase, else the index default, else the fi
 });
 
 test("the flow adapter carries the transition, the fact text, and the generation of each step", () => {
-  const graph = deckGraph(graphDocument(), "demo");
+  const graph = deckGraph(graphDocument());
   const flow = deckFlow(artifact, graph, DIGEST);
   assert.equal(flow.generation, artifact.generation.ordinal);
   assert.equal(must(flow.steps[0]).transition, "flow_start");

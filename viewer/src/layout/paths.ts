@@ -2,7 +2,7 @@
    Inputs are screen points from the rectangles of the two ends; it never reads the DOM. */
 import { f1 } from "./util.ts";
 
-export type Pt = [number, number];
+type Pt = [number, number];
 const P2 = (x: number, y: number) => `${f1(x)},${f1(y)}`;
 
 /** An orthogonal path with 4 px elbow corners. */

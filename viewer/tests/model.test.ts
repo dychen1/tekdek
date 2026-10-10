@@ -11,12 +11,12 @@ import { buildModel, initialState, shownFile, withMembership } from "../src/layo
 
 import { artifact, DIGEST, graphDocument, must } from "./fixtures.ts";
 
-const graph = deckGraph(graphDocument(), "demo");
+const graph = deckGraph(graphDocument());
 const flow = deckFlow(artifact, graph, DIGEST);
 const model = buildModel(graph, flow, new Map());
 
 test("membership marks each function with the cluster that holds it", () => {
-  const graph = deckGraph(graphDocument(), "tekdek");
+  const graph = deckGraph(graphDocument());
   const marked = withMembership(graph, deckFlow(artifact, graph, DIGEST));
   assert.equal(marked.functions.filter(fn => fn.cluster).length, 21);
   assert.equal(must(marked.functions.find(fn => fn.id === "src/main.rs::callable:main")).cluster, "route-command");

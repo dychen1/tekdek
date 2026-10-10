@@ -2,12 +2,11 @@
    of the two elements that each one joins: the guide (explorer row to file node), the tether (current slot to
    current lid), and the arrow (current lid to code header). Each end touches its element. */
 import { arrowPath, guidePath, tetherPath } from "../layout/paths.ts";
-import { clamp, f1 } from "../layout/util.ts";
+import { f1 } from "../layout/util.ts";
 import { $, type DeckContext, type Links } from "./context.ts";
 
 export function createLinks(ctx: DeckContext): Links {
   const { state } = ctx;
-  const links = $("#links");
   const guideG = $("#guideG"), guideEl = $("#guidePath");
   const tetherG = $("#tetherG"), tetherEl = $("#tetherPath"), tetherDot = $("#tetherDot");
   const arrowG = $("#arrowG"), arrEl = $("#arrPath"), arrHead = $("#arrHead"), arrDot = $("#arrDot");
@@ -54,7 +53,6 @@ export function createLinks(ctx: DeckContext): Links {
   }
 
   function draw() {
-    links.style.setProperty("--lk", clamp(state.zoom, 0.6, 1.4).toFixed(2));
     if (state.full) { hideAll(); return; }
     const lid = ctx.parts.clusterDeck.currentLid();
     guideG.classList.toggle("away", !drawGuide());

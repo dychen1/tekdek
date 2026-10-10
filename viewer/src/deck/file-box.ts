@@ -2,8 +2,8 @@
    The layout comes from `layout/file-box.ts`. A slot, a row, or a step pill goes to its step.
    The chevron folds the rows that are not in the flow. */
 import { fileBox, type FileBox } from "../layout/file-box.ts";
-import { f1, plural } from "../layout/util.ts";
-import { esc, icon } from "./markup.ts";
+import { esc, f1, plural } from "../layout/util.ts";
+import { icon } from "./markup.ts";
 import { shownFile } from "../layout/model.ts";
 import { $, type DeckContext, type FileBoxView } from "./context.ts";
 

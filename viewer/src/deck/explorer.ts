@@ -5,8 +5,8 @@
    rows, marks, scroll, clicks and keys */
 import { anchorRow, dirNote, guideKinds, isShown, type ExplorerRow } from "../layout/explorer.ts";
 import { nextStepOfFile } from "../layout/plan.ts";
-import { clamp } from "../layout/util.ts";
-import { esc, PTR } from "./markup.ts";
+import { clamp, esc } from "../layout/util.ts";
+import { PTR } from "./markup.ts";
 import { shownFile } from "../layout/model.ts";
 import { $, type DeckContext, type Explorer } from "./context.ts";
 

@@ -60,7 +60,7 @@ export interface CodeColumn { render(prev: number): void; destroy(): void }
 export interface Bar { render(clusterChanged: boolean): void; destroy(): void }
 /** Declared here and created by `tools.ts`. */
 export interface Tools {
-  sync(): void; layoutTop(): void; setFull(on: boolean): void; toggleCompact(): void; setZoom(k: number): void;
+  sync(): void; layoutTop(): void; setFull(on: boolean): void; toggleCompact(): void;
   keyOpen(): boolean; setKey(open: boolean, returnFocus?: boolean): void; destroy(): void;
 }
 /** The deck modules. `deck.ts` fills this object after it creates every module. */
@@ -82,7 +82,6 @@ export interface DeckOptions {
 
 /** The shared context of one deck. */
 export interface DeckContext {
-  options: DeckOptions;
   model: DeckModel;
   state: DeckState;
   parts: DeckParts;
