@@ -52,13 +52,6 @@ pub fn apply_cli_overrides(
     servers: &[(Language, String)],
     arguments: &BTreeMap<Language, Vec<String>>,
 ) -> Result<(), ConfigError> {
-    for (language, _) in servers {
-        require_profile(profiles, *language)?;
-    }
-    for language in arguments.keys() {
-        require_profile(profiles, *language)?;
-    }
-
     for (language, program) in servers {
         profile_mut(profiles, *language)?
             .server
@@ -184,14 +177,6 @@ fn apply_profile_override(
 
 fn default_config_path() -> Option<PathBuf> {
     dirs::config_dir().map(|path| path.join("tekdek/config.toml"))
-}
-
-fn require_profile(profiles: &[LanguageProfile], language: Language) -> Result<(), ConfigError> {
-    profiles
-        .iter()
-        .any(|profile| profile.language == language)
-        .then_some(())
-        .ok_or_else(|| unavailable_language(language))
 }
 
 fn profile_mut(
