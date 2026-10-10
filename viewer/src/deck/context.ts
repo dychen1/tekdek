@@ -88,14 +88,10 @@ export interface DeckContext {
   parts: DeckParts;
   /** Aborts every listener of the deck on teardown. */
   signal: AbortSignal;
-  /** True when the viewer prefers reduced motion. */
-  reducedMotion: boolean;
   /** Goes to a step. */
   go(step: number): void;
   /** Places the file box and the deck, then draws the connectors. */
   place(): void;
   /** Lays out the top band and places the deck on the next frame, once for every call in that frame. */
   placeSoon(): void;
-  /** Draws the connectors on every frame for a while (layout settles, fonts load), then once at rest. */
-  kick(ms: number): void;
 }

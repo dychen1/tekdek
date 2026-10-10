@@ -53,7 +53,7 @@ export function createBar(ctx: DeckContext): Bar {
     $("#cMeta").textContent = C ? `${plural(model.members.get(C.id)?.length ?? 0, "function")} · steps ${rangesOf(model.plan, C.id)}`
       : model.flow ? `${plural(N, "step")} in ${plural(model.clusters.length, "cluster")}` : "";
     cDesc.innerHTML = C ? md(C.description) : model.flow && !state.cur ? "Step forward to lift the first cluster onto its deck." : "";
-    if (clusterChanged && !ctx.reducedMotion && !document.body.classList.contains("booting")) {
+    if (clusterChanged && !document.body.classList.contains("booting")) {
       for (const el of [cExpl, cDesc]) { el.classList.remove("swap"); void el.offsetWidth; el.classList.add("swap"); }
     }
     prevBtn.disabled = state.cur <= 1;

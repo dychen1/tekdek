@@ -67,12 +67,8 @@
   --icon-stroke:1.5;
   /* geometry of the deck and its boxes; the deck camera sets --deck-z from DECK_Z in layout/deck-geometry.ts */
   --deck-t:30px; --box-h:28px; --focus-dz:30px; --shadow-dy:28px; --bh:32px;
-  --ease-lift:cubic-bezier(.45,.05,.25,1);
-  --ease-rise:cubic-bezier(.22,1.22,.42,1);
-  --ease-sink:cubic-bezier(.55,0,.85,.35);
-  --ease-slab:cubic-bezier(.2,1.12,.35,1);
   --ease-out:cubic-bezier(.16,1,.3,1);
-  --dur-hover:110ms; --dur-pop:140ms; --dur-drawer:200ms; --dur-state:240ms; --dur-layout:520ms;
+  --dur-hover:110ms; --dur-pop:140ms; --dur-state:240ms;
   --blink:1060ms;
   /* layout: explorer at left, the code column at right, the canvas frame and the bottom bar between them */
   --sb:262px; --rc:clamp(440px,36vw,580px); --gap:12px; --lab:66px;
@@ -103,7 +99,7 @@ code{font:inherit;color:var(--keyword)}
   border:1px dashed var(--frame-line);border-radius:var(--r-l);pointer-events:none;
   background-image:radial-gradient(circle,var(--grid-dot) 0 .8px,transparent 1.2px);background-size:18px 18px;background-position:9px 9px}
 /* the canvas world: a zero-size layer in screen coordinates. Zoom scales it around the current slot. */
-.cv{position:fixed;z-index:2;left:0;top:0;width:0;height:0;pointer-events:none;transition:transform 260ms var(--ease-out)}
+.cv{position:fixed;z-index:2;left:0;top:0;width:0;height:0;pointer-events:none}
 
 /* ============ file box and its rows ============ */
 /* the file box never moves on screen: each step sets its place and its rows at once, then the connectors are drawn */
@@ -117,8 +113,7 @@ code{font:inherit;color:var(--keyword)}
 .row.file .node{gap:2px;height:20px;padding:0 9px 0 2px;border:1px solid var(--line-strong);border-radius:var(--r-s);background:var(--surface-file);
   font:var(--fw-bold) var(--fs-code) var(--font-code);color:var(--ink)}
 .row.file.curfile .node{border-color:var(--cc);outline:1px solid color-mix(in srgb,var(--cc) 55%,transparent);outline-offset:1.5px}
-.fold{flex:0 0 16px;width:16px;height:16px;padding:0;display:grid;place-items:center;border:0;border-radius:var(--r-xs);background:transparent;color:var(--dim);cursor:pointer;
-  transition:transform var(--dur-drawer) var(--ease-out),background-color var(--dur-hover),color var(--dur-hover)}
+.fold{flex:0 0 16px;width:16px;height:16px;padding:0;display:grid;place-items:center;border:0;border-radius:var(--r-xs);background:transparent;color:var(--dim);cursor:pointer}
 .fold .ic{width:12px;height:12px}
 .fold:hover{background:var(--surface-hover);color:var(--ink)}
 .row.folded .fold{transform:rotate(-90deg)}
@@ -138,21 +133,16 @@ code{font:inherit;color:var(--keyword)}
   color:color-mix(in srgb,var(--c) 58%,var(--ink-2));font-size:var(--fs-code)}
 .row.fn.ghost.focus .node{border-color:var(--light);color:var(--ink)}
 .spill{min-width:22px;height:18px;padding:0 5px;border:1px solid color-mix(in srgb,var(--c) 70%,transparent);border-radius:var(--r-s);background:transparent;
-  font:var(--fs-ui-s)/16px var(--font-code);color:var(--ink);cursor:pointer;pointer-events:auto;transition:border-color var(--dur-hover),background-color var(--dur-hover)}
+  font:var(--fs-ui-s)/16px var(--font-code);color:var(--ink);cursor:pointer;pointer-events:auto}
 .spill:hover{border-color:var(--c);background:color-mix(in srgb,var(--c) 16%,transparent)}
 
 /* ============ deck (one per cluster) ============ */
-.deckcam{position:absolute;left:0;top:0;width:0;height:0;transform-style:preserve-3d;transform-origin:0 0;pointer-events:none;
-  transition:transform var(--dur-layout) var(--ease-lift)}
-.noanim,.noanim *{transition:none !important}
+.deckcam{position:absolute;left:0;top:0;width:0;height:0;transform-style:preserve-3d;transform-origin:0 0;pointer-events:none}
 .slab{position:absolute;left:0;top:0;transform-style:preserve-3d;pointer-events:none}
 .slab .shadow{position:absolute;inset:0;border-radius:var(--r-l);background:var(--shade);filter:blur(16px);
-  transform:translate3d(0,var(--shadow-dy),.3px) scale(.97);opacity:0;transition:opacity 420ms linear}
-.slab.up .shadow{opacity:1;transition:opacity 620ms linear 140ms}
-.deck{position:absolute;inset:0;transform-style:preserve-3d;transform:translateZ(0);transition:transform 460ms var(--ease-sink)}
-.slab.up .deck{transform:translateZ(var(--deck-z));transition:transform 700ms var(--ease-slab)}
-.deck>div{position:absolute;opacity:0;transition:opacity 260ms linear 220ms}
-.slab.up .deck>div{opacity:1;transition:opacity 220ms linear}
+  transform:translate3d(0,var(--shadow-dy),.3px) scale(.97)}
+.deck{position:absolute;inset:0;transform-style:preserve-3d;transform:translateZ(var(--deck-z))}
+.deck>div{position:absolute}
 .dtop{inset:0;border:1px solid var(--c);border-radius:var(--r-m);
   background:
     linear-gradient(color-mix(in srgb,var(--c) 34%,var(--deck-ground)),color-mix(in srgb,var(--c) 34%,var(--deck-ground))) top left / 100% 36px no-repeat,
@@ -165,22 +155,18 @@ code{font:inherit;color:var(--keyword)}
 .dlabel .dname{min-width:0;overflow:hidden;text-overflow:ellipsis}
 
 /* ============ lifted boxes: a lid and a front face ============ */
-.mbox{position:absolute;left:0;top:0;width:var(--lw);height:var(--bh);transform-style:preserve-3d;pointer-events:none;
-  transition:transform 440ms var(--ease-sink) var(--dly,0ms),width 320ms var(--ease-lift)}
-.mbox.up{transition:transform 720ms var(--ease-rise) var(--dly,0ms),width 320ms var(--ease-lift)}
-.riser{position:absolute;inset:0;transform-style:preserve-3d;transform:translateZ(0);transition:transform 420ms cubic-bezier(.3,1.4,.5,1)}
+.mbox{position:absolute;left:0;top:0;width:var(--lw);height:var(--bh);transform-style:preserve-3d;pointer-events:none}
+.riser{position:absolute;inset:0;transform-style:preserve-3d;transform:translateZ(0)}
 .mbox.focus .riser{transform:translateZ(var(--focus-dz))}
-.mbox .face{position:absolute;opacity:0;transition:opacity 160ms linear calc(var(--dly,0ms) + 320ms)}
-.mbox.up .face{opacity:1;transition:opacity 140ms linear var(--dly,0ms)}
+.mbox .face{position:absolute}
 .mbox .lid{left:0;top:0;width:100%;height:100%;transform:translateZ(var(--box-h));display:flex;align-items:center;gap:2px;padding:0 7px 0 0;
-  border:1px solid var(--c);border-radius:var(--r-s);background:var(--card-face);box-shadow:var(--face-light);transition:opacity 140ms linear var(--dly,0ms),border-color var(--dur-hover)}
-.mbox.up .lid{pointer-events:auto}
-.mbox.up .lid:hover{border-color:color-mix(in srgb,var(--c) 55%,var(--light))}
+  border:1px solid var(--c);border-radius:var(--r-s);background:var(--card-face);box-shadow:var(--face-light);pointer-events:auto}
+.mbox .lid:hover{border-color:color-mix(in srgb,var(--c) 55%,var(--light))}
 .mbox .front{left:0;top:100%;width:100%;height:var(--box-h);transform-origin:50% 0;transform:translateZ(var(--box-h)) rotateX(-90deg);
   border-radius:0 0 var(--r-s) var(--r-s);background:color-mix(in srgb,var(--c) var(--front-mix),var(--tn-black))}
-.mbox .fshadow{left:3px;top:6px;right:3px;bottom:-4px;border-radius:var(--r-m);background:var(--shade);filter:blur(6px);transform:translateZ(.5px);opacity:0 !important}
-.mbox.up.focus .fshadow{opacity:.9 !important}
-.lid .ptr{position:absolute;left:1px;top:50%;margin-top:-6px;opacity:0;transition:opacity var(--dur-hover)}
+.mbox .fshadow{left:3px;top:6px;right:3px;bottom:-4px;border-radius:var(--r-m);background:var(--shade);filter:blur(6px);transform:translateZ(.5px);opacity:0}
+.mbox.focus .fshadow{opacity:.9}
+.lid .ptr{position:absolute;left:1px;top:50%;margin-top:-6px;opacity:0}
 .mbox.focus .lid .ptr{opacity:1}
 .tmain{flex:1 1 auto;min-width:0;height:100%;padding:0 4px 0 13px;display:flex;flex-direction:column;justify-content:center;align-items:flex-start;
   border:0;border-radius:var(--r-s);background:transparent;cursor:pointer;text-align:left}

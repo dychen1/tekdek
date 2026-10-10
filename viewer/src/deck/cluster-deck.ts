@@ -11,7 +11,7 @@ import { $, type ClusterDeck, type DeckContext } from "./context.ts";
 interface BoxView { key: string; name: string; file: string; steps: readonly number[]; el: HTMLElement; lid: HTMLElement; btn: HTMLButtonElement; badge: HTMLElement }
 
 /** The deck of one cluster. */
-interface DeckView { cam: HTMLElement; slab: HTMLElement; top: HTMLElement; boxes: BoxView[]; byKey: Map<string, BoxView> }
+interface DeckView { cam: HTMLElement; top: HTMLElement; boxes: BoxView[]; byKey: Map<string, BoxView> }
 
 /** Puts a box at a deck-plane place and a height. */
 const setBox = (el: HTMLElement, x: number, y: number, z: number) => { el.style.transform = `translate3d(${f1(x)}px,${f1(y)}px,${f1(z)}px)`; };
@@ -33,31 +33,23 @@ export function createClusterDeck(ctx: DeckContext): ClusterDeck {
     return { key, name: fn.name, file: fn.file, steps, el, lid: el.querySelector<HTMLElement>(".lid")!, btn: el.querySelector<HTMLButtonElement>(".tmain")!, badge: el.querySelector<HTMLElement>(".stepno")! };
   }
 
-  /** Builds the deck of a cluster, flat on the base plane. `pin` puts it; `rise` lifts it. */
+  /** Builds the deck of a cluster, raised, with every box at its final place. `pin` puts it on screen. */
   function createDeck(id: string): DeckView | null {
     const cluster = CL.get(id);
     if (!cluster) return null;
     const keys = model.members.get(id) ?? [];
     const cam = document.createElement("div");
-    cam.className = "deckcam noanim"; cam.style.setProperty("--c", cluster.cv); cam.style.setProperty("--deck-z", `${DECK_Z}px`);
+    cam.className = "deckcam"; cam.style.setProperty("--c", cluster.cv); cam.style.setProperty("--deck-z", `${DECK_Z}px`);
     cam.innerHTML = `<div class="slab" style="width:${model.deckSize.width}px;height:${deckHeight(keys.length)}px"><div class="shadow"></div><div class="deck"><div class="dfront"></div>` +
       `<div class="dtop"><div class="dlabel"><span class="dname">flow functions in this cluster</span></div></div></div></div>`;
     const boxes = keys.map((key, i) => {
       const box = makeBox(key, cluster);
       cam.appendChild(box.el);
-      setBox(box.el, ...home(i), 0);
+      setBox(box.el, ...home(i), DECK_Z + 1);
       return box;
     });
     cv.appendChild(cam);
-    return { cam, slab: cam.querySelector<HTMLElement>(".slab")!, top: cam.querySelector<HTMLElement>(".dtop")!, boxes, byKey: new Map(boxes.map(box => [box.key, box])) };
-  }
-
-  /** Shows a placed deck already raised, its boxes at their final place, in one frame. */
-  function rise(d: DeckView) {
-    d.slab.classList.add("up");
-    d.boxes.forEach((box, i) => { box.el.classList.add("up"); setBox(box.el, ...home(i), DECK_Z + 1); });
-    void d.cam.offsetWidth;
-    d.cam.classList.remove("noanim");
+    return { cam, top: cam.querySelector<HTMLElement>(".dtop")!, boxes, byKey: new Map(boxes.map(box => [box.key, box])) };
   }
 
   /** Removes the current deck at once. */
@@ -68,9 +60,7 @@ export function createClusterDeck(ctx: DeckContext): ClusterDeck {
 
   function show(cluster: string | null) {
     sinkDeck();
-    if (!cluster) return;
-    deck = createDeck(cluster);
-    if (deck) rise(deck);
+    if (cluster) deck = createDeck(cluster);
   }
 
   /** Marks the current box and shows a file path on the boxes that live in other files. */

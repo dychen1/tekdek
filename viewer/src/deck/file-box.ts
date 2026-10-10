@@ -57,7 +57,6 @@ export function createFileBox(ctx: DeckContext): FileBoxView {
     if (state.folded.has(shown.file)) state.folded.delete(shown.file); else state.folded.add(shown.file);
     render();
     ctx.place();
-    ctx.kick(800);
   }, { signal });
 
   return {

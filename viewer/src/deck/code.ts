@@ -2,7 +2,7 @@
    header (`path:line`), and the code viewer with its line numbers, colors, and margin marks. The facts come from
    `layout/step-facts.ts` and the lines from the `/source` answer. Every data string goes through `esc`.
    # Sections
-   markup, empty states, facts, code viewer, step, events */
+   markup, empty states, facts, code viewer, step */
 import type { DeckStep, SourceView } from "../data/models.ts";
 import { displayName } from "../data/adapt.ts";
 import { highlight } from "../layout/highlight.ts";
@@ -41,7 +41,7 @@ function refList(refs: readonly CallRef[]): string {
 }
 
 export function createCode(ctx: DeckContext): CodeColumn {
-  const { model, state, signal } = ctx;
+  const { model, state } = ctx;
   const head = $("#cdHead"), stepEl = $("#cdStep"), whereEl = $("#where"), codeEl = $("#code");
 
   // ============ empty states ============
@@ -121,9 +121,9 @@ export function createCode(ctx: DeckContext): CodeColumn {
 
   // ============ step ============
 
-  /** Restarts the 240 ms fade of the step text and the code on a step change, except at boot or with reduced motion. */
+  /** Restarts the fade of the step text and the code on a step change, except at boot. The CSS stops it under reduced motion. */
   function swap(prev: number) {
-    if (prev === state.cur || ctx.reducedMotion || document.body.classList.contains("booting")) return;
+    if (prev === state.cur || document.body.classList.contains("booting")) return;
     for (const el of [stepEl, codeEl]) { el.classList.remove("swap"); void el.offsetWidth; el.classList.add("swap"); }
   }
 
@@ -158,10 +158,6 @@ export function createCode(ctx: DeckContext): CodeColumn {
     stepEl.innerHTML = `<p class="cd-ann">${md(step.annotation)}</p><dl class="cd-facts">${facts.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("")}</dl>`;
     swap(prev);
   }
-
-  // ============ events ============
-
-  codeEl.addEventListener("scroll", () => ctx.kick(0), { signal });
 
   return {
     render,

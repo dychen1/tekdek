@@ -97,7 +97,6 @@ export function createExplorer(ctx: DeckContext): Explorer {
     if (state.open.has(row.path)) state.open.delete(row.path); else state.open.add(row.path);
     sync();
     ctx.place();
-    ctx.kick(800);
   }
 
   /** A file click goes to its next flow step, from the current step on. At rest, or for a file with no step, it shows the file box. */

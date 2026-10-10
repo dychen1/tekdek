@@ -32,7 +32,7 @@ export function createLinks(ctx: DeckContext): Links {
   /** Draws the tether from the current slot to the current lid, level out past the widest row, then one S curve. */
   function drawTether(lid: HTMLElement | null): boolean {
     const slot = ctx.parts.fileBox.slotEl();
-    if (!lid || !slot || +getComputedStyle(lid).opacity < 0.02) return false;
+    if (!lid || !slot) return false;
     const s = slot.getBoundingClientRect(), l = lid.getBoundingClientRect();
     const a = { x: s.right, y: s.top + s.height / 2 }, b = { x: l.left, y: l.top + l.height / 2 };
     const tether = tetherPath(a, ctx.parts.fileBox.rowsRight(), b);
