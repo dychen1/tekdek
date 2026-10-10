@@ -1,82 +1,15 @@
 //! Safe file reads.
 //!
 //! This module reads the store files and the project files that the viewer
-//! server sends. It opens only a regular file, and it refuses a symbolic link
-//! at every component of the path. A base folder and a relative path are the
-//! input. The file bytes, or a reply or a reason for a failure, are the output.
-//!
-//! # Sections
-//!
-//! `Opening` opens one regular file without following a link.
-//! `Readers` read one store file or one project file.
+//! server sends. Both readers open through `store::open_regular`: only a
+//! regular file, and no symbolic link at any component of the path. A base
+//! folder and a relative path are the input. The file bytes, or a reply or a
+//! reason for a failure, are the output.
 
-use std::{
-    fs::{self, File, Metadata},
-    io::{self, Read},
-    path::Path,
-};
+use std::{io::Read, path::Path};
 
 use super::{Reply, not_found, read_failure};
-
-// -----------------------------------------------------------------------------
-// Opening
-// -----------------------------------------------------------------------------
-
-/// Why `open_regular` cannot open a file.
-enum OpenFailure {
-    Link,
-    Missing,
-    NotFile,
-    Other(io::Error),
-}
-
-/// Opens one regular file at `base` joined with `parts`.
-///
-/// No component of the path, `base` included, can be a symbolic link. The open
-/// uses `O_NOFOLLOW` and `O_NONBLOCK`: a link that appears after the walk fails
-/// with `ELOOP`, and a pipe does not block the open.
-fn open_regular(base: &Path, parts: &[&str]) -> Result<(File, Metadata), OpenFailure> {
-    let check = |path: &Path| match fs::symlink_metadata(path) {
-        // Refuse a symbolic link at any component.
-        Ok(metadata) if metadata.file_type().is_symlink() => Err(OpenFailure::Link),
-        // Keep walking when the component exists.
-        Ok(_) => Ok(()),
-        // Report a component that does not exist.
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Err(OpenFailure::Missing),
-        // Report any other failure.
-        Err(error) => Err(OpenFailure::Other(error)),
-    };
-    let mut path = base.to_path_buf();
-    check(&path)?;
-    for part in parts {
-        path.push(part);
-        check(&path)?;
-    }
-    let mut options = fs::OpenOptions::new();
-    options.read(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-
-        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
-    }
-    let file = options.open(&path).map_err(|error| {
-        #[cfg(unix)]
-        if error.raw_os_error() == Some(libc::ELOOP) {
-            return OpenFailure::Link;
-        }
-        OpenFailure::Other(error)
-    })?;
-    let metadata = file.metadata().map_err(OpenFailure::Other)?;
-    if !metadata.is_file() {
-        return Err(OpenFailure::NotFile);
-    }
-    Ok((file, metadata))
-}
-
-// -----------------------------------------------------------------------------
-// Readers
-// -----------------------------------------------------------------------------
+use crate::store::{OpenFailure, open_regular};
 
 /// The largest project file that the source route reads.
 const MAX_SOURCE_BYTES: u64 = 2 * 1024 * 1024;
@@ -87,7 +20,7 @@ pub(super) fn read_store(store: &Path, parts: &[&str]) -> Result<Vec<u8>, Reply>
         // Refuse a link.
         OpenFailure::Link => Reply::failure(403, "Symbolic links are not allowed."),
         // Report a missing file.
-        OpenFailure::Missing => not_found(),
+        OpenFailure::Missing(_) => not_found(),
         // Refuse a folder or a pipe.
         OpenFailure::NotFile => Reply::failure(403, "The path must be a regular file."),
         // Map any other failure.
@@ -110,7 +43,7 @@ pub(super) fn read_project(root: &Path, relative: &str) -> Result<String, String
         // Refuse a link.
         OpenFailure::Link => "the path holds a symbolic link".to_owned(),
         // Report a missing file.
-        OpenFailure::Missing => "the file is missing".to_owned(),
+        OpenFailure::Missing(_) => "the file is missing".to_owned(),
         // Refuse a folder or a pipe.
         OpenFailure::NotFile => "the path is not a regular file".to_owned(),
         // Report any other failure.

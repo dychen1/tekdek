@@ -20,7 +20,7 @@ use std::{
 use serde::{Deserialize, Serialize};
 
 use super::models::{FLOW_ARTIFACT_SCHEMA_VERSION, FlowArtifact, FlowId, Sha256Digest};
-use crate::store::{reject_symlink, write_bytes};
+use crate::store::{read_bytes, reject_symlink, write_bytes};
 
 /// Names the current generation of one flow.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -52,6 +52,8 @@ pub fn generation_file(flow_id: &FlowId, ordinal: u32, digest: &Sha256Digest) ->
 
 /// Reads the current generation of one flow, or `None` when the flow has no lineage.
 ///
+/// A pointer that is not a regular file counts as no lineage.
+///
 /// # Errors
 /// Returns an error for a link, an unreadable file, an invalid document, a
 /// generation of another flow, or a pointer that names another generation.
@@ -60,9 +62,7 @@ pub fn read_current(
     flow_id: &FlowId,
 ) -> Result<Option<StoredGeneration>, LineageError> {
     let lineage = lineage_path(directory, flow_id)?;
-    let pointer_path = lineage.join("current.json");
-    reject_symlink(&pointer_path)?;
-    let bytes = match fs::read(&pointer_path) {
+    let bytes = match read_bytes(&lineage.join("current.json")) {
         Ok(bytes) => bytes,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(error.into()),
@@ -95,23 +95,13 @@ pub fn read_generation(
 ) -> Result<StoredGeneration, LineageError> {
     let file = generation_file(flow_id, ordinal, digest);
     let path = flows_path(directory)?.join(&file);
-    for step in [
-        path.parent().and_then(Path::parent),
-        path.parent(),
-        Some(path.as_path()),
-    ]
-    .into_iter()
-    .flatten()
+    for folder in [path.parent().and_then(Path::parent), path.parent()]
+        .into_iter()
+        .flatten()
     {
-        reject_symlink(step)?;
+        reject_symlink(folder)?;
     }
-    let bytes = fs::read(&path).map_err(|error| {
-        io::Error::new(
-            error.kind(),
-            format!("cannot read {}: {error}", path.display()),
-        )
-    })?;
-    let artifact = parse_artifact(&bytes)?;
+    let artifact = parse_artifact(&read_bytes(&path)?)?;
     if artifact.flow_id != *flow_id {
         return Err(LineageError::FlowMismatch {
             folder: flow_id.to_string(),

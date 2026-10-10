@@ -376,10 +376,10 @@ fn graph_name(name: &str) -> bool {
 
 /// Returns the source JSON of every step function of one flow.
 ///
-/// The current generation of the flow must bind the named graph. A missing or
-/// linked lineage or graph file is a 404. A lineage that cannot be read for any
-/// other reason is a 500. File paths come from the graph, never from the query,
-/// and stay inside the project folder that holds the store.
+/// The current generation of the flow must bind the named graph. A missing,
+/// linked, or non-regular lineage or graph file is a 404. A lineage that cannot
+/// be read for any other reason is a 500. File paths come from the graph, never
+/// from the query, and stay inside the project folder that holds the store.
 fn source_document(store: &Path, query: Option<&str>) -> Result<Vec<u8>, Reply> {
     let (artifact, flow) = source_query(query)?;
     check_link(store)?;
@@ -905,6 +905,46 @@ mod tests {
         let lineage = store.join("flows/demo-flow");
         fs::rename(&lineage, project.path().join("lineage")).expect("move lineage");
         std::os::unix::fs::symlink(project.path().join("lineage"), &lineage).expect("link lineage");
+        assert_error(&get(&store, url), 404);
+    }
+
+    #[test]
+    fn rejects_source_requests_for_a_graph_or_pointer_that_is_a_folder() {
+        let url = "/source?artifact=graph.json&flow=demo-flow";
+        let project = source_fixture();
+        let store = project.path().join(".tekdek");
+        fs::remove_file(store.join("graph.json")).expect("remove graph");
+        fs::create_dir(store.join("graph.json")).expect("graph folder");
+        assert_error(&get(&store, url), 404);
+
+        let project = source_fixture();
+        let store = project.path().join(".tekdek");
+        let pointer = store.join("flows/demo-flow/current.json");
+        fs::remove_file(&pointer).expect("remove pointer");
+        fs::create_dir(&pointer).expect("pointer folder");
+        assert_error(&get(&store, url), 404);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_source_requests_for_a_graph_or_pointer_that_is_a_pipe() {
+        let url = "/source?artifact=graph.json&flow=demo-flow";
+        let pipe = |path: &Path| {
+            fs::remove_file(path).expect("remove file");
+            let made = std::process::Command::new("mkfifo")
+                .arg(path)
+                .status()
+                .expect("mkfifo");
+            assert!(made.success(), "mkfifo must create the pipe");
+        };
+        let project = source_fixture();
+        let store = project.path().join(".tekdek");
+        pipe(&store.join("graph.json"));
+        assert_error(&get(&store, url), 404);
+
+        let project = source_fixture();
+        let store = project.path().join(".tekdek");
+        pipe(&store.join("flows/demo-flow/current.json"));
         assert_error(&get(&store, url), 404);
     }
 

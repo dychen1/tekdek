@@ -157,6 +157,28 @@ mod tests {
         assert!(error.contains("no flow named missing"), "{error}");
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn rejects_a_flow_whose_pointer_is_a_folder_or_a_pipe() {
+        let store = tempfile::tempdir().expect("store");
+        let pointer = store.path().join("flows/demo-flow/current.json");
+        let assert_unlisted = || {
+            let error = flow_url("http://127.0.0.1:1/viewer/", store.path(), "demo-flow")
+                .expect_err("unlisted flow");
+            assert!(error.contains("no flow named demo-flow"), "{error}");
+        };
+        std::fs::create_dir_all(&pointer).expect("pointer folder");
+        assert_unlisted();
+
+        std::fs::remove_dir(&pointer).expect("remove folder");
+        let made = std::process::Command::new("mkfifo")
+            .arg(&pointer)
+            .status()
+            .expect("mkfifo");
+        assert!(made.success(), "mkfifo must create the pipe");
+        assert_unlisted();
+    }
+
     #[test]
     fn opens_the_complete_url_on_each_operating_system() {
         let url = "http://127.0.0.1:1/viewer/?artifact=a.json&flow=b&step=3";

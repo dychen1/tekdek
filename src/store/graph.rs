@@ -23,11 +23,11 @@
 //! `Conversion` maps the analysis graph onto that shape.
 //! `Reading and writing` validates, reads, and writes one document.
 
-use std::{collections::BTreeSet, fs, io, path::Path};
+use std::{collections::BTreeSet, io, path::Path};
 
 use serde::{Deserialize, Serialize};
 
-use super::{digest_of, lock_store, reject_symlink, write_json};
+use super::{digest_of, lock_store, read_bytes, reject_symlink, write_json};
 use crate::analysis::{
     fact::{EntityKind, RelationKind},
     graph::{Edge, Graph, Node, NodeId, ProvenanceOrigin},
@@ -397,14 +397,7 @@ pub fn check_graph_name(file: &str) -> io::Result<()> {
 pub fn read_graph(directory: &Path, file: &str) -> io::Result<(ArtifactGraph, String)> {
     check_graph_name(file)?;
     reject_symlink(directory)?;
-    let path = directory.join(file);
-    reject_symlink(&path)?;
-    let bytes = fs::read(&path).map_err(|error| {
-        io::Error::new(
-            error.kind(),
-            format!("cannot read {}: {error}", path.display()),
-        )
-    })?;
+    let bytes = read_bytes(&directory.join(file))?;
     let artifact = GraphArtifact::read(&bytes)?;
     Ok((artifact.graph, digest_of(&bytes)))
 }
