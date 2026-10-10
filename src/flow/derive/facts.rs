@@ -14,7 +14,7 @@ use crate::{
         canonical::{self, CanonicalError},
         models::{
             ContentHash, FactBinding, FactEdge, FactLayer, FactNode, FactProjection, NodeKey,
-            NodeKind, RelationKind, Sha256Digest, from_wire_name, wire_name,
+            NodeKind, Sha256Digest, wire_name,
         },
     },
     store::graph::ArtifactGraph,
@@ -39,8 +39,6 @@ pub fn fact_layer(
         .filter(|node| keys.contains(node.key.as_str()))
     {
         let key = NodeKey::try_from(node.key.as_str()).map_err(DeriveError::Fact)?;
-        let kind: NodeKind = from_wire_name(&node.kind)
-            .ok_or_else(|| DeriveError::Graph(format!("unknown node kind {}", node.kind)))?;
         let content_hash = node
             .content_hash
             .as_deref()
@@ -50,7 +48,7 @@ pub fn fact_layer(
         let mut fact = FactNode {
             key: key.clone(),
             name: node.name.clone(),
-            kind,
+            kind: node.kind,
             language: node.language.clone(),
             path: node.path.clone(),
             content_hash,
@@ -68,9 +66,10 @@ pub fn fact_layer(
         let (Some(source), Some(target)) = (ids.get(&edge.source), ids.get(&edge.target)) else {
             continue;
         };
-        let kind: RelationKind = from_wire_name(&edge.kind)
-            .ok_or_else(|| DeriveError::Graph(format!("unknown relation kind {}", edge.kind)))?;
-        edges.insert((source.clone(), target.clone(), wire_name(&kind)), kind);
+        edges.insert(
+            (source.clone(), target.clone(), wire_name(&edge.kind)),
+            edge.kind,
+        );
     }
     Ok(FactLayer {
         projection: FactProjection::NodeFact1,

@@ -13,7 +13,9 @@ use super::{
     lineage,
     models::{Author, FlowArtifact, FlowId},
 };
-use crate::store::graph::{ArtifactEdge, ArtifactGraph, ArtifactNode, GraphArtifact};
+use crate::store::graph::{
+    ArtifactEdge, ArtifactGraph, ArtifactNode, GraphArtifact, NodeKind, Origin, RelationKind,
+};
 
 /// The generation digest of the fixture output frozen against the fixture graph.
 pub const GOLDEN_GENERATION: &str =
@@ -48,10 +50,10 @@ pub fn write_graph(directory: &Path, extra: &str) -> GraphArtifact {
             language: "rust".to_owned(),
             key: (*key).to_owned(),
             name: (*name).to_owned(),
-            kind: "callable".to_owned(),
+            kind: NodeKind::Callable,
             content_hash: Some(format!("{:016x}", u64::from(id) + 1)),
             path: (*path).to_owned(),
-            origin: "syntax".to_owned(),
+            origin: Origin::Syntax,
             declarations: vec![],
             scope: None,
             body: None,
@@ -65,9 +67,9 @@ pub fn write_graph(directory: &Path, extra: &str) -> GraphArtifact {
     let edge = |source: u32, target: u32| ArtifactEdge {
         source,
         target,
-        kind: "calls".to_owned(),
+        kind: RelationKind::Calls,
         weight: 1,
-        origin: "semantic".to_owned(),
+        origin: Origin::Semantic,
         observations: vec![],
     };
     let artifact = GraphArtifact {

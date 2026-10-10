@@ -1491,7 +1491,7 @@ mod tests {
         entity(
             facts,
             name,
-            |kind| matches!(kind, EntityKind::Type(data) if same_type_kind(&data.kind, expected)),
+            |kind| matches!(kind, EntityKind::Type(data) if data.kind == *expected),
         )
     }
 
@@ -1522,17 +1522,6 @@ mod tests {
             panic!("the entity must be callable");
         };
         data
-    }
-
-    fn same_type_kind(left: &TypeKind, right: &TypeKind) -> bool {
-        matches!(
-            (left, right),
-            (TypeKind::Class, TypeKind::Class)
-                | (TypeKind::Struct, TypeKind::Struct)
-                | (TypeKind::Enum, TypeKind::Enum)
-                | (TypeKind::Interface, TypeKind::Interface)
-                | (TypeKind::Trait, TypeKind::Trait)
-        )
     }
 
     fn assert_contains(

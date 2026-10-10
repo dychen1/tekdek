@@ -307,7 +307,7 @@ mod tests {
     use crate::{
         analysis::source::{ContentHash, SourceRange, content_span},
         flow::fixtures::{current, frozen, import, output, write_graph},
-        store::graph::{ArtifactNode, ArtifactRange},
+        store::graph::{ArtifactNode, ArtifactRange, NodeKind, Origin},
     };
 
     const RUST: &str = "use std::fs;\n\n/// Reads the file.\n/// Returns its text.\n#[must_use]\npub fn read(path: &str)\n    -> String {\n    fs::read_to_string(path).unwrap()\n}\n";
@@ -338,12 +338,12 @@ mod tests {
             language: language.to_owned(),
             key: "src/a::callable:f".to_owned(),
             name: "f".to_owned(),
-            kind: "callable".to_owned(),
+            kind: NodeKind::Callable,
             content_hash: Some(
                 ContentHash::of(&text[span.start as usize..span.end as usize]).to_string(),
             ),
             path: "src/a".to_owned(),
-            origin: "syntax".to_owned(),
+            origin: Origin::Syntax,
             declarations: vec![range(name)],
             scope: Some(range(scope)),
             body: Some(range(body)),

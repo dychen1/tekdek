@@ -15,8 +15,8 @@ use std::{error::Error, path::PathBuf};
 use serde::Serialize;
 use tekdek::{
     catalog,
-    query::{self, NODE_KINDS, NodeDetail, NodeRef, SearchResult},
-    store::graph::{ArtifactGraph, read_graph},
+    query::{self, NodeDetail, NodeRef, SearchResult},
+    store::graph::{ArtifactGraph, NODE_KINDS, NodeKind, read_graph},
 };
 
 use super::{failure, render, split_arguments, store_directory};
@@ -47,7 +47,7 @@ struct Command {
 enum Action {
     Search {
         text: String,
-        kind: Option<String>,
+        kind: Option<NodeKind>,
         limit: usize,
     },
     Show {
@@ -70,14 +70,14 @@ impl Command {
                 kind: options
                     .remove("--kind")
                     .map(|kind| {
-                        if NODE_KINDS.contains(&kind.as_str()) {
-                            Ok(kind)
-                        } else {
-                            Err(format!(
-                                "unknown node kind {kind}: use {}",
-                                NODE_KINDS.join(", ")
-                            ))
-                        }
+                        NODE_KINDS
+                            .into_iter()
+                            .find(|known| known.to_string() == kind)
+                            .ok_or_else(|| {
+                                let known: Vec<String> =
+                                    NODE_KINDS.iter().map(ToString::to_string).collect();
+                                format!("unknown node kind {kind}: use {}", known.join(", "))
+                            })
                     })
                     .transpose()?,
                 limit: options
@@ -135,7 +135,7 @@ fn execute(command: Command) -> Result<(u8, String), Box<dyn Error>> {
     match command.action {
         // Rank the matching keys.
         Action::Search { text, kind, limit } => {
-            let result = query::search(&graph, &text, kind.as_deref(), limit);
+            let result = query::search(&graph, &text, kind, limit);
             let human = describe_search(&result, &file);
             Ok((0, render(command.json, &in_graph(&file, &result), human)?))
         }
@@ -180,7 +180,7 @@ fn missing_key(graph: &ArtifactGraph, file: &str, key: &str) -> String {
             .nodes
             .iter()
             .filter(|node| node.path == path && node.key != path)
-            .filter(|node| kind.is_empty() || node.kind == kind)
+            .filter(|node| kind.is_empty() || node.kind.to_string() == kind)
             .map(|node| node.key.clone())
             .take(5)
             .collect();

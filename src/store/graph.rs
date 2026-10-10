@@ -19,17 +19,17 @@
 //!
 //! # Sections
 //!
-//! `Schema` defines the document shape.
+//! `Schema` defines the document shape and its wire enums.
 //! `Conversion` maps the analysis graph onto that shape.
 //! `Reading and writing` validates, reads, and writes one document.
 
-use std::{collections::BTreeSet, io, path::Path};
+use std::{collections::BTreeSet, fmt, io, path::Path};
 
 use serde::{Deserialize, Serialize};
 
 use super::{digest_of, lock_store, read_bytes, reject_symlink, write_bytes};
 use crate::analysis::{
-    fact::{EntityKind, RelationKind},
+    fact::{self, EntityKind},
     graph::{Edge, Graph, Node, NodeId, ProvenanceOrigin},
     source::{SourceRange, SourceSpan},
 };
@@ -68,11 +68,11 @@ pub struct ArtifactNode {
     pub language: String,
     pub key: String,
     pub name: String,
-    pub kind: String,
+    pub kind: NodeKind,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content_hash: Option<String>,
     pub path: String,
-    pub origin: String,
+    pub origin: Origin,
     pub declarations: Vec<ArtifactRange>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scope: Option<ArtifactRange>,
@@ -95,9 +95,9 @@ pub struct ArtifactNode {
 pub struct ArtifactEdge {
     pub source: u32,
     pub target: u32,
-    pub kind: String,
+    pub kind: RelationKind,
     pub weight: u32,
-    pub origin: String,
+    pub origin: Origin,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub observations: Vec<ArtifactObservation>,
 }
@@ -114,6 +114,52 @@ pub struct ArtifactObservation {
 pub struct ArtifactRange {
     pub start: u32,
     pub end: u32,
+}
+
+/// The kind of one graph node. Serde refuses any other value on read.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NodeKind {
+    Module,
+    Type,
+    Callable,
+    Field,
+}
+
+/// Every node kind, in declaration order.
+pub const NODE_KINDS: [NodeKind; 4] = [
+    NodeKind::Module,
+    NodeKind::Type,
+    NodeKind::Callable,
+    NodeKind::Field,
+];
+
+impl fmt::Display for NodeKind {
+    /// Writes the wire name.
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.serialize(formatter)
+    }
+}
+
+/// The kind of one graph edge. Serde refuses any other value on read.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RelationKind {
+    Contains,
+    Calls,
+    Imports,
+    InputType,
+    OutputType,
+    UsesType,
+    UsesValue,
+}
+
+/// The analysis stage that made one node or edge. Serde refuses any other value on read.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Origin {
+    Syntax,
+    Semantic,
 }
 
 // -----------------------------------------------------------------------------
@@ -147,13 +193,22 @@ impl GraphArtifact {
 
 fn artifact_node(id: NodeId, node: &Node) -> ArtifactNode {
     let evidence = &node.provenance.evidence;
-    let (signature, parameters, return_type, declared_type, documentation) = match &node.kind {
+    let (kind, signature, parameters, return_type, declared_type, documentation) = match &node.kind
+    {
         // Emit no kind-specific metadata for modules.
-        EntityKind::Module => (None, Vec::new(), None, None, None),
+        EntityKind::Module => (NodeKind::Module, None, Vec::new(), None, None, None),
         // Preserve type documentation.
-        EntityKind::Type(data) => (None, Vec::new(), None, None, data.documentation.clone()),
+        EntityKind::Type(data) => (
+            NodeKind::Type,
+            None,
+            Vec::new(),
+            None,
+            None,
+            data.documentation.clone(),
+        ),
         // Preserve callable signature metadata.
         EntityKind::Callable(data) => (
+            NodeKind::Callable,
             data.signature.clone(),
             data.parameters.clone(),
             data.return_type.clone(),
@@ -161,7 +216,14 @@ fn artifact_node(id: NodeId, node: &Node) -> ArtifactNode {
             data.documentation.clone(),
         ),
         // Preserve field type metadata.
-        EntityKind::Field(data) => (None, Vec::new(), None, data.declared_type.clone(), None),
+        EntityKind::Field(data) => (
+            NodeKind::Field,
+            None,
+            Vec::new(),
+            None,
+            data.declared_type.clone(),
+            None,
+        ),
     };
 
     ArtifactNode {
@@ -169,10 +231,10 @@ fn artifact_node(id: NodeId, node: &Node) -> ArtifactNode {
         language: node.language.as_str().to_owned(),
         key: node.key.to_string(),
         name: node.name.clone(),
-        kind: node.kind.tag().to_owned(),
+        kind,
         content_hash: node.content_hash.map(|hash| hash.to_string()),
         path: evidence.path.clone(),
-        origin: origin_name(node.provenance.origin).to_owned(),
+        origin: origin(node.provenance.origin),
         declarations: evidence
             .declarations
             .iter()
@@ -193,9 +255,9 @@ fn artifact_edge(edge: &Edge) -> ArtifactEdge {
     ArtifactEdge {
         source: edge.source.0,
         target: edge.target.0,
-        kind: relation_kind_name(edge.kind).to_owned(),
+        kind: relation_kind(edge.kind),
         weight: edge.weight,
-        origin: origin_name(edge.provenance.origin).to_owned(),
+        origin: origin(edge.provenance.origin),
         observations: edge
             .provenance
             .evidence
@@ -221,30 +283,29 @@ fn artifact_range(range: SourceRange) -> ArtifactRange {
     }
 }
 
-fn relation_kind_name(kind: RelationKind) -> &'static str {
+fn relation_kind(kind: fact::RelationKind) -> RelationKind {
     match kind {
         // Encode containment.
-        RelationKind::Contains => "contains",
+        fact::RelationKind::Contains => RelationKind::Contains,
         // Encode direct calls.
-        RelationKind::Calls => "calls",
+        fact::RelationKind::Calls => RelationKind::Calls,
         // Encode imports.
-        RelationKind::Imports => "imports",
+        fact::RelationKind::Imports => RelationKind::Imports,
         // Encode an accepted signature type.
-        RelationKind::InputType => "input_type",
+        fact::RelationKind::InputType => RelationKind::InputType,
         // Encode a returned signature type.
-        RelationKind::OutputType => "output_type",
+        fact::RelationKind::OutputType => RelationKind::OutputType,
         // Encode type use.
-        RelationKind::UsesType => "uses_type",
+        fact::RelationKind::UsesType => RelationKind::UsesType,
         // Encode value use.
-        RelationKind::UsesValue => "uses_value",
+        fact::RelationKind::UsesValue => RelationKind::UsesValue,
     }
 }
 
-fn origin_name(origin: ProvenanceOrigin) -> &'static str {
+fn origin(origin: ProvenanceOrigin) -> Origin {
     match origin {
-        ProvenanceOrigin::Syntax => "syntax",
-        ProvenanceOrigin::Semantic => "semantic",
-        ProvenanceOrigin::Derived => "derived",
+        ProvenanceOrigin::Syntax => Origin::Syntax,
+        ProvenanceOrigin::Semantic => Origin::Semantic,
     }
 }
 
@@ -324,8 +385,6 @@ impl ArtifactGraph {
                 return Err(invalid("invalid or duplicate graph node identity"));
             }
             if !languages.contains(&node.language)
-                || !matches!(node.kind.as_str(), "module" | "type" | "callable" | "field")
-                || !matches!(node.origin.as_str(), "syntax" | "semantic" | "derived")
                 || node
                     .declarations
                     .iter()
@@ -340,18 +399,7 @@ impl ArtifactGraph {
             if !ids.contains(&edge.source) || !ids.contains(&edge.target) {
                 return Err(invalid("a graph edge names an unknown node"));
             }
-            if !matches!(
-                edge.kind.as_str(),
-                "contains"
-                    | "calls"
-                    | "imports"
-                    | "input_type"
-                    | "output_type"
-                    | "uses_type"
-                    | "uses_value"
-            ) || !matches!(edge.origin.as_str(), "syntax" | "semantic" | "derived")
-                || edge.observations.iter().any(|span| span.start > span.end)
-            {
+            if edge.observations.iter().any(|span| span.start > span.end) {
                 return Err(invalid("invalid graph edge metadata"));
             }
         }
@@ -406,7 +454,7 @@ pub fn read_graph(directory: &Path, file: &str) -> io::Result<(ArtifactGraph, St
 
 #[cfg(test)]
 mod tests {
-    use super::{GraphArtifact, check_graph_name, read_graph};
+    use super::{GraphArtifact, NODE_KINDS, NodeKind, check_graph_name, digest_of, read_graph};
     use crate::analysis::{
         fact::{
             CallableData, CallableKind, EntityEvidence, EntityKey, EntityKind, RelationEvidence,
@@ -428,6 +476,49 @@ mod tests {
         value["schemaVersion"] = serde_json::json!(1);
         value["graph"]["edges"][0]["target"] = serde_json::json!(999);
         assert!(GraphArtifact::read(&serde_json::to_vec(&value).expect("serialize")).is_err());
+    }
+
+    #[test]
+    fn refuses_an_unknown_node_kind_edge_kind_or_origin() {
+        let value = serde_json::to_value(GraphArtifact::new(&two_node_graph())).expect("value");
+        for (pointer, unknown) in [
+            ("/graph/nodes/0/kind", "interface"),
+            ("/graph/nodes/0/origin", "derived"),
+            ("/graph/edges/0/kind", "derives"),
+            ("/graph/edges/0/origin", "derived"),
+        ] {
+            let mut changed = value.clone();
+            *changed.pointer_mut(pointer).expect(pointer) = unknown.into();
+            let bytes = serde_json::to_vec(&changed).expect("bytes");
+            assert!(GraphArtifact::read(&bytes).is_err(), "{pointer}");
+        }
+    }
+
+    #[test]
+    fn lists_every_node_kind_once() {
+        // A new kind fails this match until NODE_KINDS and this list name it.
+        let position = |kind: NodeKind| match kind {
+            NodeKind::Module => 0,
+            NodeKind::Type => 1,
+            NodeKind::Callable => 2,
+            NodeKind::Field => 3,
+        };
+        assert_eq!(NODE_KINDS.map(position), [0, 1, 2, 3]);
+        assert_eq!(
+            NODE_KINDS.map(|kind| kind.to_string()),
+            ["module", "type", "callable", "field"]
+        );
+    }
+
+    #[test]
+    fn writes_the_demo_graph_back_byte_for_byte() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("demo/tekdek.json");
+        let bytes = std::fs::read(path).expect("demo graph");
+
+        let artifact = GraphArtifact::read(&bytes).expect("read the demo graph");
+
+        let written = artifact.to_bytes().expect("bytes");
+        assert_eq!(digest_of(&written), digest_of(&bytes));
     }
 
     #[test]

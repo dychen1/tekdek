@@ -37,8 +37,7 @@ pub use diff::{
     MembershipChange, Presence, StepDiff, StepField,
 };
 pub use facts::{
-    FactBinding, FactEdge, FactLayer, FactNode, FactProjection, NodeKind, RelationKind,
-    from_wire_name, wire_name,
+    FactBinding, FactEdge, FactLayer, FactNode, FactProjection, NodeKind, RelationKind, wire_name,
 };
 pub use ids::{
     ClusterKey, ContentHash, FlowId, InvalidIdentifier, NodeKey, Sha256Digest, StepId,

@@ -121,5 +121,4 @@ pub struct Provenance<E> {
 pub enum ProvenanceOrigin {
     Syntax,
     Semantic,
-    Derived,
 }
