@@ -9,7 +9,10 @@ use std::{
     process::{Command, Stdio},
 };
 
-use tekdek::{catalog::build_catalog, serve::ViewerServer};
+use tekdek::{
+    flow::{lineage::read_current, models::FlowId},
+    serve::ViewerServer,
+};
 use url::Url;
 
 use super::{split_arguments, store_directory};
@@ -77,14 +80,14 @@ fn parse(raw: impl Iterator<Item = String>) -> Result<Arguments, String> {
     })
 }
 
-/// Returns the viewer URL that opens one flow under the graph that the store catalog lists it with.
+/// Returns the viewer URL that opens one flow under the graph that its current generation binds.
 fn flow_url(base: &str, store: &Path, flow: &str) -> Result<String, String> {
-    let catalog =
-        build_catalog(store).map_err(|error| format!("cannot read the store catalog: {error}"))?;
-    let artifact = catalog
-        .graph_of_flow(flow)
-        .ok_or_else(|| format!("the store lists no flow named {flow}: run `tekdek flow list`"))?;
-    viewer_url(base, artifact, flow)
+    let unlisted = || format!("the store lists no flow named {flow}: run `tekdek flow list`");
+    let flow_id = FlowId::try_from(flow).map_err(|_| unlisted())?;
+    let current = read_current(store, &flow_id)
+        .map_err(|error| format!("cannot read the flow {flow}: {error}"))?
+        .ok_or_else(unlisted)?;
+    viewer_url(base, &current.artifact.facts.binding.graph_artifact, flow)
 }
 
 /// Returns the viewer URL of one flow under one graph file.

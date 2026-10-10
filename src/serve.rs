@@ -277,8 +277,7 @@ fn route(store: &Path, parts: &[String], query: Option<&str>) -> Result<Reply, R
         ["artifacts", "index.json"] => Ok(Reply::json(catalog_document(store)?)),
         // Serve the store files that the catalog lists.
         ["artifacts", rest @ ..] if !rest.is_empty() => {
-            let file = rest.join("/");
-            if !listed(&catalog_files(store)?, &file) {
+            if !catalog_files(store)?.contains(&rest.join("/")) {
                 return Err(not_found());
             }
             Ok(Reply::json(read_safe(store, rest)?))
@@ -361,40 +360,9 @@ fn catalog_failure(error: &io::Error) -> Reply {
     }
 }
 
-/// True when the catalog lists the file: a graph file, or a current flow generation under `flows/`.
-fn listed(files: &[String], file: &str) -> bool {
-    let named = match file.strip_prefix("flows/") {
-        Some(path) => generation_file(path),
-        None => graph_name(file),
-    };
-    named && files.iter().any(|listed| listed == file)
-}
-
 /// Accepts a graph file name: one store entry that ends in `.json`, does not start with a dot, and is not the index.
 fn graph_name(name: &str) -> bool {
     !name.starts_with('.') && check_graph_name(name).is_ok()
-}
-
-/// Accepts a generation path: `<flow ID>/generations/<ordinal>-<digest12>.json`.
-fn generation_file(path: &str) -> bool {
-    let parts: Vec<&str> = path.split('/').collect();
-    let [id, "generations", name] = parts.as_slice() else {
-        return false;
-    };
-    let Some((ordinal, digest)) = name
-        .strip_suffix(".json")
-        .and_then(|stem| stem.split_once('-'))
-    else {
-        return false;
-    };
-    is_flow_id(id)
-        && (1..=9).contains(&ordinal.len())
-        && !ordinal.starts_with('0')
-        && ordinal.bytes().all(|byte| byte.is_ascii_digit())
-        && digest.len() == 12
-        && digest
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
 // -----------------------------------------------------------------------------
@@ -406,21 +374,26 @@ const MAX_SOURCE_BYTES: u64 = 2 * 1024 * 1024;
 
 /// Returns the source JSON of every step function of one flow.
 ///
-/// The flow must be in the catalog under the named graph. File paths come
-/// from the graph, never from the query, and stay inside the project folder
-/// that holds the store.
+/// The current generation of the flow must bind the named graph. A flow that
+/// the catalog skips, because its lineage cannot be read, and a linked graph
+/// file are a 404. File paths come from the graph, never from the query, and
+/// stay inside the project folder that holds the store.
 fn source_document(store: &Path, query: Option<&str>) -> Result<Vec<u8>, Reply> {
     let (artifact, flow) = source_query(query)?;
     check_link(store)?;
-    let catalog = build_catalog(store).map_err(|error| catalog_failure(&error))?;
-    if catalog.graph_of_flow(&flow) != Some(artifact.as_str()) {
-        return Err(not_found());
-    }
-    let (graph, _) = read_graph(store, &artifact).map_err(|error| read_failure(&error))?;
     let flow_id = FlowId::try_from(flow.as_str()).map_err(|_| not_found())?;
     let current = read_current(store, &flow_id)
-        .map_err(|_| Reply::failure(500, "Cannot read the flow."))?
+        .ok()
+        .flatten()
+        .filter(|current| current.artifact.facts.binding.graph_artifact == artifact)
         .ok_or_else(not_found)?;
+    let (graph, _) = read_graph(store, &artifact).map_err(|error| {
+        if error.kind() == io::ErrorKind::InvalidInput {
+            not_found()
+        } else {
+            read_failure(&error)
+        }
+    })?;
     let store = fs::canonicalize(store).map_err(|error| read_failure(&error))?;
     let root = store
         .parent()
@@ -997,6 +970,24 @@ mod tests {
         ] {
             assert_error(&get(&store, url), code);
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_source_requests_for_a_linked_graph_or_an_unreadable_flow() {
+        let url = "/source?artifact=graph.json&flow=demo-flow";
+        let project = source_fixture();
+        let store = project.path().join(".tekdek");
+        fs::rename(store.join("graph.json"), project.path().join("graph.json")).expect("move");
+        assert_error(&get(&store, url), 404);
+        std::os::unix::fs::symlink(project.path().join("graph.json"), store.join("graph.json"))
+            .expect("link graph");
+        assert_error(&get(&store, url), 404);
+
+        let project = source_fixture();
+        let store = project.path().join(".tekdek");
+        fs::write(store.join("flows/demo-flow/current.json"), "{").expect("pointer");
+        assert_error(&get(&store, url), 404);
     }
 
     #[cfg(unix)]
