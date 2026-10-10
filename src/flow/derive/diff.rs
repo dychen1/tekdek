@@ -94,63 +94,41 @@ pub fn diff(
 }
 
 fn step_diffs(base: &[FlowStep], current: &[FlowStep], summary: &mut DiffSummary) -> Vec<StepDiff> {
-    let base_by_id: BTreeMap<&StepId, &FlowStep> =
-        base.iter().map(|step| (&step.id, step)).collect();
-    let current_ids: BTreeSet<&StepId> = current.iter().map(|step| &step.id).collect();
-    let retained_base: Vec<&StepId> = base
-        .iter()
-        .map(|step| &step.id)
-        .filter(|id| current_ids.contains(id))
-        .collect();
-    let retained_current: Vec<&StepId> = current
-        .iter()
-        .map(|step| &step.id)
-        .filter(|id| base_by_id.contains_key(id))
-        .collect();
-    let in_place = common_subsequence(&retained_base, &retained_current);
-    let mut diffs = Vec::new();
-    for step in current {
-        let Some(before) = base_by_id.get(&step.id) else {
-            summary.steps_added += 1;
-            diffs.push(StepDiff {
-                step_id: step.id.clone(),
-                presence: Presence::Added,
-                changed_fields: vec![],
-            });
-            continue;
-        };
-        let mut changed_fields = Vec::new();
-        if before.node_key != step.node_key {
-            changed_fields.push(StepField::Node);
-        }
-        if before.cluster_key != step.cluster_key {
-            changed_fields.push(StepField::Cluster);
-        }
-        if before.title != step.title {
-            changed_fields.push(StepField::Title);
-        }
-        if before.annotation != step.annotation {
-            changed_fields.push(StepField::Annotation);
-        }
-        if !in_place.contains(&step.id) {
-            changed_fields.push(StepField::Position);
-        }
-        summary.steps_changed += u32::from(!changed_fields.is_empty());
-        diffs.push(StepDiff {
-            step_id: step.id.clone(),
-            presence: Presence::Retained,
-            changed_fields,
-        });
-    }
-    for step in base.iter().filter(|step| !current_ids.contains(&step.id)) {
-        summary.steps_removed += 1;
-        diffs.push(StepDiff {
-            step_id: step.id.clone(),
-            presence: Presence::Removed,
-            changed_fields: vec![],
-        });
-    }
-    diffs
+    keyed_changes(base, current, |step| &step.id)
+        .into_iter()
+        .map(|change| {
+            let mut changed_fields = Vec::new();
+            if let (Some(before), step) = (change.before, change.item) {
+                if before.node_key != step.node_key {
+                    changed_fields.push(StepField::Node);
+                }
+                if before.cluster_key != step.cluster_key {
+                    changed_fields.push(StepField::Cluster);
+                }
+                if before.title != step.title {
+                    changed_fields.push(StepField::Title);
+                }
+                if before.annotation != step.annotation {
+                    changed_fields.push(StepField::Annotation);
+                }
+                if !change.in_place {
+                    changed_fields.push(StepField::Position);
+                }
+            }
+            match change.presence {
+                Presence::Added => summary.steps_added += 1,
+                Presence::Removed => summary.steps_removed += 1,
+                Presence::Retained => {
+                    summary.steps_changed += u32::from(!changed_fields.is_empty());
+                }
+            }
+            StepDiff {
+                step_id: change.item.id.clone(),
+                presence: change.presence,
+                changed_fields,
+            }
+        })
+        .collect()
 }
 
 fn cluster_diffs(
@@ -160,20 +138,6 @@ fn cluster_diffs(
     current_members: &BTreeMap<&NodeKey, &ClusterKey>,
     summary: &mut DiffSummary,
 ) -> Vec<ClusterDiff> {
-    let base_by_key: BTreeMap<&ClusterKey, &ClusterIntent> =
-        base.iter().map(|cluster| (&cluster.key, cluster)).collect();
-    let current_keys: BTreeSet<&ClusterKey> = current.iter().map(|cluster| &cluster.key).collect();
-    let retained_base: Vec<&ClusterKey> = base
-        .iter()
-        .map(|cluster| &cluster.key)
-        .filter(|key| current_keys.contains(key))
-        .collect();
-    let retained_current: Vec<&ClusterKey> = current
-        .iter()
-        .map(|cluster| &cluster.key)
-        .filter(|key| base_by_key.contains_key(key))
-        .collect();
-    let in_place = common_subsequence(&retained_base, &retained_current);
     let members_of =
         |members: &BTreeMap<&NodeKey, &ClusterKey>, key: &ClusterKey| -> BTreeSet<NodeKey> {
             members
@@ -182,52 +146,101 @@ fn cluster_diffs(
                 .map(|(node, _)| (*node).clone())
                 .collect()
         };
-    let mut diffs = Vec::new();
-    for cluster in current {
-        let Some(before) = base_by_key.get(&cluster.key) else {
-            summary.clusters_added += 1;
-            diffs.push(ClusterDiff {
-                cluster_key: cluster.key.clone(),
-                presence: Presence::Added,
-                changed_fields: vec![],
-            });
-            continue;
-        };
-        let mut changed_fields = Vec::new();
-        if before.label != cluster.label {
-            changed_fields.push(ClusterField::Label);
-        }
-        if before.description != cluster.description {
-            changed_fields.push(ClusterField::Description);
-        }
-        if before.phase != cluster.phase || before.phase_note != cluster.phase_note {
-            changed_fields.push(ClusterField::Phase);
-        }
-        if members_of(base_members, &cluster.key) != members_of(current_members, &cluster.key) {
-            changed_fields.push(ClusterField::Members);
-        }
-        if !in_place.contains(&cluster.key) {
-            changed_fields.push(ClusterField::Position);
-        }
-        summary.clusters_changed += u32::from(!changed_fields.is_empty());
-        diffs.push(ClusterDiff {
-            cluster_key: cluster.key.clone(),
-            presence: Presence::Retained,
-            changed_fields,
-        });
-    }
-    for cluster in base
+    keyed_changes(base, current, |cluster| &cluster.key)
+        .into_iter()
+        .map(|change| {
+            let mut changed_fields = Vec::new();
+            if let (Some(before), cluster) = (change.before, change.item) {
+                if before.label != cluster.label {
+                    changed_fields.push(ClusterField::Label);
+                }
+                if before.description != cluster.description {
+                    changed_fields.push(ClusterField::Description);
+                }
+                if before.phase != cluster.phase || before.phase_note != cluster.phase_note {
+                    changed_fields.push(ClusterField::Phase);
+                }
+                if members_of(base_members, &cluster.key)
+                    != members_of(current_members, &cluster.key)
+                {
+                    changed_fields.push(ClusterField::Members);
+                }
+                if !change.in_place {
+                    changed_fields.push(ClusterField::Position);
+                }
+            }
+            match change.presence {
+                Presence::Added => summary.clusters_added += 1,
+                Presence::Removed => summary.clusters_removed += 1,
+                Presence::Retained => {
+                    summary.clusters_changed += u32::from(!changed_fields.is_empty());
+                }
+            }
+            ClusterDiff {
+                cluster_key: change.item.key.clone(),
+                presence: change.presence,
+                changed_fields,
+            }
+        })
+        .collect()
+}
+
+/// One item of a keyed walk. `item` is a current item, or a removed base item.
+struct Change<'a, T> {
+    presence: Presence,
+    item: &'a T,
+    /// The base item of a retained item.
+    before: Option<&'a T>,
+    /// True when a retained item is in a longest common subsequence of the retained keys.
+    in_place: bool,
+}
+
+/// Walks two lists by key: current items in order, then removed base items in base order.
+fn keyed_changes<'a, T, K: Ord>(
+    base: &'a [T],
+    current: &'a [T],
+    key: fn(&T) -> &K,
+) -> Vec<Change<'a, T>> {
+    let base_by_key: BTreeMap<&K, &T> = base.iter().map(|item| (key(item), item)).collect();
+    let current_keys: BTreeSet<&K> = current.iter().map(key).collect();
+    let retained_base: Vec<&K> = base
         .iter()
-        .filter(|cluster| !current_keys.contains(&cluster.key))
-    {
-        summary.clusters_removed += 1;
-        diffs.push(ClusterDiff {
-            cluster_key: cluster.key.clone(),
-            presence: Presence::Removed,
-            changed_fields: vec![],
-        });
-    }
-    diffs
+        .map(key)
+        .filter(|key| current_keys.contains(key))
+        .collect();
+    let retained_current: Vec<&K> = current
+        .iter()
+        .map(key)
+        .filter(|key| base_by_key.contains_key(key))
+        .collect();
+    let in_place = common_subsequence(&retained_base, &retained_current);
+    let mut changes: Vec<Change<'a, T>> = current
+        .iter()
+        .map(|item| {
+            let before = base_by_key.get(key(item)).copied();
+            Change {
+                presence: if before.is_some() {
+                    Presence::Retained
+                } else {
+                    Presence::Added
+                },
+                item,
+                before,
+                in_place: in_place.contains(key(item)),
+            }
+        })
+        .collect();
+    changes.extend(
+        base.iter()
+            .filter(|item| !current_keys.contains(key(item)))
+            .map(|item| Change {
+                presence: Presence::Removed,
+                item,
+                before: None,
+                in_place: false,
+            }),
+    );
+    changes
 }
 
 fn membership(assignment: &AssignmentLayer) -> BTreeMap<&NodeKey, &ClusterKey> {
@@ -289,12 +302,40 @@ fn common_subsequence<'a, T: Ord>(base: &[&'a T], current: &[&'a T]) -> BTreeSet
 mod tests {
     use std::collections::BTreeSet;
 
-    use super::common_subsequence;
+    use super::{common_subsequence, keyed_changes};
+    use crate::flow::models::Presence;
 
     #[test]
     fn common_subsequence_marks_moved_items() {
         let (a, b, c, d) = ("a", "b", "c", "d");
         let kept = common_subsequence(&[&a, &b, &c, &d], &[&b, &c, &a, &d]);
         assert_eq!(kept, BTreeSet::from([&b, &c, &d]));
+    }
+
+    #[test]
+    fn keyed_changes_list_current_items_then_removed_base_items() {
+        let changes = keyed_changes(&["a", "b", "c", "d"], &["b", "e", "a", "d"], |key| key);
+
+        let labels: Vec<String> = changes
+            .iter()
+            .map(|change| match change.presence {
+                Presence::Added => format!("added {}", change.item),
+                Presence::Retained if change.in_place => {
+                    format!("retained {} in place", change.item)
+                }
+                Presence::Retained => format!("retained {} moved", change.item),
+                Presence::Removed => format!("removed {}", change.item),
+            })
+            .collect();
+        assert_eq!(
+            labels,
+            [
+                "retained b in place",
+                "added e",
+                "retained a moved",
+                "retained d in place",
+                "removed c"
+            ]
+        );
     }
 }
