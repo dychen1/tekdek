@@ -59,40 +59,6 @@ pub struct ServerCommand {
     pub initialization_options: Value,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum RequiredCapability {
-    DocumentSymbols,
-    CallHierarchy,
-    References,
-    TypeDefinitions,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct CapabilityPolicy {
-    required: &'static [RequiredCapability],
-}
-
-impl CapabilityPolicy {
-    pub const NONE: Self = Self::new(&[]);
-
-    pub const SEMANTIC_GRAPH: Self = Self::new(&[
-        RequiredCapability::DocumentSymbols,
-        RequiredCapability::CallHierarchy,
-        RequiredCapability::References,
-        RequiredCapability::TypeDefinitions,
-    ]);
-
-    #[must_use]
-    pub const fn new(required: &'static [RequiredCapability]) -> Self {
-        Self { required }
-    }
-
-    #[must_use]
-    pub fn requires(self, capability: RequiredCapability) -> bool {
-        self.required.contains(&capability)
-    }
-}
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LanguageProfile {
     pub language: Language,
