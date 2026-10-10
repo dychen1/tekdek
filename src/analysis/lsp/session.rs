@@ -106,7 +106,7 @@ pub fn produce_semantic_facts(
 
     let captured = captured?;
     shutdown?;
-    capture::validate_capture(sources, &captured)?;
+    capture::validate_capture(&captured)?;
     capture::normalize_capture(&root, sources, captured, config.fallback)
 }
 

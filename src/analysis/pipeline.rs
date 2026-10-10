@@ -25,7 +25,6 @@ use super::{
     language::{Language, LanguageAdapter, LanguageProfile, builtin_profiles},
     preflight::{
         detect_languages, detect_required_languages, enabled_extensions, preflight_server_programs,
-        profile,
     },
     source::{self, DEFAULT_EXCLUDED_DIRECTORIES},
 };
@@ -41,12 +40,11 @@ use super::{
 /// Returns an error if loading, fact production, or graph construction fails.
 pub fn run(config: &PipelineConfig) -> Result<PipelineResult, PipelineError> {
     let documents = load_documents(config)?;
-    let languages = detect_required_languages(&documents, &config.profiles)?;
-    preflight_server_programs(&config.profiles, &languages)?;
+    let profiles = detect_required_languages(&documents, &config.profiles)?;
+    preflight_server_programs(&profiles)?;
 
-    let mut fact_sets = Vec::with_capacity(languages.len());
-    for language in &languages {
-        let profile = profile(&config.profiles, *language)?;
+    let mut fact_sets = Vec::with_capacity(profiles.len());
+    for profile in profiles {
         fact_sets.push(produce_facts(&config.root, profile, &documents)?);
     }
 
@@ -63,7 +61,10 @@ pub fn run(config: &PipelineConfig) -> Result<PipelineResult, PipelineError> {
 /// Returns an error if the source files cannot be read.
 pub fn detect_project_languages(config: &PipelineConfig) -> Result<Vec<Language>, PipelineError> {
     let documents = load_documents(config)?;
-    Ok(detect_languages(&documents, &config.profiles))
+    Ok(detect_languages(&documents, &config.profiles)
+        .into_iter()
+        .map(|profile| profile.language)
+        .collect())
 }
 
 fn load_documents(config: &PipelineConfig) -> Result<Vec<source::DocumentSnapshot>, PipelineError> {

@@ -320,42 +320,18 @@ fn call_locations(uri: &Uri, ranges: Vec<Range>) -> Vec<Location> {
 // Capture Validation
 // -----------------------------------------------------------------------------
 
-/// Requires equal document counts and matching paths in source order.
-/// Requires file URIs and selections contained by their definitions.
-/// Validates symbol values and forward location ranges.
+/// Validates the symbols and facts that the server returned.
+///
+/// The session builds the document paths and URIs itself, so they need no check.
 ///
 /// # Errors
 ///
-/// Returns an error if a file, symbol, or fact is invalid.
-pub(crate) fn validate_capture(
-    sources: &Sources<'_>,
-    capture: &SemanticCapture,
-) -> Result<(), LspError> {
-    if sources.len() != capture.documents.len() {
-        return Err(LspError::new(
-            "the selected source and captured document counts differ",
-        ));
+/// Returns an error if a symbol or fact is invalid.
+pub(crate) fn validate_capture(capture: &SemanticCapture) -> Result<(), LspError> {
+    for document in &capture.documents {
+        validate_document_symbols(&document.symbols, &document.path)?;
     }
-
-    for (document, captured_document) in sources.iter().zip(&capture.documents) {
-        let path = source_path(document)?;
-        if path != captured_document.path {
-            return Err(LspError::new(format!(
-                "the selected source path {} does not match the captured path {}",
-                path, captured_document.path
-            )));
-        }
-        if !captured_document.uri.as_str().starts_with("file:") {
-            return Err(LspError::new(format!(
-                "the captured URI is not a file: {}",
-                captured_document.path
-            )));
-        }
-        validate_document_symbols(&captured_document.symbols, &captured_document.path)?;
-    }
-    validate_facts(&capture.facts)?;
-
-    Ok(())
+    validate_facts(&capture.facts)
 }
 
 /// A selection outside its definition would query the wrong source position.
@@ -515,7 +491,6 @@ fn position_before_or_equal(left: Position, right: Position) -> bool {
 /// # Errors
 ///
 /// Returns an error if a selected source path is not valid UTF-8.
-/// Returns an error if a captured document path is unknown.
 /// Returns an error if a selected protocol position is outside its source.
 pub(crate) fn normalize_capture(
     root: &Path,
@@ -546,7 +521,6 @@ impl<'a> SourceLookup<'a> {
     /// # Errors
     ///
     /// Returns an error if a selected source path is not valid UTF-8.
-    /// Returns an error if a captured document path is unknown.
     fn new(
         root: &'a Path,
         sources: &'a Sources<'_>,
@@ -558,19 +532,11 @@ impl<'a> SourceLookup<'a> {
             .collect::<Result<HashMap<_, _>, LspError>>()?;
         let by_uri = documents
             .iter()
-            .map(|document| {
-                let source = by_path
-                    .get(document.path.as_str())
-                    .copied()
-                    .ok_or_else(|| {
-                        LspError::new(format!(
-                            "the language server returned an unknown document path: {}",
-                            document.path
-                        ))
-                    })?;
-                Ok((document.uri.as_str(), source))
+            .filter_map(|document| {
+                let source = by_path.get(document.path.as_str()).copied()?;
+                Some((document.uri.as_str(), source))
             })
-            .collect::<Result<HashMap<_, _>, LspError>>()?;
+            .collect();
 
         Ok(Self {
             root,
