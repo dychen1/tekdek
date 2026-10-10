@@ -17,9 +17,9 @@ use std::collections::{HashMap, HashSet};
 use serde::Serialize;
 
 use crate::{
-    analysis::source::ContentHash,
+    analysis::source::{ContentHash, SourceRange, content_span},
     flow::models::FlowArtifact,
-    store::graph::{ArtifactGraph, ArtifactNode},
+    store::graph::{ArtifactGraph, ArtifactNode, ArtifactRange},
 };
 
 // -----------------------------------------------------------------------------
@@ -231,21 +231,23 @@ fn holds(text: &str, start: usize, end: usize) -> bool {
 
 /// True when the node has no content hash, or the text still hashes to it.
 ///
-/// The hashed range is the indexer's: the first declaration to the body end.
+/// The hashed range is the indexer's `content_span`.
 fn hash_matches(text: &str, node: &ArtifactNode) -> bool {
     let Some(expected) = &node.content_hash else {
         return true;
     };
-    let start = node.declarations.iter().map(|range| range.start).min();
-    let end = node.declarations.iter().map(|range| range.end).max();
-    let range = match (&node.body, start, end) {
-        (Some(body), _, _) => Some((start.unwrap_or(body.start), body.end)),
-        (None, Some(start), Some(end)) => Some((start, end)),
-        (None, _, _) => node.scope.as_ref().map(|scope| (scope.start, scope.end)),
+    let source = |range: &ArtifactRange| SourceRange {
+        start: range.start,
+        end: range.end,
     };
-    range
-        .and_then(|(start, end)| text.get(start as usize..end as usize))
-        .is_some_and(|slice| ContentHash::of(slice).to_string() == *expected)
+    let declarations: Vec<SourceRange> = node.declarations.iter().map(source).collect();
+    content_span(
+        &declarations,
+        node.body.as_ref().map(source),
+        node.scope.as_ref().map(source),
+    )
+    .and_then(|span| text.get(span.start as usize..span.end as usize))
+    .is_some_and(|slice| ContentHash::of(slice).to_string() == *expected)
 }
 
 /// Counts the lines right above the scope that belong to it.
@@ -303,7 +305,7 @@ mod tests {
 
     use super::{CutError, MAX_LINES, SourceStatus, cut, flow_sources};
     use crate::{
-        analysis::source::ContentHash,
+        analysis::source::{ContentHash, SourceRange, content_span},
         flow::fixtures::{current, frozen, import, output, write_graph},
         store::graph::{ArtifactNode, ArtifactRange},
     };
@@ -328,6 +330,9 @@ mod tests {
         body: (u32, u32),
     ) -> ArtifactNode {
         let range = |(start, end): (u32, u32)| ArtifactRange { start, end };
+        let source = |(start, end): (u32, u32)| SourceRange { start, end };
+        let span =
+            content_span(&[source(name)], Some(source(body)), Some(source(scope))).expect("span");
         ArtifactNode {
             id: 0,
             language: language.to_owned(),
@@ -335,7 +340,7 @@ mod tests {
             name: "f".to_owned(),
             kind: "callable".to_owned(),
             content_hash: Some(
-                ContentHash::of(&text[name.0 as usize..body.1 as usize]).to_string(),
+                ContentHash::of(&text[span.start as usize..span.end as usize]).to_string(),
             ),
             path: "src/a".to_owned(),
             origin: "syntax".to_owned(),

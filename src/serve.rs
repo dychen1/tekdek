@@ -755,24 +755,29 @@ mod tests {
 
     /// Sets the declaration, scope, body, and content hash of a node from its source text.
     fn set_ranges(node: &mut crate::store::graph::ArtifactNode, text: &str) {
-        use crate::{analysis::source::ContentHash, store::graph::ArtifactRange};
-        let offset = |index: usize| u32::try_from(index).expect("offset");
+        use crate::{
+            analysis::source::{ContentHash, SourceRange, content_span},
+            store::graph::ArtifactRange,
+        };
+        let range = |start: usize, end: usize| SourceRange {
+            start: u32::try_from(start).expect("offset"),
+            end: u32::try_from(end).expect("offset"),
+        };
         let name = text.find(&node.name).expect("name");
-        let open = text.find('{').expect("body");
         let close = text.rfind('}').expect("body end") + 1;
-        node.declarations = vec![ArtifactRange {
-            start: offset(name),
-            end: offset(name + node.name.len()),
-        }];
-        node.scope = Some(ArtifactRange {
-            start: offset(text.find("fn ").expect("fn")),
-            end: offset(close),
-        });
-        node.body = Some(ArtifactRange {
-            start: offset(open),
-            end: offset(close),
-        });
-        node.content_hash = Some(ContentHash::of(&text[name..close]).to_string());
+        let declaration = range(name, name + node.name.len());
+        let scope = range(text.find("fn ").expect("fn"), close);
+        let body = range(text.find('{').expect("body"), close);
+        let span = content_span(&[declaration], Some(body), Some(scope)).expect("span");
+        node.content_hash =
+            Some(ContentHash::of(&text[span.start as usize..span.end as usize]).to_string());
+        let artifact = |range: SourceRange| ArtifactRange {
+            start: range.start,
+            end: range.end,
+        };
+        node.declarations = vec![artifact(declaration)];
+        node.scope = Some(artifact(scope));
+        node.body = Some(artifact(body));
     }
 
     /// A project folder with a store, one frozen flow, a graph with source ranges, and source files.

@@ -20,7 +20,7 @@ use crate::analysis::{
     },
     graph::{Edge, Graph, Node, NodeId, Provenance, ProvenanceOrigin},
     language::Language,
-    source::{ContentHash, DocumentSnapshot, SourceRange, SourceSpan},
+    source::{ContentHash, DocumentSnapshot, SourceSpan, content_span},
 };
 
 // -----------------------------------------------------------------------------
@@ -83,30 +83,9 @@ fn hash_content(nodes: &mut [Node], documents: &[DocumentSnapshot]) {
         .collect();
 
     for node in nodes {
-        node.content_hash = content_span(node)
+        node.content_hash = content_span(node.declarations(), node.body(), node.scope())
             .and_then(|span| documents_by_path.get(node.path())?.text(span))
             .map(ContentHash::of);
-    }
-}
-
-/// Returns the byte range whose text identifies one node.
-///
-/// The range runs from the first declaration to the body end, so a nested
-/// change marks every ancestor of its owner.
-fn content_span(node: &Node) -> Option<SourceRange> {
-    let start = node.declarations().iter().map(|range| range.start).min();
-    let end = node.declarations().iter().map(|range| range.end).max();
-
-    if let Some(body) = node.body() {
-        return Some(SourceRange {
-            start: start.unwrap_or(body.start),
-            end: body.end,
-        });
-    }
-
-    match (start, end) {
-        (Some(start), Some(end)) => Some(SourceRange { start, end }),
-        _ => node.scope(),
     }
 }
 

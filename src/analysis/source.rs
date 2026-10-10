@@ -118,6 +118,34 @@ impl fmt::Display for ContentHash {
 const OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
 const PRIME: u64 = 0x0000_0100_0000_01b3;
 
+/// Returns the byte range whose text identifies one entity.
+///
+/// The range runs from the first declaration to the body end, so a nested
+/// change marks every ancestor of its owner. Without a body, the range covers
+/// the declarations. Without a body and declarations, it is the scope. The
+/// indexer hashes this range, and the viewer source cut checks the same range.
+#[must_use]
+pub fn content_span(
+    declarations: &[SourceRange],
+    body: Option<SourceRange>,
+    scope: Option<SourceRange>,
+) -> Option<SourceRange> {
+    let start = declarations.iter().map(|range| range.start).min();
+    let end = declarations.iter().map(|range| range.end).max();
+
+    if let Some(body) = body {
+        return Some(SourceRange {
+            start: start.unwrap_or(body.start),
+            end: body.end,
+        });
+    }
+
+    match (start, end) {
+        (Some(start), Some(end)) => Some(SourceRange { start, end }),
+        _ => scope,
+    }
+}
+
 // -----------------------------------------------------------------------------
 // Loading
 // -----------------------------------------------------------------------------
