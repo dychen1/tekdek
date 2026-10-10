@@ -377,9 +377,10 @@ fn graph_name(name: &str) -> bool {
 /// Returns the source JSON of every step function of one flow.
 ///
 /// The current generation of the flow must bind the named graph. A missing,
-/// linked, or non-regular lineage or graph file is a 404. A lineage that cannot
-/// be read for any other reason is a 500. File paths come from the graph, never
-/// from the query, and stay inside the project folder that holds the store.
+/// linked, or non-regular lineage or graph file is a 404, and so is a lineage
+/// folder that holds another flow. A lineage that cannot be read for any other
+/// reason is a 500. File paths come from the graph, never from the query, and
+/// stay inside the project folder that holds the store.
 fn source_document(store: &Path, query: Option<&str>) -> Result<Vec<u8>, Reply> {
     let (artifact, flow) = source_query(query)?;
     check_link(store)?;
@@ -394,6 +395,7 @@ fn source_document(store: &Path, query: Option<&str>) -> Result<Vec<u8>, Reply> 
         {
             None
         }
+        Err(LineageError::FlowMismatch { .. }) => None,
         Err(_) => return Err(Reply::failure(500, "Cannot read the flow.")),
     }
     .filter(|current| current.artifact.facts.binding.graph_artifact == artifact)
@@ -946,6 +948,21 @@ mod tests {
         let store = project.path().join(".tekdek");
         pipe(&store.join("flows/demo-flow/current.json"));
         assert_error(&get(&store, url), 404);
+    }
+
+    #[test]
+    fn rejects_source_requests_for_a_lineage_that_holds_another_flow() {
+        let project = source_fixture();
+        let store = project.path().join(".tekdek");
+        fs::rename(
+            store.join("flows/demo-flow"),
+            store.join("flows/other-flow"),
+        )
+        .expect("rename");
+        assert_error(
+            &get(&store, "/source?artifact=graph.json&flow=other-flow"),
+            404,
+        );
     }
 
     #[test]
