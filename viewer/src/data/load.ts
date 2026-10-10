@@ -1,8 +1,9 @@
 /* Artifact loading. This module owns every fetch of the viewer: the artifact index, one graph file with its
-   SHA-256 digest check, and one frozen flow generation. Each failure is a LoadError with its cause.
+   SHA-256 digest check, one frozen flow generation, and the function source of one flow. Each failure is a
+   LoadError with its cause.
    # Sections
-   errors, fetch, index, graph, flow */
-import type { ArtifactEntry, ArtifactIndex, FlowArtifact, FlowEntry, GraphDocument } from "./models.ts";
+   errors, fetch, index, graph, flow, source */
+import type { ArtifactEntry, ArtifactIndex, FlowArtifact, FlowEntry, GraphDocument, SourceDocument, SourceView } from "./models.ts";
 
 // ============ errors ============
 
@@ -66,4 +67,17 @@ export async function loadGraph(entry: ArtifactEntry): Promise<GraphDocument> {
 /** Loads the frozen generation that an index entry points to. The adapter checks its shape. */
 export async function loadFlow(entry: FlowEntry): Promise<FlowArtifact> {
   return await (await fetchBytes(`flows/${entry.file}`)).json() as FlowArtifact;
+}
+
+// ============ source ============
+
+/** Loads the source of every step function of one flow. The server cuts it from the project files. */
+export async function loadSource(artifact: string, flow: string): Promise<Map<string, SourceView>> {
+  const url = `/source?artifact=${encodeURIComponent(artifact)}&flow=${encodeURIComponent(flow)}`;
+  let response: Response;
+  try { response = await fetch(url, { cache: "no-store" }); }
+  catch { throw new LoadError("fetch", `The viewer server did not answer the source request for ${flow}.`); }
+  if (!response.ok) throw new LoadError("fetch", `Could not load the source of ${flow} (HTTP ${response.status}).`);
+  const document = await response.json() as SourceDocument;
+  return new Map((document.functions ?? []).map(view => [view.key, view]));
 }

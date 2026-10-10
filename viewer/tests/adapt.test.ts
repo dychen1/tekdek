@@ -88,3 +88,15 @@ test("only frozen schema 3 flows show, and the picker opens the requested flow, 
   assert.equal(pickFlow([], null), null);
   assert.deepEqual(frozenFlows(undefined), []);
 });
+
+test("the flow adapter carries the transition, the fact text, and the generation of each step", () => {
+  const graph = deckGraph(graphDocument(), "demo");
+  const flow = deckFlow(artifact, graph, DIGEST);
+  assert.equal(flow.generation, artifact.generation.ordinal);
+  assert.equal(must(flow.steps[0]).transition, "flow_start");
+  const views = new Map(artifact.view.steps.map(view => [view.stepId, view.transition]));
+  for (const step of flow.steps) assert.equal(step.transition, views.get(step.id) ?? null);
+  const fact = must(artifact.facts.nodes.find(node => node.key === must(flow.steps[1]).node));
+  assert.equal(must(flow.steps[1]).signature, fact.signature ?? null);
+  assert.equal("behavior" in flow, false);
+});

@@ -5,11 +5,11 @@ import { readFileSync } from "node:fs";
 import type { FlowArtifact, GraphDocument, GraphEdge, GraphNode } from "../src/data/models.ts";
 
 /** A fact node and a fact edge of the demo artifact, which the fixture graphs copy. */
-interface FactNode { key: string; name: string; path: string; kind: string }
+interface FactNode { key: string; name: string; path: string; kind: string; signature?: string | null; documentation?: string | null }
 interface FactEdge { source: string; target: string; kind: string }
 
 /** The demo artifact, with the fact fields that the fixtures read. */
-type DemoArtifact = FlowArtifact & { facts: FlowArtifact["facts"] & { nodes: FactNode[]; edges: FactEdge[] } };
+type DemoArtifact = Omit<FlowArtifact, "facts"> & { facts: { binding: { graphDigest: string }; nodes: FactNode[]; edges: FactEdge[] } };
 
 const read = <T>(path: string): T => JSON.parse(readFileSync(new URL(path, import.meta.url), "utf8")) as T;
 const current = read<{ ordinal: number; generationDigest: string }>("../../demo/flows/flow-generation/current.json");

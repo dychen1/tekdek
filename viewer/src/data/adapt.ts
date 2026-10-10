@@ -85,12 +85,17 @@ export function deckFlow(artifact: FlowArtifact, graph: DeckGraph, graphDigest: 
         .map(member => member.nodeKey),
     };
   });
+  const transitions = new Map((artifact.view.steps ?? []).map(view => [view.stepId, view.transition]));
+  const facts = new Map((artifact.facts.nodes ?? []).map(node => [node.key, node]));
   const steps: DeckStep[] = artifact.intent.steps.map((step, i) => ({
     index: i + 1, id: step.id, title: step.title, node: step.nodeKey, cluster: step.clusterKey ?? "",
     annotation: step.annotation, missing: !present.has(step.nodeKey),
+    transition: transitions.get(step.id) ?? null,
+    signature: facts.get(step.nodeKey)?.signature ?? null,
+    documentation: facts.get(step.nodeKey)?.documentation ?? null,
   }));
   return {
-    name: artifact.flowId, behavior: artifact.intent.behavior,
+    name: artifact.flowId, generation: artifact.generation?.ordinal ?? 1,
     stale: Boolean(entry?.stale) || artifact.facts.binding.graphDigest !== graphDigest,
     steps, clusters,
   };

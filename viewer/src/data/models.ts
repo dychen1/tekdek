@@ -1,7 +1,7 @@
 /* Viewer data model. This module owns the wire types that the viewer reads (the artifact index, the graph
    document, the frozen flow artifact) and the deck types that the adapters produce.
    # Sections
-   artifact index, graph document, flow artifact, deck data */
+   artifact index, graph document, flow artifact, deck data, function source */
 
 // ============ artifact index ============
 
@@ -27,17 +27,22 @@ export interface GraphDocument { schemaVersion: number; graph: { nodes: GraphNod
 
 // ============ flow artifact ============
 
+/** The static call relation from the previous step's function. It is not a runtime observation. */
+export type Transition = "flow_start" | "same_function" | "calls" | "returns_to_caller" | "sibling_call"
+  | "calls_indirectly" | "returns_to_ancestor" | "no_static_edge";
+
 /** The fields of a frozen schema 3 flow artifact that the viewer reads. */
 export interface FlowArtifact {
   kind: string; schemaVersion: number; flowId: string;
-  facts: { binding: { graphDigest: string } };
+  generation: { ordinal: number };
+  facts: { binding: { graphDigest: string }; nodes: { key: string; signature?: string | null; documentation?: string | null }[] };
   intent: {
     behavior: string;
     clusters: { key: string; label: string; description: string }[];
     steps: { id: string; nodeKey: string; clusterKey: string | null; title: string; annotation: string }[];
   };
   assignment: { members: { outcome: string; nodeKey: string; clusterKey?: string }[] };
-  view: { clusters: { clusterKey: string; color: string }[] };
+  view: { clusters: { clusterKey: string; color: string }[]; steps: { stepId: string; transition: Transition }[] };
 }
 
 // ============ deck data ============
@@ -61,7 +66,23 @@ export interface DeckGraph { repo: string; files: string[]; tree: DeckTree; func
 export interface DeckCluster { id: string; label: string; description: string; color: ClusterColor; members: string[] }
 
 /** One flow step. `missing` is true when the bound graph no longer has the step function. */
-export interface DeckStep { index: number; id: string; title: string; node: string; cluster: string; annotation: string; missing: boolean }
+export interface DeckStep {
+  index: number; id: string; title: string; node: string; cluster: string; annotation: string; missing: boolean;
+  transition: Transition | null; signature: string | null; documentation: string | null;
+}
 
 /** One playable flow. `stale` is true when the flow was frozen against another graph digest. */
-export interface DeckFlow { name: string; behavior: string; stale: boolean; steps: DeckStep[]; clusters: DeckCluster[] }
+export interface DeckFlow { name: string; generation: number; stale: boolean; steps: DeckStep[]; clusters: DeckCluster[] }
+
+// ============ function source ============
+
+/** The source of one step function, as the `/source` route answers it. Line numbers are one-based. */
+export interface SourceView {
+  key: string; status: "ok" | "missing" | "changed" | "unreadable";
+  path?: string; language?: string; reason?: string;
+  firstLine?: number; declarationLine?: number; docLines?: [number, number] | null; signatureLines?: [number, number];
+  lines?: string[]; more?: number;
+}
+
+/** The `/source` answer for one flow. */
+export interface SourceDocument { artifact: string; flow: string; functions: SourceView[] }

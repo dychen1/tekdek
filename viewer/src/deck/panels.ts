@@ -20,7 +20,7 @@ const plural = (n: number, one: string, many = one + "s") => `${n} ${n === 1 ? o
 
 // ============ callout markup ============
 
-/** The rest callout: the flow badge (a picker when the codebase has more than one flow), the behavior, and notes. */
+/** The rest callout: the flow badge (a picker when the codebase has more than one flow), the counts, and notes. */
 export function restCallout(flow: DeckFlow | null, flowCount: number, repo: string): string {
   if (!flow) {
     return `<span class="pbadge"><span>no flow</span></span>` +
@@ -36,7 +36,7 @@ export function restCallout(flow: DeckFlow | null, flowCount: number, repo: stri
     flow.stale ? "This flow was frozen against an older graph. Some steps can point to changed code." : "",
     missing ? `${plural(missing, "step")} name a function that this graph no longer has. ${missing === 1 ? "It plays" : "They play"} without a lift.` : "",
   ].filter(Boolean).map(text => `<p class="co-warn">${esc(text)}</p>`).join("");
-  return badge + `<p class="co-desc">${esc(flow.behavior)}</p><p class="co-meta">${count}</p>` + warn;
+  return badge + `<p class="co-desc"></p><p class="co-meta">${count}</p>` + warn;
 }
 
 /** The cluster callout: the cluster badge, its description, its size, and its step ranges. */
