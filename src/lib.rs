@@ -14,6 +14,9 @@
 //! `serve` serves the embedded viewer and the listed files of one store.
 //! `source_view` cuts the source of the step functions of one flow for the viewer.
 
+#[cfg(not(any(feature = "python", feature = "rust")))]
+compile_error!("enable the python or rust feature");
+
 pub mod analysis;
 pub mod catalog;
 pub mod flow;

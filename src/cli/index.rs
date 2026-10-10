@@ -13,17 +13,13 @@
 //! `Arguments` parses the command line.
 //! `Artifact destination` selects indexed or explicit output.
 
-use std::process::ExitCode;
-
-use super::ERROR_CODE;
-
-#[cfg(any(feature = "python", feature = "rust"))]
 use std::{
     collections::BTreeMap,
     fs,
     path::{Path, PathBuf},
+    process::ExitCode,
 };
-#[cfg(any(feature = "python", feature = "rust"))]
+
 use tekdek::{
     analysis::{
         self, PipelineConfig,
@@ -32,6 +28,8 @@ use tekdek::{
     },
     store::{PROJECT_STORE, create_project_store, find_project_store, graph::GraphArtifact},
 };
+
+use super::ERROR_CODE;
 
 // -----------------------------------------------------------------------------
 // Entry
@@ -50,7 +48,6 @@ store, index creates <root>/.tekdek after the analysis succeeds. index writes
 <store>/<name>.json. --output writes one file and changes no store.";
 
 /// Analyzes one codebase and writes its graph into the store.
-#[cfg(any(feature = "python", feature = "rust"))]
 pub(super) fn run(raw: impl Iterator<Item = String>) -> ExitCode {
     let arguments = match Arguments::parse(raw) {
         Ok(arguments) => arguments,
@@ -114,19 +111,11 @@ pub(super) fn run(raw: impl Iterator<Item = String>) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-/// Reports that this build cannot analyze any language.
-#[cfg(not(any(feature = "python", feature = "rust")))]
-pub(super) fn run(_raw: impl Iterator<Item = String>) -> ExitCode {
-    eprintln!("error: this build has no language adapters");
-    ExitCode::from(ERROR_CODE)
-}
-
 /// Builds pipeline configuration from files and command-line overrides.
 ///
 /// # Errors
 ///
 /// Returns an error if configuration loading or override application fails.
-#[cfg(any(feature = "python", feature = "rust"))]
 fn pipeline_config(arguments: &Arguments, root: &Path) -> Result<PipelineConfig, ConfigError> {
     let mut profiles = configured_profiles(arguments.config.as_deref())?;
     apply_cli_overrides(
@@ -143,7 +132,6 @@ fn pipeline_config(arguments: &Arguments, root: &Path) -> Result<PipelineConfig,
 // Arguments
 // -----------------------------------------------------------------------------
 
-#[cfg(any(feature = "python", feature = "rust"))]
 #[derive(Debug)]
 struct Arguments {
     root: PathBuf,
@@ -160,7 +148,6 @@ struct Arguments {
     server_arguments: BTreeMap<Language, Vec<String>>,
 }
 
-#[cfg(any(feature = "python", feature = "rust"))]
 impl Arguments {
     /// Parses command-line arguments.
     ///
@@ -253,7 +240,6 @@ impl Arguments {
 /// # Errors
 ///
 /// Returns a message if either component is empty or the language is unknown.
-#[cfg(any(feature = "python", feature = "rust"))]
 fn parse_language_value(
     value: &str,
     option: &str,
@@ -278,7 +264,6 @@ fn parse_language_value(
 /// # Errors
 ///
 /// Returns a message if the option has no value.
-#[cfg(any(feature = "python", feature = "rust"))]
 fn next_value(
     arguments: &mut impl Iterator<Item = String>,
     option: &str,
@@ -296,7 +281,6 @@ fn next_value(
 ///
 /// `create_store` is true when the destination is a new project store.
 /// `project_root` is true when index analyzes the project root instead of the working directory.
-#[cfg(any(feature = "python", feature = "rust"))]
 #[derive(Debug, PartialEq, Eq)]
 struct Destination {
     root: PathBuf,
@@ -320,7 +304,6 @@ struct Destination {
 ///
 /// Returns a message if the root or artifact name is invalid, or if a root
 /// inside a project has no `--name`.
-#[cfg(any(feature = "python", feature = "rust"))]
 fn artifact_destination(arguments: &Arguments) -> Result<Destination, String> {
     if let Some(output) = &arguments.output {
         return Ok(Destination {
@@ -388,7 +371,6 @@ fn artifact_destination(arguments: &Arguments) -> Result<Destination, String> {
 /// # Errors
 ///
 /// Returns a message if the name is not valid UTF-8.
-#[cfg(any(feature = "python", feature = "rust"))]
 fn folder_name(root: &Path) -> Result<String, String> {
     match root.file_name() {
         Some(name) => name
@@ -404,7 +386,6 @@ fn folder_name(root: &Path) -> Result<String, String> {
 /// # Errors
 ///
 /// Returns a message if the name is not one normal path component.
-#[cfg(any(feature = "python", feature = "rust"))]
 fn validate_artifact_name(name: &str) -> Result<(), String> {
     let path = Path::new(name);
     if name.is_empty()
@@ -424,7 +405,7 @@ fn validate_artifact_name(name: &str) -> Result<(), String> {
 // Tests
 // -----------------------------------------------------------------------------
 
-#[cfg(all(test, any(feature = "python", feature = "rust")))]
+#[cfg(test)]
 mod tests {
     use std::path::PathBuf;
 
