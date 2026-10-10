@@ -53,8 +53,8 @@ pub fn generation_file(flow_id: &FlowId, ordinal: u32, digest: &Sha256Digest) ->
 /// Reads the current generation of one flow, or `None` when the flow has no lineage.
 ///
 /// # Errors
-/// Returns an error for a link, an unreadable file, an invalid document, or a
-/// pointer that names another generation.
+/// Returns an error for a link, an unreadable file, an invalid document, a
+/// generation of another flow, or a pointer that names another generation.
 pub fn read_current(
     directory: &Path,
     flow_id: &FlowId,
@@ -85,7 +85,8 @@ pub fn read_current(
 /// Reads one generation by ordinal and digest.
 ///
 /// # Errors
-/// Returns an error for a link, an unreadable file, or an invalid document.
+/// Returns an error for a link, an unreadable file, an invalid document, or a
+/// generation that states another flow than the lineage folder.
 pub fn read_generation(
     directory: &Path,
     flow_id: &FlowId,
@@ -110,10 +111,14 @@ pub fn read_generation(
             format!("cannot read {}: {error}", path.display()),
         )
     })?;
-    Ok(StoredGeneration {
-        artifact: parse_artifact(&bytes)?,
-        file,
-    })
+    let artifact = parse_artifact(&bytes)?;
+    if artifact.flow_id != *flow_id {
+        return Err(LineageError::FlowMismatch {
+            folder: flow_id.to_string(),
+            stated: artifact.flow_id.to_string(),
+        });
+    }
+    Ok(StoredGeneration { artifact, file })
 }
 
 /// Parses one artifact after its schema header check.
@@ -234,6 +239,7 @@ pub enum LineageError {
     UnknownSchema { stated: u32 },
     PointerMismatch { flow: String },
     Conflict { file: String },
+    FlowMismatch { folder: String, stated: String },
 }
 
 impl fmt::Display for LineageError {
@@ -252,6 +258,11 @@ impl fmt::Display for LineageError {
             Self::PointerMismatch { flow } => write!(
                 formatter,
                 "pointer_mismatch: the current pointer of {flow} names a different generation"
+            ),
+            // Identify a generation that belongs to another flow.
+            Self::FlowMismatch { folder, stated } => write!(
+                formatter,
+                "flow_mismatch: the lineage {folder} holds a generation of the flow {stated}"
             ),
             // Refuse to replace a frozen file.
             Self::Conflict { file } => write!(
@@ -281,5 +292,109 @@ impl From<io::Error> for LineageError {
 impl From<serde_json::Error> for LineageError {
     fn from(error: serde_json::Error) -> Self {
         Self::Json(error)
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Tests
+// -----------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use std::{fs, path::Path};
+
+    use super::{LineageError, read_current};
+    use crate::flow::{
+        FlowError,
+        fixtures::{self, frozen, import, output},
+        models::FlowId,
+        verify::verify_flow,
+    };
+
+    fn id(name: &str) -> FlowId {
+        FlowId::try_from(name).expect("flow ID")
+    }
+
+    /// Freezes one initial generation and one revision of `name`.
+    fn freeze_with_revision(path: &Path, name: &str) {
+        frozen(import(path, name, &output()));
+        let initial = fixtures::current(path, name);
+        let mut revised = output();
+        for (step, stored) in revised["flow"]["steps"]
+            .as_array_mut()
+            .expect("steps")
+            .iter_mut()
+            .zip(&initial.intent.steps)
+        {
+            step["priorStepId"] = stored.id.as_str().into();
+        }
+        revised["flow"]["steps"][5]["title"] = "Hold the store lock".into();
+        revised["flow"]["revisionSummary"] = "Rename the last step to name the lock.".into();
+        frozen(import(path, name, &revised));
+    }
+
+    /// Copies the pointer and the generation files of one lineage into another folder.
+    fn copy_lineage(path: &Path, from: &str, to: &str) {
+        let source = path.join("flows").join(from);
+        let target = path.join("flows").join(to);
+        fs::create_dir_all(target.join("generations")).expect("target folder");
+        fs::copy(source.join("current.json"), target.join("current.json")).expect("pointer");
+        for entry in fs::read_dir(source.join("generations")).expect("generations") {
+            let file = entry.expect("entry").file_name();
+            fs::copy(
+                source.join("generations").join(&file),
+                target.join("generations").join(&file),
+            )
+            .expect("generation");
+        }
+    }
+
+    fn is_flow_mismatch(error: &LineageError) -> bool {
+        matches!(error, LineageError::FlowMismatch { .. })
+    }
+
+    #[test]
+    fn a_revision_copied_under_another_flow_is_rejected() {
+        let directory = fixtures::store();
+        let path = directory.path();
+        freeze_with_revision(path, "flow-b");
+        copy_lineage(path, "flow-b", "flow-a");
+
+        let error = read_current(path, &id("flow-a")).expect_err("wrong flow");
+
+        assert!(is_flow_mismatch(&error), "{error}");
+        assert!(matches!(
+            verify_flow(path, "flow-a"),
+            Err(FlowError::Lineage(LineageError::FlowMismatch { .. }))
+        ));
+        assert!(
+            read_current(path, &id("flow-b"))
+                .expect("own flow")
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn an_initial_generation_copied_under_another_flow_is_rejected() {
+        let directory = fixtures::store();
+        let path = directory.path();
+        frozen(import(path, "flow-b", &output()));
+        copy_lineage(path, "flow-b", "flow-a");
+
+        let error = read_current(path, &id("flow-a")).expect_err("wrong flow");
+
+        assert!(is_flow_mismatch(&error), "{error}");
+    }
+
+    #[test]
+    fn a_renamed_lineage_folder_is_rejected() {
+        let directory = fixtures::store();
+        let path = directory.path();
+        freeze_with_revision(path, "flow-b");
+        fs::rename(path.join("flows/flow-b"), path.join("flows/flow-a")).expect("rename");
+
+        let error = read_current(path, &id("flow-a")).expect_err("renamed folder");
+
+        assert!(is_flow_mismatch(&error), "{error}");
     }
 }
