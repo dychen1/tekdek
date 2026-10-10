@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { deckFlow, deckGraph, displayName, fileTree, pickFlow, frozenFlows, withMembership } from "../src/data/adapt.ts";
+import { deckFlow, deckGraph, displayName, fileTree, pickFlow, frozenFlows } from "../src/data/adapt.ts";
 import { digestOf, loadFlow, loadIndex, loadSource, LoadError, verifyGraph } from "../src/data/load.ts";
 
 import { artifact, DIGEST, graphDocument, must } from "./fixtures.ts";
@@ -85,14 +85,6 @@ test("a step whose function left the graph is marked missing and leaves the memb
 test("a file that is not a frozen schema 3 flow is rejected", () => {
   const graph = deckGraph(graphDocument(), "tekdek");
   assert.throws(() => deckFlow({ ...artifact, schemaVersion: 2 }, graph, DIGEST), /schema 3/);
-});
-
-test("membership marks each function with the cluster that holds it", () => {
-  const graph = deckGraph(graphDocument(), "tekdek");
-  const marked = withMembership(graph, deckFlow(artifact, graph, DIGEST));
-  assert.equal(marked.functions.filter(fn => fn.cluster).length, 21);
-  assert.equal(must(marked.functions.find(fn => fn.id === "src/main.rs::callable:main")).cluster, "route-command");
-  assert.equal(graph.functions.filter(fn => fn.cluster).length, 0, "the source graph stays unmarked");
 });
 
 test("only frozen schema 3 flows show, and the picker opens the requested flow, else the first one", () => {

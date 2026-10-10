@@ -7,7 +7,8 @@ import { anchorRow, dirNote, guideKinds, isShown, type ExplorerRow } from "../la
 import { nextStepOfFile } from "../layout/plan.ts";
 import { clamp } from "../layout/util.ts";
 import { esc, PTR } from "./markup.ts";
-import { $, shownFile, type DeckContext, type Explorer } from "./model.ts";
+import { shownFile } from "../layout/model.ts";
+import { $, type DeckContext, type Explorer } from "./context.ts";
 
 /** A row and the elements that show it. */
 interface RowView { row: ExplorerRow; el: HTMLButtonElement; note: HTMLElement | null }

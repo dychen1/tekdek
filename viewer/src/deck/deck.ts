@@ -5,6 +5,7 @@
    instance, stepping, placement, draw loop, boot and teardown */
 import { deckSpot, fileBoxCenter, FILE_X, startZoom, type Frame } from "../layout/deck-geometry.ts";
 import { openTo } from "../layout/explorer.ts";
+import { buildModel, initialState } from "../layout/model.ts";
 import { clamp, f1 } from "../layout/util.ts";
 import { createBar } from "./bar.ts";
 import { createClusterDeck } from "./cluster-deck.ts";
@@ -13,10 +14,10 @@ import { createExplorer } from "./explorer.ts";
 import { createFileBox } from "./file-box.ts";
 import { createInput } from "./input.ts";
 import { createLinks } from "./links.ts";
-import { $, buildModel, initialState, type DeckContext, type DeckOptions, type DeckParts } from "./model.ts";
+import { $, type DeckContext, type DeckOptions, type DeckParts } from "./context.ts";
 import { createTools } from "./tools.ts";
 
-export type { DeckOptions } from "./model.ts";
+export type { DeckOptions } from "./context.ts";
 
 export interface DeckInstance {
   go(step: number): void;

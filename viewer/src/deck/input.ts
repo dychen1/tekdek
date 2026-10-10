@@ -2,7 +2,7 @@
    keys see Escape. The URL step is `?step=`, and `main.ts` writes it.
    # Sections
    keyboard, resize */
-import type { DeckContext, Input } from "./model.ts";
+import type { DeckContext, Input } from "./context.ts";
 
 /** True when a key goes to a text field. */
 const typing = (target: EventTarget | null) =>

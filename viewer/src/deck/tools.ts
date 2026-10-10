@@ -6,9 +6,16 @@
 import { rangesOf } from "../layout/plan.ts";
 import { clamp } from "../layout/util.ts";
 import { esc, icon } from "./markup.ts";
-import { $, KEY_VARIANT, store, type DeckContext, type Tools } from "./model.ts";
+import { $, type DeckContext, type Tools } from "./context.ts";
 
 const VARIANTS = ["night", "storm", "moon"];
+const KEY_VARIANT = "tekdek.deck.variant";
+
+/** Per-viewer conveniences. Blocked storage keeps the in-memory state. */
+const store = {
+  get(key: string) { try { return localStorage.getItem(key); } catch { return null; } },
+  set(key: string, value: string) { try { localStorage.setItem(key, value); } catch { /* storage is blocked */ } },
+};
 
 export function createTools(ctx: DeckContext): Tools {
   const { model, state, options, signal } = ctx;

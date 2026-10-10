@@ -10,7 +10,7 @@ import { nearestStep } from "../layout/plan.ts";
 import { callRefs, calleesOf, callersOf, oneLineSignature, otherVisits, sourceNote, transitionFact, type CallRef } from "../layout/step-facts.ts";
 import { clamp, plural } from "../layout/util.ts";
 import { esc, md } from "./markup.ts";
-import { $, type CodeColumn, type DeckContext } from "./model.ts";
+import { $, type CodeColumn, type DeckContext } from "./context.ts";
 
 // ============ markup ============
 

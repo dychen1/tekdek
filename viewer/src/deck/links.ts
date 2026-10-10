@@ -3,7 +3,7 @@
    current lid), and the arrow (current lid to code header). Each end touches its element. */
 import { arrowPath, guidePath, tetherPath } from "../layout/paths.ts";
 import { clamp, f1 } from "../layout/util.ts";
-import { $, type DeckContext, type Links } from "./model.ts";
+import { $, type DeckContext, type Links } from "./context.ts";
 
 export function createLinks(ctx: DeckContext): Links {
   const { state } = ctx;

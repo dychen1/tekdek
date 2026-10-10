@@ -103,13 +103,6 @@ export function deckFlow(artifact: FlowArtifact, graph: DeckGraph, graphDigest: 
 
 // ============ shared rules ============
 
-/** Returns a copy of the graph where each function carries the flow cluster that holds it. */
-export function withMembership(graph: DeckGraph, flow: DeckFlow | null): DeckGraph {
-  const clusterOf = new Map<string, string>();
-  for (const cluster of flow?.clusters ?? []) for (const id of cluster.members) if (!clusterOf.has(id)) clusterOf.set(id, cluster.id);
-  return { ...graph, functions: graph.functions.map(fn => ({ ...fn, cluster: clusterOf.get(fn.id) ?? null })) };
-}
-
 /** Returns the flows that the viewer shows: the frozen schema 3 entries of a codebase, in index order. */
 export const frozenFlows = (flows: readonly FlowEntry[] | undefined) => (flows ?? []).filter(flow => flow.schemaVersion === 3);
 

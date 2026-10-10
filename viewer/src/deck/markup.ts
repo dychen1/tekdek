@@ -1,8 +1,8 @@
 /* Deck markup. This module owns the small HTML builders that the deck modules share: icons, the pointer,
-   cluster colors, inline code, and the two picker lists. Every builder escapes the data that it writes.
+   inline code, and the two picker lists. Every builder escapes the data that it writes.
    # Sections
    helpers, pickers */
-import type { ArtifactEntry, ClusterColor, FlowEntry } from "../data/models.ts";
+import type { ArtifactEntry, FlowEntry } from "../data/models.ts";
 import { esc, plural } from "../layout/util.ts";
 
 export { esc } from "../layout/util.ts";
@@ -11,8 +11,6 @@ export { esc } from "../layout/util.ts";
 
 export const icon = (name: string) => `<svg class="ic" aria-hidden="true"><use href="#i-${name}"/></svg>`;
 export const PTR = '<svg class="ic ptr" aria-hidden="true"><use href="#i-ptr"/></svg>';
-/** Returns the CSS color of a cluster. */
-export const colorVar = (color: ClusterColor) => `var(--cl-${color})`;
 /** Escapes text, then turns `x` into <code>x</code>. */
 export const md = (text: string) => esc(text).replace(/`([^`]+)`/g, "<code>$1</code>");
 

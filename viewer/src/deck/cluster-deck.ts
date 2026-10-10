@@ -4,7 +4,8 @@
 import { boxWidth, deckHeight, deckTransform, DECK_Z, home } from "../layout/deck-geometry.ts";
 import { f1 } from "../layout/util.ts";
 import { esc, PTR } from "./markup.ts";
-import { $, type ClusterDeck, type ClusterView, type DeckContext } from "./model.ts";
+import type { ClusterView } from "../layout/model.ts";
+import { $, type ClusterDeck, type DeckContext } from "./context.ts";
 
 /** One lifted box and the elements that the deck reads. */
 interface BoxView { key: string; name: string; file: string; steps: readonly number[]; el: HTMLElement; lid: HTMLElement; btn: HTMLButtonElement; badge: HTMLElement }

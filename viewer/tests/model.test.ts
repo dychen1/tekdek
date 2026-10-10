@@ -1,4 +1,4 @@
-// Tests for the deck model: derived maps, the rest state, and the file that the file box shows.
+// Tests for the deck model: membership, derived maps, the rest state, and the file that the file box shows.
 
 import assert from "node:assert/strict";
 import test from "node:test";
@@ -7,13 +7,21 @@ import { deckFlow, deckGraph } from "../src/data/adapt.ts";
 import type { DeckFlow } from "../src/data/models.ts";
 import { isShown } from "../src/layout/explorer.ts";
 import { MIN_DECK_W } from "../src/layout/deck-geometry.ts";
-import { buildModel, initialState, shownFile } from "../src/deck/model.ts";
+import { buildModel, initialState, shownFile, withMembership } from "../src/layout/model.ts";
 
 import { artifact, DIGEST, graphDocument, must } from "./fixtures.ts";
 
 const graph = deckGraph(graphDocument(), "demo");
 const flow = deckFlow(artifact, graph, DIGEST);
 const model = buildModel(graph, flow, new Map());
+
+test("membership marks each function with the cluster that holds it", () => {
+  const graph = deckGraph(graphDocument(), "tekdek");
+  const marked = withMembership(graph, deckFlow(artifact, graph, DIGEST));
+  assert.equal(marked.functions.filter(fn => fn.cluster).length, 21);
+  assert.equal(must(marked.functions.find(fn => fn.id === "src/main.rs::callable:main")).cluster, "route-command");
+  assert.equal(graph.functions.filter(fn => fn.cluster).length, 0, "the source graph stays unmarked");
+});
 
 test("members follow their first visit and the deck is as wide as the widest cluster needs", () => {
   for (const cluster of model.clusters) {

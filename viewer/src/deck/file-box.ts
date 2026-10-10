@@ -4,7 +4,8 @@
 import { fileBox, type FileBox } from "../layout/file-box.ts";
 import { f1, plural } from "../layout/util.ts";
 import { esc, icon } from "./markup.ts";
-import { $, shownFile, type DeckContext, type FileBoxView } from "./model.ts";
+import { shownFile } from "../layout/model.ts";
+import { $, type DeckContext, type FileBoxView } from "./context.ts";
 
 export function createFileBox(ctx: DeckContext): FileBoxView {
   const { model, state, signal } = ctx;
