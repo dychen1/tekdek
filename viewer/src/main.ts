@@ -55,11 +55,11 @@ function setChrome(enabled: boolean) {
 
 /** The recovery step for each cause of a load failure. */
 const RECOVERY: Record<LoadReason, string> = {
-  fetch: "Run <code>make serve</code> from the repository root, then reload this page.",
-  digest: "Reindex the source with <code>cargo run -- &lt;path&gt;</code>, then reload this page.",
-  graph: "Reindex the source with <code>cargo run -- &lt;path&gt;</code> to write a current graph.",
-  flow: "Freeze the flow again with <code>flow import</code>, then reload this page.",
-  empty: "Index a codebase with <code>cargo run -- &lt;path&gt;</code>, then reload this page.",
+  fetch: "Start the viewer server with <code>tekdek serve</code>, then reload this page.",
+  digest: "Reindex the codebase with <code>tekdek index</code>, then reload this page.",
+  graph: "Reindex the codebase with <code>tekdek index</code> to write a current graph.",
+  flow: "Freeze the flow again with <code>tekdek flow import</code>, then reload this page.",
+  empty: "Index a codebase with <code>tekdek index</code>, then reload this page.",
 };
 
 /** Shows a load failure in the code column, with one recovery step.
