@@ -32,7 +32,7 @@ use self::files::{read_project, read_store};
 use crate::{
     catalog::{build_catalog, readable_files},
     flow::{
-        lineage::read_current,
+        lineage::{LineageError, read_current},
         models::{FlowId, is_flow_id},
     },
     source_view::{SourceDocument, flow_sources},
@@ -376,19 +376,28 @@ fn graph_name(name: &str) -> bool {
 
 /// Returns the source JSON of every step function of one flow.
 ///
-/// The current generation of the flow must bind the named graph. A flow that
-/// the catalog skips, because its lineage cannot be read, and a linked graph
-/// file are a 404. File paths come from the graph, never from the query, and
-/// stay inside the project folder that holds the store.
+/// The current generation of the flow must bind the named graph. A missing or
+/// linked lineage or graph file is a 404. A lineage that cannot be read for any
+/// other reason is a 500. File paths come from the graph, never from the query,
+/// and stay inside the project folder that holds the store.
 fn source_document(store: &Path, query: Option<&str>) -> Result<Vec<u8>, Reply> {
     let (artifact, flow) = source_query(query)?;
     check_link(store)?;
     let flow_id = FlowId::try_from(flow.as_str()).map_err(|_| not_found())?;
-    let current = read_current(store, &flow_id)
-        .ok()
-        .flatten()
-        .filter(|current| current.artifact.facts.binding.graph_artifact == artifact)
-        .ok_or_else(not_found)?;
+    let current = match read_current(store, &flow_id) {
+        Ok(current) => current,
+        Err(LineageError::Io(error))
+            if matches!(
+                error.kind(),
+                io::ErrorKind::NotFound | io::ErrorKind::InvalidInput
+            ) =>
+        {
+            None
+        }
+        Err(_) => return Err(Reply::failure(500, "Cannot read the flow.")),
+    }
+    .filter(|current| current.artifact.facts.binding.graph_artifact == artifact)
+    .ok_or_else(not_found)?;
     let (graph, _) = read_graph(store, &artifact).map_err(|error| {
         if error.kind() == io::ErrorKind::InvalidInput {
             not_found()
@@ -881,7 +890,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn rejects_source_requests_for_a_linked_graph_or_an_unreadable_flow() {
+    fn rejects_source_requests_for_a_missing_or_linked_graph_or_lineage() {
         let url = "/source?artifact=graph.json&flow=demo-flow";
         let project = source_fixture();
         let store = project.path().join(".tekdek");
@@ -893,8 +902,21 @@ mod tests {
 
         let project = source_fixture();
         let store = project.path().join(".tekdek");
-        fs::write(store.join("flows/demo-flow/current.json"), "{").expect("pointer");
+        let lineage = store.join("flows/demo-flow");
+        fs::rename(&lineage, project.path().join("lineage")).expect("move lineage");
+        std::os::unix::fs::symlink(project.path().join("lineage"), &lineage).expect("link lineage");
         assert_error(&get(&store, url), 404);
+    }
+
+    #[test]
+    fn fails_source_requests_for_a_flow_that_cannot_be_read() {
+        let project = source_fixture();
+        let store = project.path().join(".tekdek");
+        fs::write(store.join("flows/demo-flow/current.json"), "{").expect("pointer");
+        assert_error(
+            &get(&store, "/source?artifact=graph.json&flow=demo-flow"),
+            500,
+        );
     }
 
     #[cfg(unix)]
