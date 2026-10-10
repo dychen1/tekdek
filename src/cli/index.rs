@@ -407,13 +407,9 @@ fn validate_artifact_name(name: &str) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
-
     #[cfg(feature = "rust")]
-    use std::{
-        fs,
-        sync::atomic::{AtomicUsize, Ordering},
-    };
+    use std::fs;
+    use std::path::PathBuf;
 
     use tekdek::analysis::language::Language;
 
@@ -531,7 +527,8 @@ mod tests {
     #[cfg(feature = "rust")]
     #[test]
     fn applies_cli_overrides_after_explicit_configuration() {
-        let config_path = test_config_path();
+        let directory = tempfile::tempdir().expect("the temporary directory should exist");
+        let config_path = directory.path().join("config.toml");
         fs::write(
             &config_path,
             r#"
@@ -561,7 +558,6 @@ mod tests {
 
         let config = pipeline_config(&arguments, &arguments.root)
             .expect("the pipeline configuration should build");
-        fs::remove_file(&config_path).expect("the test configuration should be removed");
         let rust = config
             .profiles
             .iter()
@@ -651,16 +647,5 @@ mod tests {
             validate_artifact_name("INDEX"),
             Err("invalid artifact name: INDEX".to_owned())
         );
-    }
-
-    #[cfg(feature = "rust")]
-    fn test_config_path() -> PathBuf {
-        static NEXT_PATH: AtomicUsize = AtomicUsize::new(0);
-
-        std::env::temp_dir().join(format!(
-            "tekdek-cli-{}-{}.toml",
-            std::process::id(),
-            NEXT_PATH.fetch_add(1, Ordering::Relaxed)
-        ))
     }
 }
