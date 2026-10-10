@@ -666,6 +666,41 @@ mod tests {
     }
 
     #[test]
+    fn keeps_the_old_graph_when_the_analysis_fails() {
+        let directory = tempfile::tempdir().expect("folder");
+        let root = directory.path().join("app");
+        let store = directory.path().join("store");
+        std::fs::create_dir_all(&root).expect("root");
+        std::fs::create_dir_all(&store).expect("store");
+        for file in ["app.py", "lib.rs"] {
+            std::fs::write(root.join(file), [0xff, 0xfe]).expect("source that is not UTF-8");
+        }
+        std::fs::write(store.join("app.json"), "old graph\n").expect("old graph");
+
+        let text = |path: &std::path::Path| path.to_str().expect("path").to_owned();
+        let error = run([
+            text(&root),
+            "--name".into(),
+            "app".into(),
+            "--store".into(),
+            text(&store),
+        ]
+        .into_iter())
+        .expect_err("a failed analysis");
+
+        assert!(error.starts_with("cannot read the codebase"), "{error}");
+        assert_eq!(
+            std::fs::read_to_string(store.join("app.json")).expect("graph"),
+            "old graph\n"
+        );
+        let names: Vec<_> = std::fs::read_dir(&store)
+            .expect("list")
+            .map(|entry| entry.expect("entry").file_name())
+            .collect();
+        assert_eq!(names, ["app.json"]);
+    }
+
+    #[test]
     fn reserves_the_artifact_index_name() {
         assert_eq!(
             artifact_file("INDEX"),
