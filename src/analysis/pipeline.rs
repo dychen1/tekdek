@@ -1,6 +1,6 @@
 //! Analysis pipeline.
 //!
-//! This module runs the analysis stages in order and writes the graph artifact.
+//! This module runs the analysis stages in order and returns the code graph.
 //!
 //! # Sections
 //!
@@ -29,13 +29,12 @@ use super::{
     },
     source::{self, DEFAULT_EXCLUDED_DIRECTORIES},
 };
-use crate::store::graph::GraphArtifact;
 
 // -----------------------------------------------------------------------------
 // Stages
 // -----------------------------------------------------------------------------
 
-/// Analyzes one codebase and returns its graph and detected languages.
+/// Analyzes one codebase and returns its graph.
 ///
 /// # Errors
 ///
@@ -52,7 +51,7 @@ pub fn run(config: &PipelineConfig) -> Result<PipelineResult, PipelineError> {
     }
 
     let graph = build_graph(fact_sets, &documents).map_err(PipelineError::Graph)?;
-    Ok(PipelineResult { graph, languages })
+    Ok(PipelineResult { graph })
 }
 
 /// Returns the enabled languages that have source files under the root, in stable order.
@@ -68,38 +67,12 @@ pub fn detect_project_languages(config: &PipelineConfig) -> Result<Vec<Language>
 }
 
 fn load_documents(config: &PipelineConfig) -> Result<Vec<source::DocumentSnapshot>, PipelineError> {
-    let excluded = config
-        .excluded_directories
-        .iter()
-        .map(String::as_str)
-        .collect::<Vec<_>>();
     let extensions = enabled_extensions(&config.profiles);
     Ok(source::load_documents(
         &config.root,
         &extensions,
-        &excluded,
+        DEFAULT_EXCLUDED_DIRECTORIES,
     )?)
-}
-
-/// Analyzes one codebase and writes its graph artifact.
-///
-/// The function does not change the output if analysis fails.
-///
-/// # Errors
-///
-/// Returns an analysis error or an artifact write error.
-pub fn run_and_write(
-    config: &PipelineConfig,
-    output: &Path,
-) -> Result<PipelineResult, PipelineOutputError> {
-    let result = run(config).map_err(PipelineOutputError::Analysis)?;
-    GraphArtifact::new(&result.graph)
-        .write(output)
-        .map_err(|source| PipelineOutputError::Artifact {
-            path: output.to_path_buf(),
-            source,
-        })?;
-    Ok(result)
 }
 
 fn produce_facts(
@@ -169,7 +142,6 @@ fn produce_rust_facts(
 pub struct PipelineConfig {
     pub root: PathBuf,
     pub profiles: Vec<LanguageProfile>,
-    pub excluded_directories: Vec<String>,
 }
 
 impl PipelineConfig {
@@ -178,10 +150,6 @@ impl PipelineConfig {
         Self {
             root,
             profiles: builtin_profiles(),
-            excluded_directories: DEFAULT_EXCLUDED_DIRECTORIES
-                .iter()
-                .map(|directory| (*directory).to_owned())
-                .collect(),
         }
     }
 }
@@ -192,7 +160,6 @@ impl PipelineConfig {
 
 pub struct PipelineResult {
     pub graph: Graph,
-    pub languages: Vec<Language>,
 }
 
 // -----------------------------------------------------------------------------
@@ -212,34 +179,6 @@ pub enum PipelineError {
     },
     /// Graph construction cannot merge the language facts.
     Graph(AnalysisError),
-}
-
-#[derive(Debug)]
-pub enum PipelineOutputError {
-    /// Analysis failed before artifact writing.
-    Analysis(PipelineError),
-    /// The analyzed graph could not be written.
-    Artifact { path: PathBuf, source: io::Error },
-}
-
-impl fmt::Display for PipelineOutputError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Analysis(error) => error.fmt(formatter),
-            Self::Artifact { path, source } => {
-                write!(formatter, "cannot write {}: {source}", path.display())
-            }
-        }
-    }
-}
-
-impl Error for PipelineOutputError {
-    fn source(&self) -> Option<&(dyn Error + 'static)> {
-        match self {
-            Self::Analysis(error) => Some(error),
-            Self::Artifact { source, .. } => Some(source),
-        }
-    }
 }
 
 impl fmt::Display for PipelineError {
@@ -293,7 +232,7 @@ mod tests {
         sync::atomic::{AtomicU64, Ordering},
     };
 
-    use super::{PipelineConfig, PipelineError, PipelineOutputError, run, run_and_write};
+    use super::{PipelineConfig, PipelineError, run};
     use crate::{
         analysis::{
             language::{Language, LanguageProfile},
@@ -336,34 +275,26 @@ mod tests {
     }
 
     #[test]
-    fn preserves_an_existing_artifact_when_one_language_server_fails() {
+    fn names_the_language_whose_server_fails() {
         let repository = TestRepository::new();
         repository.write("app.py", "def run():\n    pass\n");
         repository.write("src/lib.rs", "pub fn run() {}\n");
-        let output = repository.path().join("result.json");
-        let sentinel = b"existing artifact";
-        fs::write(&output, sentinel).expect("the existing artifact should be written");
         let server = FakeServer::new();
         let config = pipeline_config(&repository, &server, "protocol-error");
 
-        let Err(error) = run_and_write(&config, &output) else {
+        let Err(error) = run(&config) else {
             panic!("the Rust fake server should return an error");
         };
 
         assert!(
             matches!(
                 error,
-                PipelineOutputError::Analysis(PipelineError::Language {
+                PipelineError::Language {
                     language: Language::Rust,
                     ..
-                })
+                }
             ),
             "the error should identify the failed adapter"
-        );
-        assert_eq!(
-            fs::read(&output).expect("the existing artifact should remain readable"),
-            sentinel,
-            "a failed pipeline must preserve the requested artifact"
         );
     }
 
