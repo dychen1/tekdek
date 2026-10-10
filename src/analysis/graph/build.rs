@@ -193,10 +193,7 @@ fn resolve_endpoint_key(
     let id = node_ids.get(key).copied().ok_or_else(|| {
         AnalysisError::new(format!("a syntax relation names an unknown entity: {key}"))
     })?;
-    let node = graph.nodes.get(id.index()).ok_or_else(|| {
-        AnalysisError::new("a syntax relation resolved to an invalid node identity")
-    })?;
-    if node.language != language {
+    if graph.nodes[id.index()].language != language {
         return Err(AnalysisError::new(format!(
             "a syntax relation names an entity from a different language: {key}"
         )));

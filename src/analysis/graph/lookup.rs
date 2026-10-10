@@ -88,8 +88,8 @@ impl<'a> SyntaxGraphIndex<'a> {
         }
     }
 
-    pub(super) fn node(&self, id: NodeId) -> Option<&Node> {
-        self.graph.nodes.get(id.index())
+    pub(super) fn node(&self, id: NodeId) -> &Node {
+        &self.graph.nodes[id.index()]
     }
 
     /// Returns the node declared at one source byte offset.

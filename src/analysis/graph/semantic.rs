@@ -119,7 +119,7 @@ fn add_call_edges(
             validate_body_locations(lookup, language, call_sites, "call")?;
             continue;
         };
-        let target = select_call_target(lookup, target_anchor)?;
+        let target = select_call_target(lookup, target_anchor);
 
         for location in call_sites {
             let ReportedLocation::Selected(observation) = location else {
@@ -178,7 +178,7 @@ fn add_type_use_edges(
                 continue;
             };
             let target = match_type_location(lookup, language, reported)?;
-            if !is_exact_type(lookup, target)? || source.node == target.node {
+            if !is_exact_type(lookup, target) || source.node == target.node {
                 continue;
             }
             edges.observe(
@@ -224,7 +224,7 @@ fn add_reference_edges(
             continue;
         };
         // Classify the target as a type or value.
-        let kind = reference_relation_kind(lookup, target)?;
+        let kind = reference_relation_kind(lookup, target);
 
         for location in occurrences {
             // Select one source occurrence.
@@ -271,7 +271,7 @@ fn add_reference_edges(
 ///
 /// # Errors
 ///
-/// Returns an error if a matched node identity or type location is invalid.
+/// Returns an error if a selected type location has no node.
 fn annotated_types(
     lookup: &SyntaxGraphIndex<'_>,
     language: Language,
@@ -279,7 +279,7 @@ fn annotated_types(
     target: NodeMatch,
     declared_types: &HashMap<SourcePosition, &[ReportedLocation]>,
 ) -> Result<Vec<NodeId>, AnalysisError> {
-    if is_exact_type(lookup, target)? {
+    if is_exact_type(lookup, target) {
         return Ok(vec![target.node]);
     }
 
@@ -295,7 +295,7 @@ fn annotated_types(
             continue;
         };
         let declared = match_type_location(lookup, language, observation)?;
-        if is_exact_type(lookup, declared)? {
+        if is_exact_type(lookup, declared) {
             types.push(declared.node);
         }
     }
@@ -408,33 +408,23 @@ pub(super) fn match_symbol(
 }
 
 /// Selects the last direct constructor for an exact class target.
-///
-/// # Errors
-///
-/// Returns an error if the matched node identity is invalid.
-fn select_call_target(
-    lookup: &SyntaxGraphIndex<'_>,
-    target: NodeMatch,
-) -> Result<NodeMatch, AnalysisError> {
-    let node = lookup.node(target.node).ok_or_else(|| AnalysisError {
-        message: "a resolved call target has an invalid node identity".to_owned(),
-    })?;
+fn select_call_target(lookup: &SyntaxGraphIndex<'_>, target: NodeMatch) -> NodeMatch {
     let is_exact_class = !target.used_owner
         && matches!(
-            &node.kind,
+            &lookup.node(target.node).kind,
             EntityKind::Type(data) if matches!(data.kind, TypeKind::Class)
         );
     let Some(constructor) = is_exact_class
         .then(|| lookup.last_direct_constructor(target.node))
         .flatten()
     else {
-        return Ok(target);
+        return target;
     };
 
-    Ok(NodeMatch {
+    NodeMatch {
         node: constructor,
         used_owner: false,
-    })
+    }
 }
 
 /// Matches a type location to a graph node.
@@ -465,32 +455,17 @@ fn match_type_location(
 }
 
 /// Returns the relation kind for a reference target.
-///
-/// # Errors
-///
-/// Returns an error if the matched node identity is invalid.
-fn reference_relation_kind(
-    lookup: &SyntaxGraphIndex<'_>,
-    target: NodeMatch,
-) -> Result<RelationKind, AnalysisError> {
-    if is_exact_type(lookup, target)? {
-        Ok(RelationKind::UsesType)
+fn reference_relation_kind(lookup: &SyntaxGraphIndex<'_>, target: NodeMatch) -> RelationKind {
+    if is_exact_type(lookup, target) {
+        RelationKind::UsesType
     } else {
-        Ok(RelationKind::UsesValue)
+        RelationKind::UsesValue
     }
 }
 
 /// Tests whether a match names a type declaration.
-///
-/// # Errors
-///
-/// Returns an error if the matched node identity is invalid.
-fn is_exact_type(lookup: &SyntaxGraphIndex<'_>, target: NodeMatch) -> Result<bool, AnalysisError> {
-    let node = lookup.node(target.node).ok_or_else(|| AnalysisError {
-        message: "a resolved reference target has an invalid node identity".to_owned(),
-    })?;
-
-    Ok(!target.used_owner && matches!(&node.kind, EntityKind::Type(_)))
+fn is_exact_type(lookup: &SyntaxGraphIndex<'_>, target: NodeMatch) -> bool {
+    !target.used_owner && matches!(&lookup.node(target.node).kind, EntityKind::Type(_))
 }
 
 fn source_position(span: &SourceSpan) -> SourcePosition {
