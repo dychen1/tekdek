@@ -4,7 +4,7 @@
    # Sections
    status, loading, pickers and badges, URL state, boot */
 import type { ArtifactEntry, ArtifactIndex, DeckFlow, DeckGraph, FlowEntry, SourceView } from "./data/models.ts";
-import { deckFlow, deckGraph, pickFlow, frozenFlows } from "./data/adapt.ts";
+import { deckFlow, deckGraph, pickArtifact, pickFlow, frozenFlows } from "./data/adapt.ts";
 import { loadFlow, loadGraph, loadIndex, loadSource, LoadError, type LoadReason } from "./data/load.ts";
 import { createDeck, type DeckInstance } from "./deck/deck.ts";
 import { codebasePicker, esc, flowPicker, icon } from "./deck/markup.ts";
@@ -246,9 +246,7 @@ async function boot() {
   showLoading("loading the artifact index");
   index = await loadIndex();
   const want = readUrl();
-  const file = index.artifacts.some(item => item.file === want.artifact) ? want.artifact!
-    : index.artifacts.some(item => item.file === index!.defaultArtifact) ? index.defaultArtifact! : index.artifacts[0].file;
-  await openArtifact(file, want.flow, want.step);
+  await openArtifact(pickArtifact(index, want.artifact)!.file, want.flow, want.step);
 }
 
 boot().catch(fail);

@@ -3,7 +3,7 @@
    The adapters read data only; they never fetch.
    # Sections
    graph, flow, shared rules */
-import type { ClusterColor, DeckCall, DeckCluster, DeckFlow, DeckFunction, DeckGraph, DeckStep, DeckTree, FlowArtifact, FlowEntry, GraphDocument } from "./models.ts";
+import type { ArtifactEntry, ArtifactIndex, ClusterColor, DeckCall, DeckCluster, DeckFlow, DeckFunction, DeckGraph, DeckStep, DeckTree, FlowArtifact, FlowEntry, GraphDocument } from "./models.ts";
 
 // ============ graph ============
 
@@ -109,4 +109,10 @@ export const frozenFlows = (flows: readonly FlowEntry[] | undefined) => (flows ?
 /** Picks the flow to open: the requested name, else the first flow. */
 export function pickFlow(flows: readonly FlowEntry[], requested: string | null): FlowEntry | null {
   return flows.find(flow => flow.name === requested) ?? flows[0] ?? null;
+}
+
+/** Picks the codebase to open: the requested file, else the index default, else the first codebase. */
+export function pickArtifact(index: ArtifactIndex, requested: string | null): ArtifactEntry | null {
+  const find = (file: string | null | undefined) => index.artifacts.find(item => item.file === file);
+  return find(requested) ?? find(index.defaultArtifact) ?? index.artifacts[0] ?? null;
 }

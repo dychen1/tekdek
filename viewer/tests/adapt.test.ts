@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { deckFlow, deckGraph, displayName, fileTree, pickFlow, frozenFlows } from "../src/data/adapt.ts";
+import { deckFlow, deckGraph, displayName, fileTree, pickArtifact, pickFlow, frozenFlows } from "../src/data/adapt.ts";
 import { digestOf, loadFlow, loadIndex, loadSource, LoadError, verifyGraph } from "../src/data/load.ts";
 
 import { artifact, DIGEST, graphDocument, must } from "./fixtures.ts";
@@ -95,6 +95,17 @@ test("only frozen schema 3 flows show, and the picker opens the requested flow, 
   assert.equal(must(pickFlow(flows, "missing")).name, "a");
   assert.equal(pickFlow([], null), null);
   assert.deepEqual(frozenFlows(undefined), []);
+});
+
+test("the page opens the requested codebase, else the index default, else the first one", () => {
+  const artifacts = [{ file: "a.json", digest: "sha256:a" }, { file: "b.json", digest: "sha256:b" }];
+  const index = { defaultArtifact: "b.json", artifacts };
+  assert.equal(must(pickArtifact(index, "a.json")).file, "a.json");
+  assert.equal(must(pickArtifact(index, "missing.json")).file, "b.json");
+  assert.equal(must(pickArtifact(index, null)).file, "b.json");
+  assert.equal(must(pickArtifact({ defaultArtifact: "gone.json", artifacts }, null)).file, "a.json");
+  assert.equal(must(pickArtifact({ artifacts }, null)).file, "a.json");
+  assert.equal(pickArtifact({ artifacts: [] }, null), null);
 });
 
 test("the flow adapter carries the transition, the fact text, and the generation of each step", () => {
