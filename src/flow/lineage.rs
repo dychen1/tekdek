@@ -170,7 +170,8 @@ pub fn lineage_ids(directory: &Path) -> io::Result<Vec<FlowId>> {
 /// Writes one generation and moves the current pointer to it.
 ///
 /// The generation file is written first, so a reader never sees a pointer to a
-/// missing file. An identical existing generation file is kept.
+/// missing file. An identical existing generation file is kept. An entry that
+/// is not a regular file counts as missing.
 ///
 /// # Errors
 /// Returns an error for a link, a file failure, or a different file at the same path.
@@ -186,10 +187,9 @@ pub fn write_current(directory: &Path, artifact: &FlowArtifact) -> Result<String
     reject_symlink(&generations)?;
     fs::create_dir_all(&generations)?;
     let path = flows.join(&file);
-    reject_symlink(&path)?;
     let mut bytes = serde_json::to_vec_pretty(artifact)?;
     bytes.push(b'\n');
-    match fs::read(&path) {
+    match read_bytes(&path) {
         Ok(existing) if existing == bytes => {}
         Ok(_) => return Err(LineageError::Conflict { file }),
         Err(error) if error.kind() == io::ErrorKind::NotFound => write_bytes(&path, &bytes)?,
@@ -293,7 +293,7 @@ impl From<serde_json::Error> for LineageError {
 mod tests {
     use std::{fs, path::Path};
 
-    use super::{LineageError, read_current};
+    use super::{LineageError, read_current, write_current};
     use crate::flow::{
         FlowError,
         fixtures::{self, frozen, import, output},
@@ -374,6 +374,34 @@ mod tests {
         let error = read_current(path, &id("flow-a")).expect_err("wrong flow");
 
         assert!(is_flow_mismatch(&error), "{error}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_pipe_at_the_generation_path_does_not_block_a_write() {
+        let directory = fixtures::store();
+        let path = directory.path().to_owned();
+        let generation = frozen(import(&path, "flow-a", &output()));
+        let artifact = fixtures::current(&path, "flow-a");
+        let file = path.join("flows").join(&generation.file);
+        let bytes = fs::read(&file).expect("generation");
+        fs::remove_file(&file).expect("remove generation");
+        let made = std::process::Command::new("mkfifo")
+            .arg(&file)
+            .status()
+            .expect("mkfifo");
+        assert!(made.success(), "mkfifo must create the pipe");
+
+        let (sender, receiver) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = sender.send(write_current(&path, &artifact).map_err(|error| error.to_string()));
+        });
+        let written = receiver
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .expect("the write must not block on the pipe");
+
+        assert_eq!(written, Ok(generation.file));
+        assert_eq!(fs::read(&file).expect("generation"), bytes);
     }
 
     #[test]
