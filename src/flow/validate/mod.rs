@@ -6,12 +6,13 @@
 //! Both collect every issue; code never repairs a rejected value.
 //!
 //! # Sections
-//! `Shared rules` holds the text, cluster, and author rules of both checks.
+//! `Limits` holds the one table of text and count limits. `Shared rules` holds
+//! the text, cluster, and author rules of both checks.
 
 mod agent;
 mod artifact;
 
-use std::collections::BTreeSet;
+use std::{collections::BTreeSet, ops::RangeInclusive};
 
 pub use agent::{CheckedFlow, CheckedStep, PriorContext, check_agent_flow};
 pub use artifact::verify_artifact;
@@ -22,17 +23,56 @@ use super::{
 };
 
 // -----------------------------------------------------------------------------
+// Limits
+// -----------------------------------------------------------------------------
+
+/// The length limits of one text field. A `block` text can hold tabs and line feeds.
+///
+/// A test compares each limit with the JSON Schemas.
+#[derive(Clone, Copy)]
+pub(super) struct TextRule {
+    pub min: usize,
+    pub max: usize,
+    pub block: bool,
+}
+
+impl TextRule {
+    const fn line(min: usize, max: usize) -> Self {
+        Self {
+            min,
+            max,
+            block: false,
+        }
+    }
+
+    const fn block(min: usize, max: usize) -> Self {
+        Self {
+            min,
+            max,
+            block: true,
+        }
+    }
+}
+
+pub(super) const BEHAVIOR: TextRule = TextRule::block(20, 600);
+pub(super) const BOUNDARIES: TextRule = TextRule::block(10, 600);
+pub(super) const REVISION_SUMMARY: TextRule = TextRule::block(20, 1200);
+pub(super) const NO_FLOW_EXPLANATION: TextRule = TextRule::block(20, 1000);
+pub(super) const CLUSTER_LABEL: TextRule = TextRule::line(3, 60);
+pub(super) const CLUSTER_DESCRIPTION: TextRule = TextRule::block(20, 400);
+pub(super) const PHASE_NOTE: TextRule = TextRule::line(3, 200);
+pub(super) const STEP_TITLE: TextRule = TextRule::line(3, 96);
+pub(super) const STEP_ANNOTATION: TextRule = TextRule::block(1, 1500);
+pub(super) const CLUSTER_COUNT: RangeInclusive<usize> = 1..=8;
+pub(super) const STEP_COUNT: RangeInclusive<usize> = 1..=400;
+
+// -----------------------------------------------------------------------------
 // Shared rules
 // -----------------------------------------------------------------------------
 
 /// Checks one stored text, which must already be canonical.
-fn stored_text(
-    issues: &mut Vec<FlowIssue>,
-    value: &str,
-    path: &str,
-    (min, max): (usize, usize),
-    block: bool,
-) {
+pub(super) fn stored_text(issues: &mut Vec<FlowIssue>, value: &str, path: &str, rule: TextRule) {
+    let TextRule { min, max, block } = rule;
     let result = if block {
         text::check_block(value, min, max)
     } else {
@@ -43,8 +83,10 @@ fn stored_text(
     }
 }
 
-/// Checks unique keys, unique labels ignoring case, and the phase note rule.
-fn cluster_rules(clusters: &[ClusterIntent], path: &str) -> Vec<FlowIssue> {
+/// Checks unique keys, unique labels ignoring case, the phase note rule, and cluster use.
+///
+/// `used` holds the cluster key of every step.
+fn cluster_rules(clusters: &[ClusterIntent], used: &BTreeSet<&str>, path: &str) -> Vec<FlowIssue> {
     let mut issues = Vec::new();
     let mut keys = BTreeSet::new();
     let mut labels = BTreeSet::new();
@@ -91,6 +133,16 @@ fn cluster_rules(clusters: &[ClusterIntent], path: &str) -> Vec<FlowIssue> {
                 .cluster(cluster.key.as_str()),
             ),
             _ => {}
+        }
+        if !used.contains(cluster.key.as_str()) {
+            issues.push(
+                FlowIssue::error(
+                    IssueCode::UnusedCluster,
+                    format!("no step uses the cluster {}", cluster.key),
+                )
+                .at(&at)
+                .cluster(cluster.key.as_str()),
+            );
         }
     }
     issues

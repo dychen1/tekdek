@@ -7,7 +7,11 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::{cluster_rules, stored_text};
+use super::{
+    BEHAVIOR, BOUNDARIES, CLUSTER_COUNT, CLUSTER_DESCRIPTION, CLUSTER_LABEL, PHASE_NOTE,
+    REVISION_SUMMARY, STEP_ANNOTATION, STEP_COUNT, STEP_TITLE, TextRule, cluster_rules,
+    stored_text,
+};
 use crate::flow::{
     models::{
         AgentFlow, AgentStep, ClusterIntent, ClusterKey, EvidenceBasis, FlowIssue,
@@ -55,30 +59,31 @@ pub fn check_agent_flow(
     graph_keys: &BTreeSet<&str>,
 ) -> (Option<CheckedFlow>, Vec<FlowIssue>) {
     let mut issues = Vec::new();
-    let behavior = agent_text(
-        &mut issues,
-        &flow.behavior,
-        "/flow/behavior",
-        (20, 600),
-        true,
-    );
+    let behavior = agent_text(&mut issues, &flow.behavior, "/flow/behavior", BEHAVIOR);
     let boundaries = flow
         .boundaries
         .as_deref()
-        .map(|value| agent_text(&mut issues, value, "/flow/boundaries", (10, 600), true));
+        .map(|value| agent_text(&mut issues, value, "/flow/boundaries", BOUNDARIES));
     let revision_summary = flow.revision_summary.as_deref().map(|value| {
         agent_text(
             &mut issues,
             value,
             "/flow/revisionSummary",
-            (20, 1200),
-            true,
+            REVISION_SUMMARY,
         )
     });
     let clusters = check_clusters(flow, &mut issues);
-    if !(1..=400).contains(&flow.steps.len()) {
+    if !STEP_COUNT.contains(&flow.steps.len()) {
         issues.push(
-            FlowIssue::error(IssueCode::StepLimit, "a flow needs 1 to 400 steps").at("/flow/steps"),
+            FlowIssue::error(
+                IssueCode::StepLimit,
+                format!(
+                    "a flow needs {} to {} steps",
+                    STEP_COUNT.start(),
+                    STEP_COUNT.end()
+                ),
+            )
+            .at("/flow/steps"),
         );
     }
     let known: BTreeSet<&str> = flow
@@ -133,20 +138,18 @@ fn check_clusters(flow: &AgentFlow, issues: &mut Vec<FlowIssue>) -> Vec<ClusterI
             issues,
             &cluster.label,
             &format!("{path}/label"),
-            (3, 60),
-            false,
+            CLUSTER_LABEL,
         );
         let description = agent_text(
             issues,
             &cluster.description,
             &format!("{path}/description"),
-            (20, 400),
-            true,
+            CLUSTER_DESCRIPTION,
         );
         let phase_note = cluster
             .phase_note
             .as_deref()
-            .map(|value| agent_text(issues, value, &format!("{path}/phaseNote"), (3, 200), false));
+            .map(|value| agent_text(issues, value, &format!("{path}/phaseNote"), PHASE_NOTE));
         match ClusterKey::try_from(cluster.key.as_str()) {
             Ok(key) => clusters.push(ClusterIntent {
                 key,
@@ -162,29 +165,24 @@ fn check_clusters(flow: &AgentFlow, issues: &mut Vec<FlowIssue>) -> Vec<ClusterI
             ),
         }
     }
-    issues.extend(cluster_rules(&clusters, "/flow/clusters"));
-    if !(1..=8).contains(&flow.clusters.len()) {
-        issues.push(
-            FlowIssue::error(IssueCode::ClusterLimit, "a flow needs 1 to 8 clusters")
-                .at("/flow/clusters"),
-        );
-    }
     let used: BTreeSet<&str> = flow
         .steps
         .iter()
         .map(|step| step.cluster_key.as_str())
         .collect();
-    for (index, cluster) in flow.clusters.iter().enumerate() {
-        if !used.contains(cluster.key.as_str()) {
-            issues.push(
-                FlowIssue::error(
-                    IssueCode::UnusedCluster,
-                    format!("no step uses the cluster {}", cluster.key),
-                )
-                .at(format!("/flow/clusters/{index}"))
-                .cluster(&cluster.key),
-            );
-        }
+    issues.extend(cluster_rules(&clusters, &used, "/flow/clusters"));
+    if !CLUSTER_COUNT.contains(&flow.clusters.len()) {
+        issues.push(
+            FlowIssue::error(
+                IssueCode::ClusterLimit,
+                format!(
+                    "a flow needs {} to {} clusters",
+                    CLUSTER_COUNT.start(),
+                    CLUSTER_COUNT.end()
+                ),
+            )
+            .at("/flow/clusters"),
+        );
     }
     clusters
 }
@@ -205,19 +203,12 @@ fn check_step<'a>(
     issues: &mut Vec<FlowIssue>,
 ) -> Option<CheckedStep> {
     let path = format!("/flow/steps/{index}");
-    let title = agent_text(
-        issues,
-        &step.title,
-        &format!("{path}/title"),
-        (3, 96),
-        false,
-    );
+    let title = agent_text(issues, &step.title, &format!("{path}/title"), STEP_TITLE);
     let annotation = agent_text(
         issues,
         &step.annotation,
         &format!("{path}/annotation"),
-        (1, 1500),
-        true,
+        STEP_ANNOTATION,
     );
     let before = issues.iter().filter(|issue| issue.is_error()).count();
     let prior_step_id = step.prior_step_id.as_deref().and_then(|id| {
@@ -301,13 +292,7 @@ fn check_step<'a>(
 }
 
 /// Canonicalizes one agent text, reports a trim, and checks the result.
-fn agent_text(
-    issues: &mut Vec<FlowIssue>,
-    value: &str,
-    path: &str,
-    limits: (usize, usize),
-    block: bool,
-) -> String {
+fn agent_text(issues: &mut Vec<FlowIssue>, value: &str, path: &str, rule: TextRule) -> String {
     let canonical = text::canonical(value);
     if canonical != value {
         issues.push(
@@ -318,7 +303,7 @@ fn agent_text(
             .at(path),
         );
     }
-    stored_text(issues, &canonical, path, limits, block);
+    stored_text(issues, &canonical, path, rule);
     canonical
 }
 

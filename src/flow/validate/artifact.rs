@@ -7,7 +7,11 @@
 
 use std::collections::BTreeSet;
 
-use super::{check_author, cluster_rules, stored_text};
+use super::{
+    BEHAVIOR, BOUNDARIES, CLUSTER_COUNT, CLUSTER_DESCRIPTION, CLUSTER_LABEL, PHASE_NOTE,
+    REVISION_SUMMARY, STEP_ANNOTATION, STEP_COUNT, STEP_TITLE, check_author, cluster_rules,
+    stored_text,
+};
 use crate::flow::{
     assign, derive,
     models::{
@@ -154,23 +158,16 @@ fn generation_rules(artifact: &FlowArtifact, parent: Option<&FlowArtifact>) -> V
 /// Checks the stored text limits, the cluster rules, step IDs, and cluster use.
 fn intent_rules(intent: &IntentLayer) -> Vec<FlowIssue> {
     let mut issues = Vec::new();
-    stored_text(
-        &mut issues,
-        &intent.behavior,
-        "/intent/behavior",
-        (20, 600),
-        true,
-    );
+    stored_text(&mut issues, &intent.behavior, "/intent/behavior", BEHAVIOR);
     if let Some(value) = &intent.boundaries {
-        stored_text(&mut issues, value, "/intent/boundaries", (10, 600), true);
+        stored_text(&mut issues, value, "/intent/boundaries", BOUNDARIES);
     }
     if let Some(value) = &intent.revision_summary {
         stored_text(
             &mut issues,
             value,
             "/intent/revisionSummary",
-            (20, 1200),
-            true,
+            REVISION_SUMMARY,
         );
     }
     for (index, cluster) in intent.clusters.iter().enumerate() {
@@ -178,23 +175,20 @@ fn intent_rules(intent: &IntentLayer) -> Vec<FlowIssue> {
             &mut issues,
             &cluster.label,
             &format!("/intent/clusters/{index}/label"),
-            (3, 60),
-            false,
+            CLUSTER_LABEL,
         );
         stored_text(
             &mut issues,
             &cluster.description,
             &format!("/intent/clusters/{index}/description"),
-            (20, 400),
-            true,
+            CLUSTER_DESCRIPTION,
         );
         if let Some(note) = &cluster.phase_note {
             stored_text(
                 &mut issues,
                 note,
                 &format!("/intent/clusters/{index}/phaseNote"),
-                (3, 200),
-                false,
+                PHASE_NOTE,
             );
         }
     }
@@ -203,23 +197,33 @@ fn intent_rules(intent: &IntentLayer) -> Vec<FlowIssue> {
             &mut issues,
             &step.title,
             &format!("/intent/steps/{index}/title"),
-            (3, 96),
-            false,
+            STEP_TITLE,
         );
         stored_text(
             &mut issues,
             &step.annotation,
             &format!("/intent/steps/{index}/annotation"),
-            (1, 1500),
-            true,
+            STEP_ANNOTATION,
         );
     }
-    issues.extend(cluster_rules(&intent.clusters, "/intent/clusters"));
-    if !(1..=8).contains(&intent.clusters.len()) || !(1..=400).contains(&intent.steps.len()) {
+    let used: BTreeSet<&str> = intent
+        .steps
+        .iter()
+        .map(|step| step.cluster_key.as_str())
+        .collect();
+    issues.extend(cluster_rules(&intent.clusters, &used, "/intent/clusters"));
+    if !CLUSTER_COUNT.contains(&intent.clusters.len()) || !STEP_COUNT.contains(&intent.steps.len())
+    {
         issues.push(
             FlowIssue::error(
                 IssueCode::InvalidArtifact,
-                "a flow needs 1 to 8 clusters and 1 to 400 steps",
+                format!(
+                    "a flow needs {} to {} clusters and {} to {} steps",
+                    CLUSTER_COUNT.start(),
+                    CLUSTER_COUNT.end(),
+                    STEP_COUNT.start(),
+                    STEP_COUNT.end()
+                ),
             )
             .at("/intent"),
         );
@@ -233,18 +237,6 @@ fn intent_rules(intent: &IntentLayer) -> Vec<FlowIssue> {
                     format!("the step ID {} is used twice", step.id),
                 )
                 .step(step.id.as_str()),
-            );
-        }
-    }
-    let used: BTreeSet<_> = intent.steps.iter().map(|step| &step.cluster_key).collect();
-    for cluster in &intent.clusters {
-        if !used.contains(&cluster.key) {
-            issues.push(
-                FlowIssue::error(
-                    IssueCode::UnusedCluster,
-                    format!("no step uses the cluster {}", cluster.key),
-                )
-                .cluster(cluster.key.as_str()),
             );
         }
     }

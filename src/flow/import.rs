@@ -199,11 +199,12 @@ fn parse_output(input: &[u8]) -> Result<Result<AgentFlow, ImportOutcome>, FlowEr
         } => {
             let explanation = text::canonical(&explanation);
             let mut issues = contract_issues(contract_version);
-            if let Err(fault) = text::check_block(&explanation, 20, 1000) {
-                issues.push(
-                    FlowIssue::error(IssueCode::InvalidText, fault.to_string()).at("/explanation"),
-                );
-            }
+            validate::stored_text(
+                &mut issues,
+                &explanation,
+                "/explanation",
+                validate::NO_FLOW_EXPLANATION,
+            );
             if issues.is_empty() {
                 Ok(Err(ImportOutcome::NoFlow {
                     reason,

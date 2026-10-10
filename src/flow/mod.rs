@@ -407,4 +407,112 @@ mod tests {
             names(&transitions)
         );
     }
+
+    /// Reads two numeric limit keywords from one schema node.
+    fn schema_limits(schema: &Value, pointer: &str, keywords: [&str; 2]) -> (usize, usize) {
+        let node = schema.pointer(pointer).expect(pointer);
+        let read = |keyword: &str| {
+            let value = node[keyword].as_u64().expect(keyword);
+            usize::try_from(value).expect(keyword)
+        };
+        (read(keywords[0]), read(keywords[1]))
+    }
+
+    #[test]
+    fn validation_limits_match_the_schema_limits() {
+        use super::validate::{
+            BEHAVIOR, BOUNDARIES, CLUSTER_COUNT, CLUSTER_DESCRIPTION, CLUSTER_LABEL,
+            NO_FLOW_EXPLANATION, PHASE_NOTE, REVISION_SUMMARY, STEP_ANNOTATION, STEP_COUNT,
+            STEP_TITLE,
+        };
+        let (artifact_schema, agent_schema) = schemas();
+        let text = ["minLength", "maxLength"];
+        let count = ["minItems", "maxItems"];
+        // Each row: the rule, then its node in the agent schema and in the artifact schema.
+        let texts = [
+            (
+                BEHAVIOR,
+                "/$defs/AgentFlow/properties/behavior",
+                "/$defs/IntentLayer/properties/behavior",
+            ),
+            (
+                BOUNDARIES,
+                "/$defs/AgentFlow/properties/boundaries/oneOf/1",
+                "/$defs/IntentLayer/properties/boundaries/oneOf/1",
+            ),
+            (
+                REVISION_SUMMARY,
+                "/$defs/AgentFlow/properties/revisionSummary/oneOf/1",
+                "/$defs/IntentLayer/properties/revisionSummary/oneOf/1",
+            ),
+            (
+                CLUSTER_LABEL,
+                "/$defs/AgentCluster/properties/label",
+                "/$defs/ClusterIntent/properties/label",
+            ),
+            (
+                CLUSTER_DESCRIPTION,
+                "/$defs/AgentCluster/properties/description",
+                "/$defs/ClusterIntent/properties/description",
+            ),
+            (
+                PHASE_NOTE,
+                "/$defs/AgentCluster/properties/phaseNote/oneOf/1",
+                "/$defs/ClusterIntent/properties/phaseNote/oneOf/1",
+            ),
+            (
+                STEP_TITLE,
+                "/$defs/AgentStep/properties/title",
+                "/$defs/FlowStep/properties/title",
+            ),
+            (
+                STEP_ANNOTATION,
+                "/$defs/AgentStep/properties/annotation",
+                "/$defs/FlowStep/properties/annotation",
+            ),
+        ];
+        for (rule, agent, artifact) in texts {
+            let expected = (rule.min, rule.max);
+            assert_eq!(
+                schema_limits(&agent_schema, agent, text),
+                expected,
+                "{agent}"
+            );
+            assert_eq!(
+                schema_limits(&artifact_schema, artifact, text),
+                expected,
+                "{artifact}"
+            );
+        }
+        let explanation = "/$defs/NoFlowOutcome/properties/explanation";
+        assert_eq!(
+            schema_limits(&agent_schema, explanation, text),
+            (NO_FLOW_EXPLANATION.min, NO_FLOW_EXPLANATION.max),
+            "{explanation}"
+        );
+        for (range, agent, artifact) in [
+            (
+                CLUSTER_COUNT,
+                "/$defs/AgentFlow/properties/clusters",
+                "/$defs/IntentLayer/properties/clusters",
+            ),
+            (
+                STEP_COUNT,
+                "/$defs/AgentFlow/properties/steps",
+                "/$defs/IntentLayer/properties/steps",
+            ),
+        ] {
+            let expected = (*range.start(), *range.end());
+            assert_eq!(
+                schema_limits(&agent_schema, agent, count),
+                expected,
+                "{agent}"
+            );
+            assert_eq!(
+                schema_limits(&artifact_schema, artifact, count),
+                expected,
+                "{artifact}"
+            );
+        }
+    }
 }
