@@ -23,10 +23,8 @@ use std::{
     time::{Duration, Instant},
 };
 
-#[cfg(any(feature = "python", feature = "rust", test))]
-use lsp_types::Position;
 use lsp_types::{
-    InitializeParams, InitializeResult, InitializedParams, Uri,
+    InitializeParams, InitializeResult, InitializedParams, Position, Uri,
     notification::{Exit, Initialized, Notification},
     request::{Initialize, Request, Shutdown},
 };
@@ -636,7 +634,6 @@ pub fn uri_path(uri: &Uri) -> Option<PathBuf> {
 ///
 /// Returns an error if the line or character is outside the source text.
 /// Returns an error if the character splits a UTF-16 surrogate pair.
-#[cfg(any(feature = "python", feature = "rust", test))]
 pub(crate) fn position_to_byte_offset(
     source: &str,
     path: &str,
@@ -684,7 +681,6 @@ pub(crate) fn position_to_byte_offset(
 /// # Errors
 ///
 /// Returns an error if the combined offset does not fit in a source offset.
-#[cfg(any(feature = "python", feature = "rust", test))]
 fn absolute_offset(line_start: usize, byte_offset: usize, path: &str) -> Result<u32, LspError> {
     line_start
         .checked_add(byte_offset)
@@ -692,12 +688,10 @@ fn absolute_offset(line_start: usize, byte_offset: usize, path: &str) -> Result<
         .ok_or_else(|| LspError::new(format!("the source offset is too large in {path}")))
 }
 
-#[cfg(any(feature = "python", feature = "rust", test))]
 fn invalid_line(path: &str, position: Position) -> LspError {
     LspError::new(format!("the LSP line {} is outside {path}", position.line))
 }
 
-#[cfg(any(feature = "python", feature = "rust", test))]
 fn invalid_character(path: &str, position: Position) -> LspError {
     LspError::new(format!(
         "the LSP character {} is outside line {} in {path}",

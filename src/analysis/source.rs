@@ -210,7 +210,6 @@ fn is_excluded(path: &Path, excluded_directories: &[&str]) -> bool {
         .is_some_and(|name| excluded_directories.contains(&name))
 }
 
-#[cfg(any(feature = "python", feature = "rust", test))]
 pub(crate) fn document_has_extension(document: &DocumentSnapshot, extensions: &[String]) -> bool {
     has_extension(&document.path, extensions)
 }

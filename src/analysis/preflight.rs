@@ -20,11 +20,11 @@ use super::{
 // Detection
 // -----------------------------------------------------------------------------
 
-/// Returns the sorted, distinct extensions of enabled profiles with a compiled adapter.
+/// Returns the sorted, distinct extensions of enabled profiles.
 pub(super) fn enabled_extensions(profiles: &[LanguageProfile]) -> Vec<String> {
     let mut extensions = profiles
         .iter()
-        .filter(|profile| profile.enabled && language_is_compiled(profile.language))
+        .filter(|profile| profile.enabled)
         .flat_map(|profile| profile.extensions.iter().cloned())
         .collect::<Vec<_>>();
     extensions.sort();
@@ -75,7 +75,6 @@ pub(super) fn detect_languages(
         .iter()
         .filter(|profile| {
             profile.enabled
-                && language_is_compiled(profile.language)
                 && documents
                     .iter()
                     .any(|document| source::document_has_extension(document, &profile.extensions))
@@ -85,13 +84,6 @@ pub(super) fn detect_languages(
     languages.sort();
     languages.dedup();
     languages
-}
-
-fn language_is_compiled(language: Language) -> bool {
-    match language {
-        Language::Python => cfg!(feature = "python"),
-        Language::Rust => cfg!(feature = "rust"),
-    }
 }
 
 // -----------------------------------------------------------------------------
@@ -147,17 +139,16 @@ fn program_is_available(program: &str) -> bool {
 mod tests {
     use std::path::PathBuf;
 
-    #[cfg(any(all(feature = "python", feature = "rust"), not(feature = "rust")))]
-    use super::enabled_extensions;
+    #[cfg(feature = "rust")]
+    use super::detect_languages;
+    use super::detect_required_languages;
     #[cfg(all(feature = "python", feature = "rust"))]
-    use super::preflight_server_programs_with;
-    use super::{detect_languages, detect_required_languages};
+    use super::{enabled_extensions, preflight_server_programs_with};
+    #[cfg(feature = "rust")]
+    use crate::analysis::language::Language;
     #[cfg(all(feature = "python", feature = "rust"))]
     use crate::analysis::language::LanguageProfile;
-    use crate::analysis::{
-        language::{Language, builtin_profiles},
-        source::DocumentSnapshot,
-    };
+    use crate::analysis::{language::builtin_profiles, source::DocumentSnapshot};
 
     #[cfg(all(feature = "python", feature = "rust"))]
     #[test]
@@ -198,28 +189,6 @@ mod tests {
         );
 
         assert_eq!(detected, vec![Language::Rust]);
-    }
-
-    #[cfg(not(feature = "rust"))]
-    #[test]
-    fn ignores_a_profile_without_a_compiled_adapter() {
-        let mut profile = builtin_profiles()
-            .into_iter()
-            .next()
-            .expect("the Python profile should exist");
-        profile.language = Language::Rust;
-        profile.extensions = vec!["rs".to_owned()];
-
-        let detected = detect_languages(
-            &[snapshot("src/lib.rs", "pub fn run() {}")],
-            std::slice::from_ref(&profile),
-        );
-
-        assert_eq!(detected, Vec::new());
-        assert_eq!(
-            enabled_extensions(std::slice::from_ref(&profile)),
-            Vec::<String>::new()
-        );
     }
 
     #[test]

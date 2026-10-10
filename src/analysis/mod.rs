@@ -21,6 +21,7 @@ pub mod config;
 pub mod fact;
 pub mod graph;
 pub mod language;
+#[cfg(any(feature = "python", feature = "rust"))]
 pub mod lsp;
 #[cfg(any(feature = "python", feature = "rust"))]
 mod pipeline;

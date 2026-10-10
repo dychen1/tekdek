@@ -22,7 +22,7 @@ use super::language::RustAdapter;
 use super::{
     fact::{AnalysisError, FactSet},
     graph::{Graph, build::build_graph},
-    language::{Language, LanguageProfile, builtin_profiles},
+    language::{Language, LanguageAdapter, LanguageProfile, builtin_profiles},
     preflight::{
         detect_languages, detect_required_languages, enabled_extensions, preflight_server_programs,
         profile,
@@ -75,64 +75,33 @@ fn load_documents(config: &PipelineConfig) -> Result<Vec<source::DocumentSnapsho
     )?)
 }
 
+/// Runs the adapter of one profile.
+///
+/// A profile exists only for a compiled adapter, so the last arm cannot run.
 fn produce_facts(
     root: &Path,
     profile: &LanguageProfile,
     documents: &[source::DocumentSnapshot],
 ) -> Result<FactSet, PipelineError> {
+    let root = root.to_path_buf();
     let result = match profile.language {
-        Language::Python => produce_python_facts(root, profile, documents),
-        Language::Rust => produce_rust_facts(root, profile, documents),
+        #[cfg(feature = "python")]
+        Language::Python => PythonAdapter::new(root, profile.clone()).produce_facts(documents),
+        #[cfg(feature = "rust")]
+        Language::Rust => RustAdapter::new(root, profile.clone()).produce_facts(documents),
+        #[allow(
+            unreachable_patterns,
+            reason = "a build with both language features compiles every adapter"
+        )]
+        language => Err(AnalysisError::new(format!(
+            "the {language} adapter is not available in this build"
+        ))),
     };
 
     result.map_err(|source| PipelineError::Language {
         language: profile.language,
         source,
     })
-}
-
-#[cfg(feature = "python")]
-fn produce_python_facts(
-    root: &Path,
-    profile: &LanguageProfile,
-    documents: &[source::DocumentSnapshot],
-) -> Result<FactSet, AnalysisError> {
-    use super::language::LanguageAdapter;
-    let mut adapter = PythonAdapter::new(root.to_path_buf(), profile.clone());
-    adapter.produce_facts(documents)
-}
-
-#[cfg(not(feature = "python"))]
-fn produce_python_facts(
-    _root: &Path,
-    _profile: &LanguageProfile,
-    _documents: &[source::DocumentSnapshot],
-) -> Result<FactSet, AnalysisError> {
-    Err(AnalysisError::new(
-        "the Python adapter is not available in this build",
-    ))
-}
-
-#[cfg(feature = "rust")]
-fn produce_rust_facts(
-    root: &Path,
-    profile: &LanguageProfile,
-    documents: &[source::DocumentSnapshot],
-) -> Result<FactSet, AnalysisError> {
-    use super::language::LanguageAdapter;
-    let mut adapter = RustAdapter::new(root.to_path_buf(), profile.clone());
-    adapter.produce_facts(documents)
-}
-
-#[cfg(not(feature = "rust"))]
-fn produce_rust_facts(
-    _root: &Path,
-    _profile: &LanguageProfile,
-    _documents: &[source::DocumentSnapshot],
-) -> Result<FactSet, AnalysisError> {
-    Err(AnalysisError::new(
-        "the Rust adapter is not available in this build",
-    ))
 }
 
 // -----------------------------------------------------------------------------

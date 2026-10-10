@@ -198,19 +198,13 @@ fn unavailable_language(language: Language) -> ConfigError {
 #[cfg(test)]
 mod tests {
     use std::{
+        collections::BTreeMap,
+        fs,
         path::PathBuf,
         sync::atomic::{AtomicUsize, Ordering},
     };
 
-    #[cfg(any(feature = "python", feature = "rust"))]
-    use std::collections::BTreeMap;
-    #[cfg(any(feature = "python", feature = "rust"))]
-    use std::fs;
-
-    #[cfg(any(feature = "python", feature = "rust"))]
-    use super::apply_cli_overrides;
-    use super::{configured_profiles, profiles_from_toml};
-    #[cfg(any(feature = "python", feature = "rust"))]
+    use super::{apply_cli_overrides, configured_profiles, profiles_from_toml};
     use crate::analysis::language::builtin_profiles;
 
     #[cfg(feature = "rust")]
@@ -257,7 +251,6 @@ mod tests {
         assert!(error.to_string().contains(&path.display().to_string()));
     }
 
-    #[cfg(any(feature = "python", feature = "rust"))]
     #[test]
     fn loads_an_explicit_file() {
         let path = test_path("configured");
@@ -299,7 +292,6 @@ mod tests {
         assert_eq!(options["diagnostics"]["enable"], true);
     }
 
-    #[cfg(any(feature = "python", feature = "rust"))]
     #[test]
     fn applies_cli_overrides_after_configured_values() {
         let mut profiles = builtin_profiles();
@@ -325,7 +317,6 @@ mod tests {
         assert_eq!(profile.server.arguments, ["cli-argument"]);
     }
 
-    #[cfg(any(feature = "python", feature = "rust"))]
     fn profile(
         profiles: &[crate::analysis::language::LanguageProfile],
         language: crate::analysis::language::Language,
