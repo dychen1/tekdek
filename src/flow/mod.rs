@@ -12,7 +12,8 @@
 //! canonical forms.
 //!
 //! # Sections
-//! `Contracts` embeds the JSON Schemas. `Errors` reports failures.
+//! `Contracts` embeds the JSON Schemas. `Lookup` resolves a flow name.
+//! `Errors` reports failures.
 
 pub mod assign;
 pub mod canonical;
@@ -27,13 +28,13 @@ pub mod verify;
 #[cfg(test)]
 pub(crate) mod fixtures;
 
-use std::{fmt, io};
+use std::{fmt, io, path::Path};
 
 use assign::AssignError;
 use canonical::CanonicalError;
 use derive::DeriveError;
-use lineage::LineageError;
-use models::FlowIssue;
+use lineage::{LineageError, StoredGeneration};
+use models::{FlowId, FlowIssue, IssueCode};
 
 // -----------------------------------------------------------------------------
 // Contracts
@@ -44,6 +45,31 @@ pub const AGENT_OUTPUT_SCHEMA: &str = include_str!("schema/agent-output.schema.j
 
 /// The embedded frozen artifact schema, version 3.
 pub const FLOW_ARTIFACT_SCHEMA: &str = include_str!("schema/flow-artifact.schema.json");
+
+// -----------------------------------------------------------------------------
+// Lookup
+// -----------------------------------------------------------------------------
+
+/// Reads the current generation of the flow with this name.
+///
+/// # Errors
+/// Returns `Rejected` for an invalid name and `NoLineage` for a flow without a
+/// frozen generation. Returns a lineage error when the files cannot be read.
+pub fn current_flow(directory: &Path, name: &str) -> Result<StoredGeneration, FlowError> {
+    lineage::read_current(directory, &flow_id(name)?)?.ok_or_else(|| FlowError::NoLineage {
+        name: name.to_owned(),
+    })
+}
+
+/// Parses a flow name. An invalid name is a rejected input with an `invalid_key` issue.
+fn flow_id(name: &str) -> Result<FlowId, FlowError> {
+    FlowId::try_from(name).map_err(|error| {
+        FlowError::Rejected(vec![FlowIssue::error(
+            IssueCode::InvalidKey,
+            error.to_string(),
+        )])
+    })
+}
 
 // -----------------------------------------------------------------------------
 // Errors

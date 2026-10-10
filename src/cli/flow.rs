@@ -18,10 +18,10 @@ use std::{
 };
 
 use tekdek::flow::{
-    AGENT_OUTPUT_SCHEMA, FlowError,
+    AGENT_OUTPUT_SCHEMA, current_flow,
     import::{self, ImportOutcome, ImportRequest},
     lineage,
-    models::{Author, FlowArtifact, FlowId, FlowIssue, IssueCode, wire_name},
+    models::{Author, FlowArtifact, FlowIssue, wire_name},
     verify,
 };
 
@@ -219,16 +219,7 @@ fn list(directory: &Path, json: bool, graph: Option<&str>) -> Result<(u8, String
 
 /// Shows the current generation of one flow. JSON output is the frozen artifact.
 fn show(directory: &Path, json: bool, name: &str) -> Result<(u8, String), Box<dyn Error>> {
-    let flow_id = FlowId::try_from(name).map_err(|error| {
-        FlowError::Rejected(vec![FlowIssue::error(
-            IssueCode::InvalidKey,
-            error.to_string(),
-        )])
-    })?;
-    let current =
-        lineage::read_current(directory, &flow_id)?.ok_or_else(|| FlowError::NoLineage {
-            name: name.to_owned(),
-        })?;
+    let current = current_flow(directory, name)?;
     let artifact = &current.artifact;
     Ok((
         0,

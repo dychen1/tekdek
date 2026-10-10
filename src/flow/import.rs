@@ -24,6 +24,7 @@ use serde::Serialize;
 use super::{
     FlowError, assign, canonical,
     derive::{self, DeriveError},
+    flow_id,
     lineage::{self, StoredGeneration},
     models::{
         AgentFlow, AgentFlowOutput, ArtifactKind, Author, Digests, FLOW_ARTIFACT_SCHEMA_VERSION,
@@ -90,12 +91,7 @@ pub fn import_flow(
     directory: &Path,
     request: ImportRequest<'_>,
 ) -> Result<ImportOutcome, FlowError> {
-    let flow_id = FlowId::try_from(request.name).map_err(|error| {
-        FlowError::Rejected(vec![FlowIssue::error(
-            IssueCode::InvalidKey,
-            error.to_string(),
-        )])
-    })?;
+    let flow_id = flow_id(request.name)?;
     check_graph_name(request.graph_file)?;
     validate::check_author(&request.author).map_err(|message| {
         FlowError::Rejected(vec![

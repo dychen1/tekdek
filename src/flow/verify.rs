@@ -9,8 +9,8 @@ use std::{collections::BTreeSet, path::Path};
 use serde::Serialize;
 
 use super::{
-    FlowError, derive, lineage,
-    models::{FlowId, FlowIssue, GenerationPurpose, IssueCode, Sha256Digest},
+    FlowError, current_flow, derive, lineage,
+    models::{FlowIssue, GenerationPurpose, IssueCode, Sha256Digest},
     validate,
 };
 use crate::store::graph::read_graph;
@@ -34,22 +34,13 @@ pub struct VerifyReport {
 /// # Errors
 /// Returns an error when the flow has no lineage or its files cannot be read.
 pub fn verify_flow(directory: &Path, name: &str) -> Result<VerifyReport, FlowError> {
-    let flow_id = FlowId::try_from(name).map_err(|error| {
-        FlowError::Rejected(vec![FlowIssue::error(
-            IssueCode::InvalidKey,
-            error.to_string(),
-        )])
-    })?;
-    let current =
-        lineage::read_current(directory, &flow_id)?.ok_or_else(|| FlowError::NoLineage {
-            name: name.to_owned(),
-        })?;
+    let current = current_flow(directory, name)?;
     let artifact = &current.artifact;
     let mut issues = Vec::new();
     let parent = match &artifact.generation.parent_digest {
         Some(digest) => match lineage::read_generation(
             directory,
-            &flow_id,
+            &artifact.flow_id,
             artifact.generation.ordinal.saturating_sub(1),
             digest,
         ) {
@@ -92,7 +83,7 @@ pub fn verify_flow(directory: &Path, name: &str) -> Result<VerifyReport, FlowErr
         _ => true,
     };
     Ok(VerifyReport {
-        name: flow_id.to_string(),
+        name: artifact.flow_id.to_string(),
         file: current.file,
         ordinal: artifact.generation.ordinal,
         purpose: artifact.generation.purpose,
