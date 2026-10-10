@@ -107,12 +107,6 @@ fn parse_document(document: &DocumentSnapshot) -> Result<ParsedDocument<'_>, Ana
 // Source Model
 // -----------------------------------------------------------------------------
 
-#[derive(Clone, Eq, Hash, PartialEq)]
-struct QualifiedTypeName {
-    module: ModulePath,
-    name: String,
-}
-
 #[derive(Eq, Hash, PartialEq)]
 struct DeclarationId {
     path: String,
@@ -190,12 +184,9 @@ impl LineIndex {
 struct RustSyntaxWalker {
     builder: SyntaxFactBuilder,
     modules: HashMap<ModulePath, Vec<EntityKey>>,
-    types: HashMap<QualifiedTypeName, Vec<EntityKey>>,
     types_by_owner: HashMap<EntityKey, HashMap<String, Vec<EntityKey>>>,
-    file_modules: HashMap<String, EntityKey>,
     declared_modules: HashMap<DeclarationId, EntityKey>,
     declared_types: HashMap<DeclarationId, EntityKey>,
-    containments: Vec<(EntityKey, EntityKey)>,
 }
 
 impl RustSyntaxWalker {
@@ -203,12 +194,9 @@ impl RustSyntaxWalker {
         Self {
             builder: SyntaxFactBuilder::new(),
             modules: HashMap::new(),
-            types: HashMap::new(),
             types_by_owner: HashMap::new(),
-            file_modules: HashMap::new(),
             declared_modules: HashMap::new(),
             declared_types: HashMap::new(),
-            containments: Vec::new(),
         }
     }
 }
@@ -220,7 +208,8 @@ impl RustSyntaxWalker {
 /// Produces facts with three ordered syntax passes.
 ///
 /// Pass one registers modules and types. Pass two registers fields and
-/// callables. Pass three adds containment and local import relations.
+/// callables. Both passes add the containment relation of each new entity.
+/// Pass three adds local import relations.
 fn produce_document_facts(documents: &[ParsedDocument<'_>]) -> Result<SyntaxFacts, AnalysisError> {
     let mut walker = RustSyntaxWalker::new();
 
@@ -228,7 +217,7 @@ fn produce_document_facts(documents: &[ParsedDocument<'_>]) -> Result<SyntaxFact
         walker.register_file_module(document)?;
     }
     for document in documents {
-        let module = walker.file_module(document)?;
+        let module = EntityKey::module(&document.path);
         walker.register_types(
             document,
             &document.syntax.items,
@@ -237,7 +226,7 @@ fn produce_document_facts(documents: &[ParsedDocument<'_>]) -> Result<SyntaxFact
         )?;
     }
     for document in documents {
-        let module = walker.file_module(document)?;
+        let module = EntityKey::module(&document.path);
         walker.register_members(
             document,
             &document.syntax.items,
@@ -246,10 +235,8 @@ fn produce_document_facts(documents: &[ParsedDocument<'_>]) -> Result<SyntaxFact
             &module,
         )?;
     }
-
-    walker.add_containment_relations();
     for document in documents {
-        let module = walker.file_module(document)?;
+        let module = EntityKey::module(&document.path);
         walker.add_import_relations(
             document,
             &document.syntax.items,
@@ -262,26 +249,13 @@ fn produce_document_facts(documents: &[ParsedDocument<'_>]) -> Result<SyntaxFact
 }
 
 impl RustSyntaxWalker {
-    fn file_module(&self, document: &ParsedDocument<'_>) -> Result<EntityKey, AnalysisError> {
-        self.file_modules
-            .get(&document.path)
-            .cloned()
-            .ok_or_else(|| {
-                AnalysisError::new(format!(
-                    "the {} file module was not registered",
-                    document.path
-                ))
-            })
-    }
-
     /// Registers one file module before item traversal starts.
     fn register_file_module(&mut self, document: &ParsedDocument<'_>) -> Result<(), AnalysisError> {
         let module = self.builder.add_module(&document.path, document.source)?;
         self.modules
             .entry(document.module_path.clone())
             .or_default()
-            .push(module.clone());
-        self.file_modules.insert(document.path.clone(), module);
+            .push(module);
         Ok(())
     }
 
@@ -303,7 +277,6 @@ impl RustSyntaxWalker {
                 Item::Struct(item) => {
                     self.register_type(
                         document,
-                        module_path,
                         module,
                         &item.ident,
                         TypeKind::Struct,
@@ -317,7 +290,6 @@ impl RustSyntaxWalker {
                 Item::Enum(item) => {
                     self.register_type(
                         document,
-                        module_path,
                         module,
                         &item.ident,
                         TypeKind::Enum,
@@ -331,7 +303,6 @@ impl RustSyntaxWalker {
                 Item::Trait(item) => {
                     self.register_type(
                         document,
-                        module_path,
                         module,
                         &item.ident,
                         TypeKind::Trait,
@@ -368,7 +339,8 @@ impl RustSyntaxWalker {
         let module =
             self.builder
                 .add_entity(owner, item.ident.to_string(), EntityKind::Module, evidence);
-        self.containments.push((owner.clone(), module.clone()));
+        self.builder
+            .add_relation(owner, &module, RelationKind::Contains);
 
         let mut nested_path = module_path.clone();
         nested_path.segments.push(item.ident.to_string());
@@ -394,7 +366,6 @@ impl RustSyntaxWalker {
     fn register_type(
         &mut self,
         document: &ParsedDocument<'_>,
-        module_path: &ModulePath,
         owner: &EntityKey,
         ident: &syn::Ident,
         kind: TypeKind,
@@ -425,14 +396,8 @@ impl RustSyntaxWalker {
                 type_outputs: Vec::new(),
             },
         );
-        self.containments.push((owner.clone(), entity.clone()));
-        self.types
-            .entry(QualifiedTypeName {
-                module: module_path.clone(),
-                name: name.clone(),
-            })
-            .or_default()
-            .push(entity.clone());
+        self.builder
+            .add_relation(owner, &entity, RelationKind::Contains);
         self.types_by_owner
             .entry(owner.clone())
             .or_default()
@@ -584,7 +549,8 @@ impl RustSyntaxWalker {
                     type_outputs: Vec::new(),
                 },
             );
-            self.containments.push((owner.clone(), entity));
+            self.builder
+                .add_relation(owner, &entity, RelationKind::Contains);
         }
         Ok(())
     }
@@ -697,7 +663,8 @@ impl RustSyntaxWalker {
                 type_outputs: callable_type_outputs(document, signature)?,
             },
         );
-        self.containments.push((owner.clone(), entity));
+        self.builder
+            .add_relation(owner, &entity, RelationKind::Contains);
         Ok(())
     }
 
@@ -758,13 +725,6 @@ impl RustSyntaxWalker {
                 .get(owner)
                 .and_then(|types| types.get(name)),
         )
-    }
-
-    fn add_containment_relations(&mut self) {
-        for (owner, child) in self.containments.drain(..) {
-            self.builder
-                .add_relation(&owner, &child, RelationKind::Contains);
-        }
     }
 
     fn add_import_relations(
