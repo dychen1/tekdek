@@ -18,7 +18,8 @@ export function ortho(pts: Pt[]): string {
 }
 
 /** The guide: straight across to a level file node, else one tree elbow in the gutter left of the box.
- *  A row outside the frame's height range puts the gutter 8 px left of the frame, so the guide clears the bars. */
+ *  A row outside the frame's height range puts the gutter at `max(frame.left - 8, sx + 4)`, so the guide clears the bars.
+ *  The floor is `sx + 4`: a row that ends within 12 px of the frame puts the gutter at or inside the frame edge. */
 export function guidePath(
   sx: number, sy: number, node: { left: number; top: number; height: number }, k: number,
   frame?: { left: number; top: number; bottom: number },

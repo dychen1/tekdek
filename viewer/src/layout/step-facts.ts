@@ -42,13 +42,16 @@ export const calleesOf = (key: string, calls: readonly DeckCall[]) => distinct(c
 /** The visits of the function other than the current step. */
 export const otherVisits = (visits: readonly number[], current: number) => visits.filter(i => i !== current);
 
-/** The note that replaces code, or null when the source can show. */
-export function sourceNote(view: SourceView | undefined, path: string): string | null {
-  if (!view) return `The source of ${path} cannot be read: the viewer server did not send it.`;
+/** The note that replaces code, or null when the source can show. The text may hold `code` spans. */
+export function sourceNote(view: SourceView | undefined): string | null {
+  if (!view) return "This file cannot be read: the viewer server did not send it.";
   switch (view.status) {
     case "ok": return null;
     case "missing": return "This function is not in the current graph.";
-    case "changed": return `${view.path ?? path} changed after the last index. Run tekdek index to see this function.`;
-    default: return `The source of ${view.path ?? path} cannot be read: ${view.reason ?? "unknown reason"}.`;
+    case "changed": return "This file changed after the last index. Run `tekdek index` to see this function.";
+    default: return `This file cannot be read: ${view.reason ?? "unknown reason"}.`;
   }
 }
+
+/** A signature on one line: no space after "(", no trailing comma before ")", one space between words. */
+export const oneLineSignature = (signature: string) => signature.replace(/\(\s+/g, "(").replace(/,\s*\)/g, ")").replace(/\s+/g, " ");

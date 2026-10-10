@@ -7,7 +7,7 @@ import type { DeckStep, SourceView } from "../data/models.ts";
 import { displayName } from "../data/adapt.ts";
 import { highlight } from "../layout/highlight.ts";
 import { nearestStep } from "../layout/plan.ts";
-import { callRefs, calleesOf, callersOf, otherVisits, sourceNote, transitionFact, type CallRef } from "../layout/step-facts.ts";
+import { callRefs, calleesOf, callersOf, oneLineSignature, otherVisits, sourceNote, transitionFact, type CallRef } from "../layout/step-facts.ts";
 import { clamp, plural } from "../layout/util.ts";
 import { esc, md } from "./markup.ts";
 import { $, type CodeColumn, type DeckContext } from "./model.ts";
@@ -15,14 +15,14 @@ import { $, type CodeColumn, type DeckContext } from "./model.ts";
 // ============ markup ============
 
 const SEP = '<span class="sep">, </span>';
-const REST = "The flow is clear. Step forward with `k`, or pick a cell in the strip, to lift a cluster.";
+const REST = "The flow is clear. Press `k` to start it.";
 const NO_FLOW = "No saved flow for this codebase. Write one with `/tekdek:flow`, then reload.";
 
 /** The header title with its cursor. */
 const title = (text: string) => `<h2 class="cd-title"><span class="ctt">${esc(text)}</span><i class="cursor" aria-hidden="true"></i></h2>`;
 
-/** The note that replaces code. */
-const noteHtml = (text: string) => `<p class="cd-empty">${esc(text)}</p>`;
+/** The note that replaces code. It may hold `code` spans. */
+const noteHtml = (text: string) => `<p class="cd-empty">${md(text)}</p>`;
 
 /** The code header path: the folder dimmed, then the declaration line in orange when the code shows. */
 function whereHtml(path: string, line: number | null): string {
@@ -44,10 +44,10 @@ function refList(refs: readonly CallRef[]): string {
 }
 
 /** The note that replaces code, or null when the code shows. An `ok` answer with no lines counts as unreadable. */
-function codeNote(view: SourceView | undefined, path: string): string | null {
-  const note = sourceNote(view, path);
+function codeNote(view: SourceView | undefined): string | null {
+  const note = sourceNote(view);
   if (note !== null || !view || view.lines?.length) return note;
-  return sourceNote({ ...view, status: "unreadable", reason: "the viewer server sent no lines" }, path);
+  return sourceNote({ ...view, status: "unreadable", reason: "the viewer server sent no lines" });
 }
 
 export function createCode(ctx: DeckContext): CodeColumn {
@@ -148,10 +148,10 @@ export function createCode(ctx: DeckContext): CodeColumn {
     if (!fn) {
       // a step function that the graph no longer has: the note in place of code, and no facts beyond "from"
       whereEl.innerHTML = "";
-      codeEl.innerHTML = noteHtml(sourceNote({ key: step.node, status: "missing" }, step.node) ?? "");
+      codeEl.innerHTML = noteHtml(sourceNote({ key: step.node, status: "missing" }) ?? "");
     } else {
       const view = model.sources.get(step.node), path = view?.path ?? fn.file;
-      const note = codeNote(view, fn.file);
+      const note = codeNote(view);
       let marks = { doc: false, sig: false };
       if (note !== null || !view?.lines) {
         whereEl.innerHTML = whereHtml(path, null);
@@ -163,7 +163,7 @@ export function createCode(ctx: DeckContext): CodeColumn {
       facts.push(...callFacts(step));
       // doc and signature show as fact rows only when the code has no margin mark for them
       if (step.documentation && !marks.doc) facts.push(["doc", esc(step.documentation)]);
-      if (step.signature && !marks.sig) facts.push(["signature", `<code>${esc(step.signature)}</code>`]);
+      if (step.signature && !marks.sig) facts.push(["signature", `<code>${esc(oneLineSignature(step.signature))}</code>`]);
     }
     stepEl.innerHTML = `<p class="cd-ann">${md(step.annotation)}</p><dl class="cd-facts">${facts.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("")}</dl>`;
     swap(prev);

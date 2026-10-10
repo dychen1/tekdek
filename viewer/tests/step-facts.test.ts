@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { DeckFunction } from "../src/data/models.ts";
-import { calleesOf, callersOf, callRefs, otherVisits, sourceNote, transitionFact } from "../src/layout/step-facts.ts";
+import { calleesOf, callersOf, callRefs, oneLineSignature, otherVisits, sourceNote, transitionFact } from "../src/layout/step-facts.ts";
 
 test("each transition reads as one sentence, with a tag at the flow start and at a gap", () => {
   assert.deepEqual(transitionFact("flow_start", null, "main"), { tag: "flow start", text: "" });
@@ -39,9 +39,16 @@ test("callers and callees are distinct keys in graph order", () => {
 });
 
 test("a missing, changed, or unreadable source becomes one note in place of code", () => {
-  assert.equal(sourceNote({ key: "k", status: "ok", lines: ["fn a() {}"] }, "src/a.rs"), null);
-  assert.equal(sourceNote({ key: "k", status: "missing" }, "src/a.rs"), "This function is not in the current graph.");
-  assert.equal(sourceNote({ key: "k", status: "changed", path: "src/a.rs" }, "src/a.rs"), "src/a.rs changed after the last index. Run tekdek index to see this function.");
-  assert.equal(sourceNote({ key: "k", status: "unreadable", reason: "the file is missing" }, "src/a.rs"), "The source of src/a.rs cannot be read: the file is missing.");
-  assert.equal(sourceNote(undefined, "src/a.rs"), "The source of src/a.rs cannot be read: the viewer server did not send it.");
+  assert.equal(sourceNote({ key: "k", status: "ok", lines: ["fn a() {}"] }), null);
+  assert.equal(sourceNote({ key: "k", status: "missing" }), "This function is not in the current graph.");
+  assert.equal(sourceNote({ key: "k", status: "changed", path: "src/a.rs" }), "This file changed after the last index. Run `tekdek index` to see this function.");
+  assert.equal(sourceNote({ key: "k", status: "unreadable", reason: "the file is missing" }), "This file cannot be read: the file is missing.");
+  assert.equal(sourceNote({ key: "k", status: "unreadable" }), "This file cannot be read: unknown reason.");
+  assert.equal(sourceNote(undefined), "This file cannot be read: the viewer server did not send it.");
+});
+
+test("a signature reads on one line with no padding inside the parentheses", () => {
+  assert.equal(oneLineSignature("fn run(\n    intent: &Intent,\n    store: &Store,\n) -> Result<()>"), "fn run(intent: &Intent, store: &Store) -> Result<()>");
+  assert.equal(oneLineSignature("fn emit()  ->  u8"), "fn emit() -> u8");
+  assert.equal(oneLineSignature("fn a(x: u8)"), "fn a(x: u8)");
 });
