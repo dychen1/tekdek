@@ -213,9 +213,11 @@ code{font:inherit;color:var(--keyword)}
 .sidebar{position:fixed;left:0;top:0;bottom:0;width:var(--sb);padding:14px 8px 16px 12px;z-index:5;pointer-events:none;display:flex;flex-direction:column;background:transparent}
 .sidebar,.sidebar *{text-shadow:var(--text-halo)}
 .sb-head{margin:0 0 10px 12px;display:flex;pointer-events:auto}
-.sb-title{display:inline-flex;align-items:center;gap:6px;height:20px;padding:0 8px;border:0;border-radius:var(--r-s);background:var(--accent);cursor:pointer;
-  font:var(--fw-bold) var(--fs-code) var(--font-code);color:var(--on-accent);text-shadow:none;transition:filter var(--dur-hover)}
-.sb-title:hover{filter:brightness(1.12)}
+.sb-title{display:inline-flex;align-items:center;gap:6px;height:20px;padding:0 8px;border:0;border-radius:var(--r-s);background:var(--accent);
+  font:var(--fw-bold) var(--fs-code) var(--font-code);color:var(--on-accent);text-shadow:none}
+/* A badge that opens a list is a button. A plain badge has no pointer and no hover. */
+button.sb-title{cursor:pointer;transition:filter var(--dur-hover)}
+button.sb-title:hover{filter:brightness(1.12)}
 .sb-title .ic{width:12px;height:12px}
 .sb-tree{position:relative;overflow:auto;pointer-events:auto;max-height:calc(100vh - 60px);padding:2px 4px 4px 0;scrollbar-width:thin;scrollbar-color:var(--line-soft) transparent}
 .sl{position:relative;display:flex;align-items:center;width:100%;height:18px;padding:0 4px 0 12px;border:0;border-radius:var(--r-xs);background:transparent;
@@ -265,8 +267,10 @@ body.flow .sl.inc{color:var(--ink)}
 .cbtn.quiet{border-color:transparent;color:var(--ink-2)}
 .cbtn.quiet:hover{border-color:var(--line-soft);color:var(--ink)}
 .pbadge{display:inline-flex;align-items:center;gap:6px;max-width:100%;height:20px;padding:0 8px;border:0;border-radius:var(--r-s);background:var(--c,var(--accent));
-  font:var(--fw-bold) var(--fs-code) var(--font-code);color:var(--on-accent);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;transition:filter var(--dur-hover)}
-.pbadge:hover{filter:brightness(1.12)}
+  font:var(--fw-bold) var(--fs-code) var(--font-code);color:var(--on-accent);white-space:nowrap;overflow:hidden}
+.pbadge span{min-width:0;overflow:hidden;text-overflow:ellipsis}
+button.pbadge{cursor:pointer;transition:filter var(--dur-hover)}
+button.pbadge:hover{filter:brightness(1.12)}
 .pbadge .ic{width:12px;height:12px}
 .pane{position:relative;border:1px solid var(--line-strong);border-radius:var(--r-l);background:var(--surface-panel)}
 
@@ -332,7 +336,7 @@ kbd{display:inline-flex;align-items:center;gap:1px;height:16px;padding:0 4px;bor
 /* ============ top band: the flow picker and freshness beside the map tools ============ */
 .fh-top{position:fixed;z-index:8;top:var(--gap);left:var(--fh-l,560px);right:var(--frame-r);height:28px;display:flex;align-items:center;gap:12px;min-width:0}
 .fh-top .pbadge{flex:0 1 auto}
-/* The flow badge slot shrinks, so a long flow name ends in an ellipsis. */
+/* The flow badge slot shrinks. The flow name ends in an ellipsis and the chevron stays. */
 .fh-top #flowPick{flex:0 1 auto;min-width:0;display:flex}
 .fh-meta{flex:0 0 auto;font:var(--fs-ui-s) var(--font-code);color:var(--dim);white-space:nowrap}
 .fh-meta b{font-weight:400;color:var(--ink-2)}
