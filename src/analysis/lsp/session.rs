@@ -255,7 +255,9 @@ const INITIALIZE_TIMEOUT: Duration = Duration::from_mins(2);
 mod tests {
     use std::{path::PathBuf, time::Duration};
 
-    use lsp_types::{OneOf, ServerCapabilities, TypeDefinitionProviderCapability};
+    use lsp_types::{
+        CallHierarchyServerCapability, OneOf, ServerCapabilities, TypeDefinitionProviderCapability,
+    };
     use serde_json::json;
 
     use super::{
@@ -308,6 +310,24 @@ mod tests {
                     "name": "workspace",
                 }],
             })
+        );
+    }
+
+    #[test]
+    fn rejects_a_server_without_document_symbols() {
+        let capabilities = ServerCapabilities {
+            call_hierarchy_provider: Some(CallHierarchyServerCapability::Simple(true)),
+            references_provider: Some(OneOf::Left(true)),
+            type_definition_provider: Some(TypeDefinitionProviderCapability::Simple(true)),
+            ..ServerCapabilities::default()
+        };
+
+        let error =
+            validate_capabilities(&capabilities).expect_err("document symbols should be required");
+
+        assert_eq!(
+            error.to_string(),
+            "the language server does not support document symbols"
         );
     }
 
