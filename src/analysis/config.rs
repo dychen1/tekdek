@@ -197,12 +197,7 @@ fn unavailable_language(language: Language) -> ConfigError {
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        collections::BTreeMap,
-        fs,
-        path::PathBuf,
-        sync::atomic::{AtomicUsize, Ordering},
-    };
+    use std::{collections::BTreeMap, fs};
 
     use super::{apply_cli_overrides, configured_profiles, profiles_from_toml};
     use crate::analysis::language::builtin_profiles;
@@ -243,7 +238,8 @@ mod tests {
 
     #[test]
     fn reports_a_missing_explicit_file() {
-        let path = test_path("missing");
+        let directory = tempfile::tempdir().expect("the test folder should be created");
+        let path = directory.path().join("missing.toml");
         let error =
             configured_profiles(Some(&path)).expect_err("the explicit file should be required");
 
@@ -253,7 +249,8 @@ mod tests {
 
     #[test]
     fn loads_an_explicit_file() {
-        let path = test_path("configured");
+        let directory = tempfile::tempdir().expect("the test folder should be created");
+        let path = directory.path().join("config.toml");
         let language = builtin_profiles()
             .first()
             .expect("this test requires a compiled adapter")
@@ -266,7 +263,6 @@ mod tests {
 
         let profiles =
             configured_profiles(Some(&path)).expect("the explicit configuration should load");
-        fs::remove_file(&path).expect("the test configuration should be removed");
 
         assert_eq!(
             profile(&profiles, language).server.program,
@@ -325,15 +321,5 @@ mod tests {
             .iter()
             .find(|profile| profile.language == language)
             .expect("the language profile should exist")
-    }
-
-    fn test_path(label: &str) -> PathBuf {
-        static NEXT_PATH: AtomicUsize = AtomicUsize::new(0);
-
-        std::env::temp_dir().join(format!(
-            "tekdek-{label}-{}-{}",
-            std::process::id(),
-            NEXT_PATH.fetch_add(1, Ordering::Relaxed)
-        ))
     }
 }

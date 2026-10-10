@@ -195,12 +195,9 @@ impl From<io::Error> for PipelineError {
 
 #[cfg(all(test, feature = "python", feature = "rust"))]
 mod tests {
-    use std::{
-        fs,
-        path::{Path, PathBuf},
-        process,
-        sync::atomic::{AtomicU64, Ordering},
-    };
+    use std::{fs, path::Path};
+
+    use tempfile::TempDir;
 
     use super::{PipelineConfig, PipelineError, run};
     use crate::{
@@ -287,36 +284,25 @@ mod tests {
     }
 
     struct TestRepository {
-        directory: PathBuf,
+        directory: TempDir,
     }
 
     impl TestRepository {
         fn new() -> Self {
-            static NEXT_ID: AtomicU64 = AtomicU64::new(0);
-
-            let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
-            let directory =
-                std::env::temp_dir().join(format!("tekdek-pipeline-{}-{id}", process::id()));
-            fs::create_dir(&directory).expect("the test repository should be created");
+            let directory = tempfile::tempdir().expect("the test repository should be created");
             Self { directory }
         }
 
         fn path(&self) -> &Path {
-            &self.directory
+            self.directory.path()
         }
 
         fn write(&self, path: &str, content: &str) {
-            let path = self.directory.join(path);
+            let path = self.directory.path().join(path);
             if let Some(parent) = path.parent() {
                 fs::create_dir_all(parent).expect("the source directory should be created");
             }
             fs::write(path, content).expect("the source file should be written");
-        }
-    }
-
-    impl Drop for TestRepository {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.directory);
         }
     }
 }

@@ -9,11 +9,11 @@ use std::{
     ffi::OsString,
     fs,
     path::{Path, PathBuf},
-    process::{self, Command},
-    sync::atomic::{AtomicU64, Ordering},
+    process::Command,
 };
 
 use serde_json::json;
+use tempfile::TempDir;
 
 use crate::analysis::language::ServerCommand;
 
@@ -22,13 +22,13 @@ use crate::analysis::language::ServerCommand;
 /// Each test compiles its own server, because the program writes its
 /// shutdown marker next to its executable.
 pub(crate) struct FakeServer {
-    directory: TestDirectory,
+    directory: TempDir,
     executable: PathBuf,
 }
 
 impl FakeServer {
     pub(crate) fn new() -> Self {
-        let directory = TestDirectory::new();
+        let directory = tempfile::tempdir().expect("the fake server folder should be created");
         let source = directory.path().join("fake_server.rs");
         let executable = directory
             .path()
@@ -69,31 +69,6 @@ impl FakeServer {
 
     pub(crate) fn shutdown_marker(&self) -> PathBuf {
         self.directory.path().join("shutdown-requested")
-    }
-}
-
-struct TestDirectory {
-    path: PathBuf,
-}
-
-impl TestDirectory {
-    fn new() -> Self {
-        static NEXT_ID: AtomicU64 = AtomicU64::new(0);
-
-        let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
-        let path = env::temp_dir().join(format!("tekdek-lsp-session-{}-{id}", process::id()));
-        fs::create_dir(&path).expect("the fake server directory should be created");
-        Self { path }
-    }
-
-    fn path(&self) -> &Path {
-        &self.path
-    }
-}
-
-impl Drop for TestDirectory {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.path);
     }
 }
 
