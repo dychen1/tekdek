@@ -6,13 +6,13 @@
 //!
 //! An import validates the complete output before any write. It writes nothing
 //! when any error issue exists. A dry run does the complete import, including
-//! the self-check of the new generation, and writes nothing. The purpose follows from the store: a flow with a
-//! lineage gets a `revision`, and any other flow gets an `initial` generation. A
-//! revision must use the graph of its parent. The caller refreshes the catalog
-//! after a freeze.
+//! the self-check of the new generation, and writes nothing. The purpose follows
+//! from the store: a flow with a lineage gets a `revision`, and any other flow
+//! gets an `initial` generation. A revision must use the graph of its parent.
 //!
 //! # Sections
-//! `Import` freezes one agent output. `Rules` holds the parse, prior, and freeze steps.
+//! `Import` freezes one agent output. `Rules` holds the parse, prior, freeze, and
+//! report steps.
 
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -135,20 +135,12 @@ pub fn import_flow(
         && canonical::digest(&intent)? == parent.digests.intent
         && derive::facts_digest(&facts)? == parent.digests.facts
     {
-        return Ok(ImportOutcome::Frozen(FrozenGeneration {
-            name: flow_id.to_string(),
-            ordinal: parent.generation.ordinal,
-            purpose: parent.generation.purpose,
-            generation_digest: parent.digests.generation.clone(),
-            file: lineage::generation_file(
-                &flow_id,
-                parent.generation.ordinal,
-                &parent.digests.generation,
-            ),
-            unchanged: true,
-            dry_run: request.dry_run,
+        return Ok(ImportOutcome::Frozen(report(
+            parent,
+            true,
+            request.dry_run,
             warnings,
-        }));
+        )));
     }
     let artifact = freeze(
         flow_id,
@@ -158,25 +150,15 @@ pub fn import_flow(
         intent,
         request.author,
     )?;
-    let file = if request.dry_run {
-        lineage::generation_file(
-            &artifact.flow_id,
-            artifact.generation.ordinal,
-            &artifact.digests.generation,
-        )
-    } else {
-        lineage::write_current(directory, &artifact)?
-    };
-    Ok(ImportOutcome::Frozen(FrozenGeneration {
-        name: artifact.flow_id.to_string(),
-        ordinal: artifact.generation.ordinal,
-        purpose,
-        generation_digest: artifact.digests.generation,
-        file,
-        unchanged: false,
-        dry_run: request.dry_run,
+    if !request.dry_run {
+        lineage::write_current(directory, &artifact)?;
+    }
+    Ok(ImportOutcome::Frozen(report(
+        &artifact,
+        false,
+        request.dry_run,
         warnings,
-    }))
+    )))
 }
 
 // -----------------------------------------------------------------------------
@@ -391,6 +373,29 @@ fn freeze(
         Ok(artifact)
     } else {
         Err(FlowError::SelfCheck(problems))
+    }
+}
+
+/// Builds the result of an import from the generation that is current after it.
+fn report(
+    artifact: &FlowArtifact,
+    unchanged: bool,
+    dry_run: bool,
+    warnings: Vec<FlowIssue>,
+) -> FrozenGeneration {
+    FrozenGeneration {
+        name: artifact.flow_id.to_string(),
+        ordinal: artifact.generation.ordinal,
+        purpose: artifact.generation.purpose,
+        generation_digest: artifact.digests.generation.clone(),
+        file: lineage::generation_file(
+            &artifact.flow_id,
+            artifact.generation.ordinal,
+            &artifact.digests.generation,
+        ),
+        unchanged,
+        dry_run,
+        warnings,
     }
 }
 
