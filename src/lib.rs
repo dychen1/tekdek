@@ -22,5 +22,5 @@ pub mod catalog;
 pub mod flow;
 pub mod query;
 pub mod serve;
-pub mod source_view;
+mod source_view;
 pub mod store;
