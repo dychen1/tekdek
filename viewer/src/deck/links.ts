@@ -33,10 +33,10 @@ export function createLinks(ctx: DeckContext): Links {
     if (!lid || !slot || +getComputedStyle(lid).opacity < 0.02) return false;
     const s = slot.getBoundingClientRect(), l = lid.getBoundingClientRect();
     const a = { x: s.right, y: s.top + s.height / 2 }, b = { x: l.left, y: l.top + l.height / 2 };
-    if (b.x <= a.x) return false;
-    tetherEl.setAttribute("d", tetherPath(a, ctx.parts.fileBox.rowsRight(), b));
+    const tether = tetherPath(a, ctx.parts.fileBox.rowsRight(), b);
+    tetherEl.setAttribute("d", tether.d);
     tetherDot.setAttribute("cx", f1(a.x)); tetherDot.setAttribute("cy", f1(a.y));
-    return true;
+    return tether.ok;
   }
 
   /** Draws the arrow from the current lid out past the deck's edge, then one S curve into the code header. */

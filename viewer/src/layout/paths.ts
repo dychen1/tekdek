@@ -37,10 +37,10 @@ const sCurve = (a: { x: number; y: number }, tx: number, b: { x: number; y: numb
   return `M${P2(a.x, a.y)} L${P2(tx, a.y)} C${P2(tx + dx * 0.55, a.y)} ${P2(b.x - dx * 0.55, b.y)} ${P2(b.x, b.y)}`;
 };
 
-/** The tether: level out of the slot past the widest row, then one S into the lid. */
-export function tetherPath(a: { x: number; y: number }, rowsRight: number, b: { x: number; y: number }): string {
+/** The tether: level out of the slot past the widest row, then one S into the lid. Hidden when the lid is not right of the slot. */
+export function tetherPath(a: { x: number; y: number }, rowsRight: number, b: { x: number; y: number }): { d: string; ok: boolean } {
   const mx = Math.min(b.x - 40, Math.max(a.x, rowsRight) + 10);
-  return sCurve(a, Math.max(a.x, mx), b);
+  return { d: sCurve(a, Math.max(a.x, mx), b), ok: b.x > a.x };
 }
 
 /** The arrow: out of the lid past the deck's right edge, then one S into the code header. Hidden under 24 px of room. */
