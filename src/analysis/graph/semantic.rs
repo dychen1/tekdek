@@ -7,17 +7,17 @@
 //! # Sections
 //!
 //! `Semantic Edge Construction` adds semantic edges.
-//! `Edge Construction State` collects semantic relations.
+//! `Edge Construction State` holds node matches and source positions.
 
 use std::collections::{HashMap, HashSet};
 
-use super::lookup::SyntaxGraphIndex;
+use super::{build::EdgeAccumulator, lookup::SyntaxGraphIndex};
 use crate::analysis::{
     fact::{
-        AnalysisError, EntityKind, RelationEvidence, RelationKind, ReportedLocation,
-        ResolutionFallback, SemanticFact, SymbolAnchor, TypeKind,
+        AnalysisError, EntityKind, RelationKind, ReportedLocation, ResolutionFallback,
+        SemanticFact, SymbolAnchor, TypeKind,
     },
-    graph::{Edge, Graph, NodeId, Provenance, ProvenanceOrigin},
+    graph::{Edge, Graph, NodeId, ProvenanceOrigin},
     language::Language,
     source::SourceSpan,
 };
@@ -38,7 +38,7 @@ pub(super) fn build_semantic_edges(
 ) -> Result<Vec<Edge>, AnalysisError> {
     let lookup = SyntaxGraphIndex::new(graph);
     let call_positions = collect_call_positions(semantic_facts);
-    let mut edges = SemanticEdgeAccumulator::new();
+    let mut edges = EdgeAccumulator::new(ProvenanceOrigin::Semantic);
 
     add_call_edges(&lookup, language, semantic_facts, &mut edges)?;
     add_type_use_edges(&lookup, language, semantic_facts, &mut edges)?;
@@ -51,6 +51,7 @@ pub(super) fn build_semantic_edges(
     )?;
 
     let mut edges = edges.finish()?;
+    edges.sort_by_key(|edge| (edge.source.0, semantic_edge_rank(edge.kind), edge.target.0));
     remove_stated_type_uses(&mut edges);
 
     Ok(edges)
@@ -101,7 +102,7 @@ fn add_call_edges(
     lookup: &SyntaxGraphIndex<'_>,
     language: Language,
     semantic_facts: &[SemanticFact],
-    edges: &mut SemanticEdgeAccumulator,
+    edges: &mut EdgeAccumulator,
 ) -> Result<(), AnalysisError> {
     for fact in semantic_facts {
         let SemanticFact::Call {
@@ -134,7 +135,7 @@ fn add_call_edges(
                 source,
                 target.node,
                 RelationKind::Calls,
-                observation.clone(),
+                vec![observation.clone()],
             );
         }
     }
@@ -153,7 +154,7 @@ fn add_type_use_edges(
     lookup: &SyntaxGraphIndex<'_>,
     language: Language,
     semantic_facts: &[SemanticFact],
-    edges: &mut SemanticEdgeAccumulator,
+    edges: &mut EdgeAccumulator,
 ) -> Result<(), AnalysisError> {
     for fact in semantic_facts {
         let SemanticFact::TypeDefinition {
@@ -184,7 +185,7 @@ fn add_type_use_edges(
                 source.node,
                 target.node,
                 RelationKind::UsesType,
-                observation.clone(),
+                vec![observation.clone()],
             );
         }
     }
@@ -202,7 +203,7 @@ fn add_reference_edges(
     language: Language,
     semantic_facts: &[SemanticFact],
     call_positions: &HashSet<SourcePosition>,
-    edges: &mut SemanticEdgeAccumulator,
+    edges: &mut EdgeAccumulator,
 ) -> Result<(), AnalysisError> {
     // Index type definitions for alias resolution.
     let declared_types = declared_types_by_symbol(semantic_facts);
@@ -243,7 +244,7 @@ fn add_reference_edges(
             {
                 for stated in annotated_types(lookup, language, anchor, target, &declared_types)? {
                     let (source, target, kind) = role.relation(callable, stated);
-                    edges.observe(source, target, kind, observation.clone());
+                    edges.observe(source, target, kind, vec![observation.clone()]);
                 }
                 continue;
             }
@@ -259,7 +260,7 @@ fn add_reference_edges(
                 .body_owner_at(language, &observation.path, observation.range.start)
                 .ok_or_else(|| location_owner_error("reference", observation))?;
             // Add the remaining body reference.
-            edges.observe(source, target.node, kind, observation.clone());
+            edges.observe(source, target.node, kind, vec![observation.clone()]);
         }
     }
 
@@ -534,74 +535,6 @@ pub(super) struct NodeMatch {
 struct SourcePosition {
     path: String,
     offset: u32,
-}
-
-struct SemanticEdgeAccumulator {
-    edges: Vec<Edge>,
-    edge_indexes: HashMap<(NodeId, NodeId, RelationKind), usize>,
-}
-
-impl SemanticEdgeAccumulator {
-    fn new() -> Self {
-        Self {
-            edges: Vec::new(),
-            edge_indexes: HashMap::new(),
-        }
-    }
-
-    /// Adds an observation to a semantic edge.
-    fn observe(
-        &mut self,
-        source: NodeId,
-        target: NodeId,
-        kind: RelationKind,
-        observation: SourceSpan,
-    ) {
-        let key = (source, target, kind);
-        if let Some(index) = self.edge_indexes.get(&key).copied() {
-            self.edges[index]
-                .provenance
-                .evidence
-                .observations
-                .push(observation);
-            return;
-        }
-
-        let index = self.edges.len();
-        self.edges.push(Edge {
-            source,
-            target,
-            kind,
-            weight: 1,
-            provenance: Provenance {
-                origin: ProvenanceOrigin::Semantic,
-                evidence: RelationEvidence {
-                    observations: vec![observation],
-                },
-            },
-        });
-        self.edge_indexes.insert(key, index);
-    }
-
-    /// Returns normalized semantic edges in a stable order.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if an observation count cannot fit in an edge weight.
-    fn finish(mut self) -> Result<Vec<Edge>, AnalysisError> {
-        for edge in &mut self.edges {
-            edge.provenance.evidence.normalize_observations();
-            edge.weight =
-                u32::try_from(edge.provenance.evidence.observations.len()).map_err(|_| {
-                    AnalysisError {
-                        message: "a semantic edge has too many source observations".to_owned(),
-                    }
-                })?;
-        }
-        self.edges
-            .sort_by_key(|edge| (edge.source.0, semantic_edge_rank(edge.kind), edge.target.0));
-        Ok(self.edges)
-    }
 }
 
 // -----------------------------------------------------------------------------

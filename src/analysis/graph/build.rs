@@ -8,17 +8,19 @@
 //!
 //! `Construction` assembles the graph.
 //! `Syntax Materialization` adds the syntax nodes and edges.
+//! `Edge Merging` joins repeated relations into one weighted edge.
 
 use std::collections::HashMap;
 
 use super::semantic::build_semantic_edges;
 use crate::analysis::{
     fact::{
-        AnalysisError, EntityFact, EntityKey, FactSet, RelationFact, RelationKind, SyntaxFacts,
+        AnalysisError, EntityFact, EntityKey, FactSet, RelationEvidence, RelationFact,
+        RelationKind, SyntaxFacts,
     },
     graph::{Edge, Graph, Node, NodeId, Provenance, ProvenanceOrigin},
     language::Language,
-    source::{ContentHash, DocumentSnapshot, SourceRange},
+    source::{ContentHash, DocumentSnapshot, SourceRange, SourceSpan},
 };
 
 // -----------------------------------------------------------------------------
@@ -43,7 +45,7 @@ pub fn build_graph(
         edges: Vec::new(),
     };
     let mut node_ids = HashMap::<EntityKey, NodeId>::new();
-    let mut edge_indexes = HashMap::<(NodeId, NodeId, RelationKind), usize>::new();
+    let mut syntax_edges = EdgeAccumulator::new(ProvenanceOrigin::Syntax);
     let mut semantic_batches = Vec::with_capacity(fact_sets.len());
 
     for FactSet {
@@ -55,13 +57,13 @@ pub fn build_graph(
         materialize_syntax(
             &mut graph,
             &mut node_ids,
-            &mut edge_indexes,
+            &mut syntax_edges,
             language,
             syntax,
         )?;
         semantic_batches.push((language, semantic));
     }
-    normalize_edge_evidence(&mut graph.edges)?;
+    graph.edges = syntax_edges.finish()?;
 
     for (language, semantic) in semantic_batches {
         let semantic_edges = build_semantic_edges(&graph, language, &semantic)?;
@@ -115,7 +117,7 @@ fn content_span(node: &Node) -> Option<SourceRange> {
 fn materialize_syntax(
     graph: &mut Graph,
     node_ids: &mut HashMap<EntityKey, NodeId>,
-    edge_indexes: &mut HashMap<(NodeId, NodeId, RelationKind), usize>,
+    edges: &mut EdgeAccumulator,
     language: Language,
     facts: SyntaxFacts,
 ) -> Result<(), AnalysisError> {
@@ -171,29 +173,7 @@ fn materialize_syntax(
     {
         let source = resolve_endpoint_key(graph, node_ids, language, &source)?;
         let target = resolve_endpoint_key(graph, node_ids, language, &target)?;
-
-        let key = (source, target, kind);
-        if let Some(index) = edge_indexes.get(&key).copied() {
-            graph.edges[index].weight += 1;
-            graph.edges[index]
-                .provenance
-                .evidence
-                .observations
-                .extend(evidence.observations);
-        } else {
-            let index = graph.edges.len();
-            graph.edges.push(Edge {
-                source: key.0,
-                target: key.1,
-                kind: key.2,
-                weight: 1,
-                provenance: Provenance {
-                    origin: ProvenanceOrigin::Syntax,
-                    evidence,
-                },
-            });
-            edge_indexes.insert(key, index);
-        }
+        edges.observe(source, target, kind, evidence.observations);
     }
 
     Ok(())
@@ -225,23 +205,75 @@ fn resolve_endpoint_key(
     Ok(id)
 }
 
-/// Normalizes syntax edge observations and weights.
-///
-/// # Errors
-///
-/// Returns an error if an observation count cannot fit in an edge weight.
-fn normalize_edge_evidence(edges: &mut [Edge]) -> Result<(), AnalysisError> {
-    for edge in edges {
-        edge.provenance.evidence.normalize_observations();
-        let observation_count = edge.provenance.evidence.observations.len();
-        if observation_count > 0 {
-            edge.weight = u32::try_from(observation_count).map_err(|_| AnalysisError {
-                message: "a syntax edge has too many source observations".to_owned(),
-            })?;
+// -----------------------------------------------------------------------------
+// Edge Merging
+// -----------------------------------------------------------------------------
+
+/// Edges of one provenance origin, with one edge per source, target, and kind.
+pub(super) struct EdgeAccumulator {
+    origin: ProvenanceOrigin,
+    edges: Vec<Edge>,
+    indexes: HashMap<(NodeId, NodeId, RelationKind), usize>,
+}
+
+impl EdgeAccumulator {
+    pub(super) fn new(origin: ProvenanceOrigin) -> Self {
+        Self {
+            origin,
+            edges: Vec::new(),
+            indexes: HashMap::new(),
         }
     }
 
-    Ok(())
+    /// Adds one relation and its observations to the matching edge.
+    pub(super) fn observe(
+        &mut self,
+        source: NodeId,
+        target: NodeId,
+        kind: RelationKind,
+        observations: Vec<SourceSpan>,
+    ) {
+        let key = (source, target, kind);
+        if let Some(index) = self.indexes.get(&key).copied() {
+            let edge = &mut self.edges[index];
+            edge.weight += 1;
+            edge.provenance.evidence.observations.extend(observations);
+            return;
+        }
+
+        self.indexes.insert(key, self.edges.len());
+        self.edges.push(Edge {
+            source,
+            target,
+            kind,
+            weight: 1,
+            provenance: Provenance {
+                origin: self.origin,
+                evidence: RelationEvidence { observations },
+            },
+        });
+    }
+
+    /// Returns the edges in first-observation order with final weights.
+    ///
+    /// The weight is the number of distinct observations. An edge without
+    /// observations keeps the number of relations that it joins.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if an observation count cannot fit in an edge weight.
+    pub(super) fn finish(mut self) -> Result<Vec<Edge>, AnalysisError> {
+        for edge in &mut self.edges {
+            edge.provenance.evidence.normalize_observations();
+            let observation_count = edge.provenance.evidence.observations.len();
+            if observation_count > 0 {
+                edge.weight = u32::try_from(observation_count)
+                    .map_err(|_| AnalysisError::new("an edge has too many source observations"))?;
+            }
+        }
+
+        Ok(self.edges)
+    }
 }
 
 // -----------------------------------------------------------------------------
