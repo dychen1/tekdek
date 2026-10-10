@@ -28,7 +28,7 @@ use crate::{
         lineage::{lineage_ids, read_current},
         models::FLOW_ARTIFACT_SCHEMA_VERSION,
     },
-    store::{digest_of, graph::check_graph_name, reject_symlink},
+    store::{digest_of, graph::check_graph_name, read_bytes, reject_symlink},
 };
 
 // -----------------------------------------------------------------------------
@@ -302,13 +302,7 @@ fn lineage_listings(directory: &Path) -> io::Result<Vec<LineageListing>> {
 fn graph_digests(directory: &Path, files: &[String]) -> io::Result<BTreeMap<String, String>> {
     let mut digests = BTreeMap::new();
     for file in files {
-        let path = directory.join(file);
-        let bytes = fs::read(&path).map_err(|error| {
-            io::Error::new(
-                error.kind(),
-                format!("cannot read {}: {error}", path.display()),
-            )
-        })?;
+        let bytes = read_bytes(&directory.join(file))?;
         digests.insert(file.clone(), digest_of(&bytes));
     }
     Ok(digests)
