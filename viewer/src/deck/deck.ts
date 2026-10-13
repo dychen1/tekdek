@@ -1,19 +1,22 @@
-/* Deck instance. This module creates the deck for one codebase and one flow, wires its modules, and owns the
-   step controller and the frame loop. The page shell (`index.html`) holds the static elements; an instance fills
-   them and `destroy` empties them.
+/* Deck instance. This module creates the deck for one codebase and one flow, wires its modules, and owns the step
+   controller and the placement of the file box and the pinned deck. The page shell (`index.html`) holds the static
+   elements; an instance fills them, and `destroy` empties them.
    # Sections
-   instance, step controller, frame loop, boot and teardown */
-import { clamp } from "../layout/camera.ts";
-import { buildModel, initialState, KEY_ANN, readTokens, store, type DeckContext, type DeckOptions, type DeckParts } from "./context.ts";
-import { createConnectors } from "./connectors.ts";
-import { createControls } from "./controls.ts";
+   instance, stepping, placement, boot and teardown */
+import { deckSpot, fileBoxCenter, FILE_X, startZoom, type Frame } from "../layout/deck-geometry.ts";
+import { openTo } from "../layout/explorer.ts";
+import { buildModel, initialState } from "../layout/model.ts";
+import { clamp, f1 } from "../layout/util.ts";
+import { createBar } from "./bar.ts";
+import { createClusterDeck } from "./cluster-deck.ts";
+import { createCode } from "./code.ts";
+import { createExplorer } from "./explorer.ts";
+import { createFileBox } from "./file-box.ts";
 import { createInput } from "./input.ts";
-import { createPanels } from "./panels.ts";
-import { createSidebar } from "./sidebar.ts";
-import { createViewport } from "./viewport.ts";
-import { createWorld } from "./world.ts";
+import { createLinks } from "./links.ts";
+import { $, type DeckContext, type DeckOptions, type DeckParts } from "./context.ts";
+import { createTools } from "./tools.ts";
 
-export type { DeckOptions } from "./context.ts";
 
 export interface DeckInstance {
   go(step: number): void;
@@ -22,120 +25,174 @@ export interface DeckInstance {
   inspect: Record<string, unknown>;
 }
 
+/** Returns the screen rectangle of an element, or null. */
+function rectOf(el: Element | null) {
+  if (!el) return null;
+  const r = el.getBoundingClientRect();
+  return { x: r.x, y: r.y, width: r.width, height: r.height };
+}
+
 /** Creates the deck for one codebase and one flow in the page shell. */
 export function createDeck(options: DeckOptions): DeckInstance {
 
   // ============ instance ============
 
   const abort = new AbortController();
-  const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  const model = buildModel(options.graph, options.flow);
-  const state = initialState(model, store.get(KEY_ANN) === "1");
-  let timers: number[] = [];
-  let alive = true;
+  const model = buildModel(options.graph, options.flow, options.sources);
+  const state = initialState(model);
   const ctx: DeckContext = {
-    options, model, state, tokens: readTokens(), parts: {} as DeckParts,
-    signal: abort.signal, reducedMotion,
-    D: ms => (reducedMotion ? 0 : ms),
-    later(ms, fn) { timers.push(window.setTimeout(fn, ms)); },
-    clearTimers() { timers.forEach(clearTimeout); timers = []; },
-    go,
+    model, state, parts: {} as DeckParts, signal: abort.signal, go, place, placeSoon,
   };
+  let alive = true;
+  /** The cluster whose deck shows, or null. */
+  let deckCluster: string | null = null;
+  // The page shell holds these elements. `place` reads them, so they come before the parts.
+  const cv = $("#cv"), fileblk = $("#fileblk"), frameEl = $("#frame"), card = $("#card");
+  let placeRaf = 0;
+  // The boot class keeps the first frames still: no fade, no transition. It also covers a URL step.
+  document.body.classList.add("booting");
   // Every module reads the others through `ctx.parts` at call time, so the creation order is free.
-  const parts: DeckParts = ctx.parts;
-  parts.viewport = createViewport(ctx);
-  parts.world = createWorld(ctx);
-  parts.connectors = createConnectors(ctx);
-  parts.sidebar = createSidebar(ctx);
-  parts.panels = createPanels(ctx);
-  parts.controls = createControls(ctx);
-  parts.input = createInput(ctx);
-  const { viewport, world, connectors, sidebar, panels, controls } = parts;
+  // A part may call `ctx.place` only after all parts exist.
+  const parts = ctx.parts;
+  parts.explorer = createExplorer(ctx);
+  parts.fileBox = createFileBox(ctx);
+  parts.clusterDeck = createClusterDeck(ctx);
+  parts.links = createLinks(ctx);
+  parts.code = createCode(ctx);
+  parts.bar = createBar(ctx);
+  parts.tools = createTools(ctx);
+  createInput(ctx);
+  const { explorer, fileBox, clusterDeck, links, code, bar, tools } = parts;
+  // Every element that goes to a step carries `data-step`: in the file box, the deck, the code column, and the step strip.
+  document.addEventListener("click", e => {
+    const t = (e.target as Element).closest<HTMLElement>("[data-step]");
+    if (t) go(+t.dataset.step!);
+  }, { signal: abort.signal });
+  addEventListener("resize", placeSoon, { signal: abort.signal });
 
-  // ============ step controller ============
-  // Within the lifted cluster only the focus moves. A cluster change sinks the old deck first, then lifts the new one.
-  // The tree does not move between clusters: only the old slots become named rows and the new rows become slots.
+  // ============ stepping ============
+  // Nothing on the canvas moves between steps: each step sets the file box, the deck, and the connectors at their
+  // final place in one frame. A cluster change replaces the deck. Only the code column and the bar text fade in.
 
+  /** Goes to a step. A step clears a browsed file, also when the step does not change. */
   function go(n: number) {
-    n = clamp(n, 0, model.N);
-    if (n === state.cur) return;
+    n = clamp(Math.round(n), 0, model.N);
+    if (!Number.isFinite(n)) return;
+    const browsed = state.browseFile !== null;
+    state.browseFile = null;
+    if (n === state.cur) { if (browsed) render(n); return; }
+    const prev = state.cur;
     state.cur = n;
+    render(prev);
+  }
+
+  /** Shows the current step in every part. `prev` is the step before it. */
+  function render(prev: number) {
+    const n = state.cur, step = model.stepAt(n);
+    const cluster = model.stepCluster(n);
+    const clusterChanged = prev !== n && (!n || !prev || cluster !== model.stepCluster(prev));
+    document.documentElement.style.setProperty("--cc", cluster ? model.CL.get(cluster)!.cv : "var(--accent)");
+    document.body.classList.toggle("flow", !!step);
     options.onStep?.(n);
-    const target = n ? model.stepCluster(n) : null;
-    controls.update(); sidebar.update();
-    panels.refreshHover();
-    if (target && target === state.layoutCluster && target === state.liftedCluster) {
-      world.applyFocus(); viewport.focus(); connectors.render(); connectors.show(true);
-      panels.updateDock();
-      return;
+    const fn = model.fnAt(n);
+    const row = fn ? model.rowByPath.get(fn.file) : undefined;
+    if (row) openTo(state.open, row);
+    explorer.sync();
+    // the canvas frame has no size in full screen, so the tree keeps its scroll there
+    if (!state.full) explorer.reveal();
+    fileBox.render();
+    if (deckCluster !== cluster) { clusterDeck.show(cluster); deckCluster = cluster; }
+    clusterDeck.mark();
+    code.render(prev);
+    place();
+    bar.render(clusterChanged);
+    tools.sync();
+  }
+
+  // ============ placement ============
+  // The file box stays level with its explorer row, so the guide runs straight. Only a box too tall for the frame at
+  // that height moves up. The deck is pinned: one spot for every step. Zoom scales the canvas around the file node.
+
+  /** Places the file box and the deck, then draws the connectors. A browsed file shows without a deck.
+   *  Returns the frame and the deck spot that it measured. */
+  function place(): { frame: Frame; spot: { x: number; y: number } } {
+    if (state.browseFile && deckCluster !== null) { clusterDeck.show(null); deckCluster = null; }
+    const r = frameEl.getBoundingClientRect();
+    const frame: Frame = { left: r.left, top: r.top, width: r.width, height: r.height };
+    const spot = deckSpot(frame, card.getBoundingClientRect().left, model.deckSize.width, model.deckSize.maxHeight);
+    const k = state.zoom, x = frame.left + FILE_X;
+    let y = frame.top + 18;
+    if (fileBox.nodeEl()) {
+      const rr = explorer.anchorEl()?.getBoundingClientRect();
+      y = fileBoxCenter(rr ? rr.top + rr.height / 2 : y, frame, fileBox.height(), k);
+      fileblk.style.transform = `translate(${f1(x)}px,${f1(y - 10)}px)`;
     }
-    if (n && !target && state.flowOn && !state.layoutCluster && !state.liftedCluster) { world.applyFocus(); viewport.row(); return; }
-    if (!n && !state.flowOn && !state.layoutCluster && !state.liftedCluster) return;
-    clusterTransition(target, n > 0);
+    state.anchor = { x, y };
+    cv.style.transformOrigin = `${f1(x)}px ${f1(y)}px`;
+    cv.style.transform = `scale(${k})`;
+    clusterDeck.pin(spot, state.anchor, k);
+    links.draw();
+    return { frame, spot };
   }
 
-  function clusterTransition(target: string | null, wantFlow: boolean) {
-    ctx.clearTimers();
-    panels.dropBoxHover();
-    const hadLift = !!state.liftedCluster && state.liftedCluster !== target;
-    if (hadLift) world.drop(state.liftedCluster!);
-    connectors.show(false); connectors.setArrow(false);
-    const t1 = hadLift ? ctx.D(380) : 0;
-    ctx.later(t1, () => {
-      // The flow layout starts and ends here, once per flow.
-      world.setFlowLayout(wantFlow);
-      state.layoutCluster = target;
-      document.body.classList.toggle("lifted", !!target);
-      world.relayout(); panels.renderCallout(); panels.renderDock();
-      if (target) viewport.cluster();
-      else { world.applyFocus(); if (wantFlow) viewport.row(); else viewport.rest(true); }
-    });
-    if (!target) return;
-    const t2 = t1 + ctx.D(hadLift ? 300 : 380);
-    ctx.later(t2, () => { if (state.liftedCluster !== target) world.lift(target); world.applyFocus(); });
-    ctx.later(t2 + ctx.D(760), () => { connectors.render(); connectors.show(true); connectors.setArrow(true); });
+  function placeSoon() {
+    if (placeRaf) return;
+    placeRaf = requestAnimationFrame(() => { placeRaf = 0; tools.layoutTop(); place(); });
   }
-
-  // ============ frame loop ============
-
-  function tick() {
-    if (!alive) return;
-    requestAnimationFrame(tick);
-    panels.placeHover();
-    connectors.draw();
-  }
-  requestAnimationFrame(tick);
 
   // ============ boot and teardown ============
+  // The first place() measures the frame. When the widest flow file box and the deck do not fit at 100%, the canvas
+  // starts at the largest zoom that fits.
 
-  controls.syncAnnotation();
-  viewport.measure();
-  world.relayout();
-  viewport.rest(false);
-  panels.renderCallout(); panels.renderDock(); controls.update(); sidebar.update();
-  const worldEl = document.getElementById("world")!;
-  requestAnimationFrame(() => requestAnimationFrame(() => { worldEl.classList.remove("boot"); document.body.classList.remove("booting"); }));
+  tools.layoutTop();
+  explorer.sync();
+  fileBox.render();
+  const first = place();
+  const zoom = startZoom(first.frame.left, first.spot.x, model.fileRight);
+  if (zoom < 1) state.zoom = zoom;
+  render(0);
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    if (!alive) return;
+    document.body.classList.remove("booting");
+    links.draw();
+  }));
+  // Loaded fonts change line heights. The code column renders first: its step text moves the code header that the arrow joins.
+  document.fonts?.ready.then(() => {
+    if (!alive) return;
+    tools.layoutTop();
+    code.render(state.cur);
+    place();
+  });
 
   function destroy() {
     alive = false;
     abort.abort();
-    ctx.clearTimers();
-    for (const part of [controls, panels, sidebar, connectors, world]) part.destroy();
-    document.body.classList.remove("lifted", "flow");
-    document.body.style.removeProperty("--cc");
+    if (placeRaf) cancelAnimationFrame(placeRaf);
+    placeRaf = 0;
+    for (const part of [tools, bar, code, links, clusterDeck, fileBox, explorer]) part.destroy();
+    document.body.classList.remove("flow", "full", "booting");
+    document.documentElement.style.removeProperty("--cc");
   }
+
+  /** The `d` attribute of a connector path, or null when the connector is hidden. */
+  const pathOf = (group: string, path: string) => ($(group).classList.contains("away") ? null : $(path).getAttribute("d"));
 
   return {
     go, destroy,
     inspect: {
-      go, get cur() { return state.cur; }, get cam() { return { ...state.cam }; }, get view() { return { ...state.view }; },
-      slab: (cid: string) => { const rect = world.slabRect(cid); return rect && { ...rect }; },
-      row: (id: string) => { const r = model.rowById.get(id); return r && { x: r.x, y: r.y, mode: r.mode }; },
-      dir: (id: string) => { const r = model.rowById.get(id); return r && { by: state.open.get(id) ?? null, y: r.y, mode: r.mode }; },
-      frame: () => ({ w: state.treeW, h: state.treeH }),
-      rows: () => model.rows.map(r => ({ id: r.id, y: r.y, h: r.h, mode: r.mode, dot: r.kind === "fn" && !!r.fn!.cluster })),
-      clusterOf: (index: number) => model.stepCluster(index),
-      clusters: () => model.clusters.map(c => ({ id: c.id, members: c.members.length })),
+      go,
+      get cur() { return state.cur; },
+      get zoom() { return state.zoom; },
+      get full() { return state.full; },
+      get compact() { return state.compact; },
+      /** The screen box of the deck camera (its pinned spot), or null without a deck. */
+      deckRect: () => rectOf(cv.querySelector(".deckcam")),
+      fileNodeRect: () => rectOf(fileBox.nodeEl()),
+      paths: () => ({
+        guide: pathOf("#guideG", "#guidePath"),
+        tether: pathOf("#tetherG", "#tetherPath"),
+        arrow: pathOf("#arrowG", "#arrPath"),
+      }),
     },
   };
 }

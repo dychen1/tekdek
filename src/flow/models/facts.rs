@@ -1,10 +1,12 @@
 //! Fact layer: the indexed source facts that one flow references.
 //!
-//! Code copies these values from the bound graph. Agents never write them.
+//! Code copies these values from the bound graph. Agents never write them. The
+//! node and relation kinds are the wire enums of the graph artifact.
 
 use serde::{Deserialize, Serialize};
 
 use super::{ContentHash, NodeKey, Sha256Digest, nullable};
+pub use crate::store::graph::{NodeKind, RelationKind};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -48,39 +50,12 @@ pub struct FactNode {
     pub fact_digest: Sha256Digest,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum NodeKind {
-    Module,
-    Type,
-    Callable,
-    Field,
-}
-
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct FactEdge {
     pub source: NodeKey,
     pub target: NodeKey,
     pub kind: RelationKind,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum RelationKind {
-    Contains,
-    Calls,
-    Imports,
-    InputType,
-    OutputType,
-    UsesType,
-    UsesValue,
-}
-
-/// Parses one wire name through the serde representation of a unit enum.
-#[must_use]
-pub fn from_wire_name<T: serde::de::DeserializeOwned>(name: &str) -> Option<T> {
-    serde_json::from_value(serde_json::Value::String(name.to_owned())).ok()
 }
 
 /// Returns the serde wire name of a unit enum value.

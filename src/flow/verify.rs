@@ -9,8 +9,8 @@ use std::{collections::BTreeSet, path::Path};
 use serde::Serialize;
 
 use super::{
-    FlowError, derive, lineage,
-    models::{FlowId, FlowIssue, GenerationPurpose, IssueCode, Sha256Digest},
+    FlowError, current_flow, derive, lineage,
+    models::{FlowIssue, GenerationPurpose, IssueCode, Sha256Digest},
     validate,
 };
 use crate::store::graph::read_graph;
@@ -34,37 +34,24 @@ pub struct VerifyReport {
 /// # Errors
 /// Returns an error when the flow has no lineage or its files cannot be read.
 pub fn verify_flow(directory: &Path, name: &str) -> Result<VerifyReport, FlowError> {
-    let flow_id = FlowId::try_from(name).map_err(|error| {
-        FlowError::Rejected(vec![FlowIssue::error(
-            IssueCode::InvalidKey,
-            error.to_string(),
-        )])
-    })?;
-    let current =
-        lineage::read_current(directory, &flow_id)?.ok_or_else(|| FlowError::NoLineage {
-            name: name.to_owned(),
-        })?;
+    let current = current_flow(directory, name)?;
     let artifact = &current.artifact;
-    let mut issues = Vec::new();
-    let parent = match &artifact.generation.parent_digest {
-        Some(digest) => match lineage::read_generation(
-            directory,
-            &flow_id,
-            artifact.generation.ordinal.saturating_sub(1),
-            digest,
-        ) {
-            Ok(parent) => Some(parent.artifact),
-            Err(error) => {
-                issues.push(FlowIssue::error(
-                    IssueCode::UnknownGeneration,
-                    format!("cannot read the parent generation: {error}"),
-                ));
-                None
-            }
-        },
-        None => None,
-    };
-    issues.extend(validate::verify_artifact(artifact, parent.as_ref()));
+    // A parent that cannot be read gives `unknown_generation` in `verify_artifact`.
+    let parent = artifact
+        .generation
+        .parent_digest
+        .as_ref()
+        .and_then(|digest| {
+            lineage::read_generation(
+                directory,
+                &artifact.flow_id,
+                artifact.generation.ordinal.saturating_sub(1),
+                digest,
+            )
+            .ok()
+        });
+    let mut issues =
+        validate::verify_artifact(artifact, parent.as_ref().map(|parent| &parent.artifact));
     let binding = &artifact.facts.binding;
     let stale = match read_graph(directory, &binding.graph_artifact) {
         Ok((graph, digest)) if digest == binding.graph_digest.as_str() => {
@@ -92,7 +79,7 @@ pub fn verify_flow(directory: &Path, name: &str) -> Result<VerifyReport, FlowErr
         _ => true,
     };
     Ok(VerifyReport {
-        name: flow_id.to_string(),
+        name: artifact.flow_id.to_string(),
         file: current.file,
         ordinal: artifact.generation.ordinal,
         purpose: artifact.generation.purpose,
@@ -113,6 +100,7 @@ mod tests {
         FlowError,
         fixtures::{self, frozen, import, output},
         models::IssueCode,
+        validate::verify_artifact,
     };
 
     #[test]
@@ -165,6 +153,41 @@ mod tests {
             "{:?}",
             report.issues
         );
+    }
+
+    #[test]
+    fn a_revision_without_its_parent_reports_unknown_generation_once() {
+        let directory = fixtures::store();
+        let path = directory.path();
+        let first = frozen(import(path, "demo-flow", &output()));
+        let parent = fixtures::current(path, "demo-flow");
+        // A revision that drops the first cluster keeps the second cluster color.
+        let mut revised = output();
+        revised["flow"]["clusters"]
+            .as_array_mut()
+            .expect("clusters")
+            .remove(0);
+        revised["flow"]["revisionSummary"] = "Fold every step into one cluster.".into();
+        for (step, stored) in revised["flow"]["steps"]
+            .as_array_mut()
+            .expect("steps")
+            .iter_mut()
+            .zip(&parent.intent.steps)
+        {
+            step["priorStepId"] = stored.id.as_str().into();
+            step["clusterKey"] = "write-result".into();
+        }
+        frozen(import(path, "demo-flow", &revised));
+        let revision = fixtures::current(path, "demo-flow");
+        std::fs::remove_file(path.join("flows").join(first.file)).expect("remove the parent");
+
+        let report = verify_flow(path, "demo-flow").expect("verify");
+
+        let codes: Vec<_> = report.issues.iter().map(|issue| issue.code).collect();
+        assert_eq!(codes, [IssueCode::UnknownGeneration], "{:?}", report.issues);
+        let alone = verify_artifact(&revision, None);
+        let codes: Vec<_> = alone.iter().map(|issue| issue.code).collect();
+        assert_eq!(codes, [IssueCode::UnknownGeneration], "{alone:?}");
     }
 
     #[test]

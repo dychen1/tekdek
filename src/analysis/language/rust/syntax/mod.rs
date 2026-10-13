@@ -17,7 +17,7 @@
 mod paths;
 mod signature;
 
-use std::{collections::HashMap, path::Component};
+use std::collections::HashMap;
 
 use paths::{ModulePath, crate_roots, module_path, relative_module_path};
 use signature::{
@@ -36,6 +36,7 @@ use crate::analysis::{
         AnalysisError, CallableData, CallableKind, EntityEvidence, EntityKey, EntityKind,
         FieldData, RelationKind, SyntaxFactBuilder, SyntaxFacts, TypeData, TypeKind,
     },
+    language::document_path,
     source::{DocumentSnapshot, SourceRange, SourceSpan, Sources, document_has_extension},
 };
 
@@ -91,7 +92,7 @@ fn parse_document(document: &DocumentSnapshot) -> Result<ParsedDocument<'_>, Ana
     let path = document_path(document)?.to_owned();
     let syntax = syn::parse_file(&document.content)
         .map_err(|error| AnalysisError::new(format!("cannot parse Rust source {path}: {error}")))?;
-    let lines = LineIndex::new(&document.content)?;
+    let lines = LineIndex::new(&document.content);
 
     Ok(ParsedDocument {
         path,
@@ -102,42 +103,9 @@ fn parse_document(document: &DocumentSnapshot) -> Result<ParsedDocument<'_>, Ana
     })
 }
 
-/// Returns one strict relative UTF-8 document path.
-fn document_path(document: &DocumentSnapshot) -> Result<&str, AnalysisError> {
-    if document.path.is_absolute() {
-        return Err(AnalysisError::new(format!(
-            "the document path must be relative: {}",
-            document.path.display()
-        )));
-    }
-    if document
-        .path
-        .components()
-        .any(|component| !matches!(component, Component::Normal(_)))
-    {
-        return Err(AnalysisError::new(format!(
-            "the document path must contain only normal components: {}",
-            document.path.display()
-        )));
-    }
-
-    document.path.to_str().ok_or_else(|| {
-        AnalysisError::new(format!(
-            "the document path is not valid UTF-8: {}",
-            document.path.display()
-        ))
-    })
-}
-
 // -----------------------------------------------------------------------------
 // Source Model
 // -----------------------------------------------------------------------------
-
-#[derive(Clone, Eq, Hash, PartialEq)]
-struct QualifiedTypeName {
-    module: ModulePath,
-    name: String,
-}
 
 #[derive(Eq, Hash, PartialEq)]
 struct DeclarationId {
@@ -165,20 +133,23 @@ struct LineIndex {
 }
 
 impl LineIndex {
-    fn new(source: &str) -> Result<Self, AnalysisError> {
-        u32::try_from(source.len())
-            .map_err(|_| AnalysisError::new("the Rust source is too large"))?;
-        let mut starts = vec![0];
+    fn new(source: &str) -> Self {
+        // The parser removes a byte order mark before it counts line-1 columns.
+        let mut starts = vec![if source.starts_with('\u{feff}') {
+            '\u{feff}'.len_utf8()
+        } else {
+            0
+        }];
         starts.extend(
             source
                 .bytes()
                 .enumerate()
                 .filter_map(|(offset, byte)| (byte == b'\n').then_some(offset + 1)),
         );
-        Ok(Self {
+        Self {
             starts,
             source_len: source.len(),
-        })
+        }
     }
 
     /// Converts a parser location to one UTF-8 byte offset.
@@ -213,12 +184,9 @@ impl LineIndex {
 struct RustSyntaxWalker {
     builder: SyntaxFactBuilder,
     modules: HashMap<ModulePath, Vec<EntityKey>>,
-    types: HashMap<QualifiedTypeName, Vec<EntityKey>>,
     types_by_owner: HashMap<EntityKey, HashMap<String, Vec<EntityKey>>>,
-    file_modules: HashMap<String, EntityKey>,
     declared_modules: HashMap<DeclarationId, EntityKey>,
     declared_types: HashMap<DeclarationId, EntityKey>,
-    containments: Vec<(EntityKey, EntityKey)>,
 }
 
 impl RustSyntaxWalker {
@@ -226,12 +194,9 @@ impl RustSyntaxWalker {
         Self {
             builder: SyntaxFactBuilder::new(),
             modules: HashMap::new(),
-            types: HashMap::new(),
             types_by_owner: HashMap::new(),
-            file_modules: HashMap::new(),
             declared_modules: HashMap::new(),
             declared_types: HashMap::new(),
-            containments: Vec::new(),
         }
     }
 }
@@ -243,7 +208,8 @@ impl RustSyntaxWalker {
 /// Produces facts with three ordered syntax passes.
 ///
 /// Pass one registers modules and types. Pass two registers fields and
-/// callables. Pass three adds containment and local import relations.
+/// callables. Both passes add the containment relation of each new entity.
+/// Pass three adds local import relations.
 fn produce_document_facts(documents: &[ParsedDocument<'_>]) -> Result<SyntaxFacts, AnalysisError> {
     let mut walker = RustSyntaxWalker::new();
 
@@ -251,7 +217,7 @@ fn produce_document_facts(documents: &[ParsedDocument<'_>]) -> Result<SyntaxFact
         walker.register_file_module(document)?;
     }
     for document in documents {
-        let module = walker.file_module(document)?;
+        let module = EntityKey::module(&document.path);
         walker.register_types(
             document,
             &document.syntax.items,
@@ -260,7 +226,7 @@ fn produce_document_facts(documents: &[ParsedDocument<'_>]) -> Result<SyntaxFact
         )?;
     }
     for document in documents {
-        let module = walker.file_module(document)?;
+        let module = EntityKey::module(&document.path);
         walker.register_members(
             document,
             &document.syntax.items,
@@ -269,10 +235,8 @@ fn produce_document_facts(documents: &[ParsedDocument<'_>]) -> Result<SyntaxFact
             &module,
         )?;
     }
-
-    walker.add_containment_relations();
     for document in documents {
-        let module = walker.file_module(document)?;
+        let module = EntityKey::module(&document.path);
         walker.add_import_relations(
             document,
             &document.syntax.items,
@@ -285,38 +249,13 @@ fn produce_document_facts(documents: &[ParsedDocument<'_>]) -> Result<SyntaxFact
 }
 
 impl RustSyntaxWalker {
-    fn file_module(&self, document: &ParsedDocument<'_>) -> Result<EntityKey, AnalysisError> {
-        self.file_modules
-            .get(&document.path)
-            .cloned()
-            .ok_or_else(|| {
-                AnalysisError::new(format!(
-                    "the {} file module was not registered",
-                    document.path
-                ))
-            })
-    }
-
     /// Registers one file module before item traversal starts.
     fn register_file_module(&mut self, document: &ParsedDocument<'_>) -> Result<(), AnalysisError> {
-        let end = u32::try_from(document.source.len())
-            .map_err(|_| AnalysisError::new("the Rust source is too large"))?;
-        let module = self.builder.add_module(
-            &document.path,
-            EntityEvidence {
-                path: document.path.clone(),
-                declarations: Vec::new(),
-                scope: Some(SourceRange { start: 0, end }),
-                body: Some(SourceRange { start: 0, end }),
-                type_inputs: Vec::new(),
-                type_outputs: Vec::new(),
-            },
-        )?;
+        let module = self.builder.add_module(&document.path, document.source)?;
         self.modules
             .entry(document.module_path.clone())
             .or_default()
-            .push(module.clone());
-        self.file_modules.insert(document.path.clone(), module);
+            .push(module);
         Ok(())
     }
 
@@ -338,7 +277,6 @@ impl RustSyntaxWalker {
                 Item::Struct(item) => {
                     self.register_type(
                         document,
-                        module_path,
                         module,
                         &item.ident,
                         TypeKind::Struct,
@@ -352,7 +290,6 @@ impl RustSyntaxWalker {
                 Item::Enum(item) => {
                     self.register_type(
                         document,
-                        module_path,
                         module,
                         &item.ident,
                         TypeKind::Enum,
@@ -366,7 +303,6 @@ impl RustSyntaxWalker {
                 Item::Trait(item) => {
                     self.register_type(
                         document,
-                        module_path,
                         module,
                         &item.ident,
                         TypeKind::Trait,
@@ -400,10 +336,12 @@ impl RustSyntaxWalker {
             item.span(),
             Some((brace.span.open(), brace.span.close())),
         )?;
+        let declaration_start = evidence.declarations[0].start;
         let module =
             self.builder
                 .add_entity(owner, item.ident.to_string(), EntityKind::Module, evidence);
-        self.containments.push((owner.clone(), module.clone()));
+        self.builder
+            .add_relation(owner, &module, RelationKind::Contains);
 
         let mut nested_path = module_path.clone();
         nested_path.segments.push(item.ident.to_string());
@@ -411,11 +349,10 @@ impl RustSyntaxWalker {
             .entry(nested_path.clone())
             .or_default()
             .push(module.clone());
-        let declaration = source_range(document, item.ident.span())?;
         self.declared_modules.insert(
             DeclarationId {
                 path: document.path.clone(),
-                start: declaration.start,
+                start: declaration_start,
             },
             module.clone(),
         );
@@ -429,7 +366,6 @@ impl RustSyntaxWalker {
     fn register_type(
         &mut self,
         document: &ParsedDocument<'_>,
-        module_path: &ModulePath,
         owner: &EntityKey,
         ident: &syn::Ident,
         kind: TypeKind,
@@ -438,7 +374,8 @@ impl RustSyntaxWalker {
         end: Span,
         body: Option<(Span, Span)>,
     ) -> Result<(), AnalysisError> {
-        let declaration = source_range(document, ident.span())?;
+        let evidence = entity_evidence(document, ident.span(), start, end, body)?;
+        let declaration_start = evidence.declarations[0].start;
         let name = ident.to_string();
         let entity = self.builder.add_entity(
             owner,
@@ -447,27 +384,10 @@ impl RustSyntaxWalker {
                 kind,
                 documentation: documentation(attrs),
             }),
-            EntityEvidence {
-                path: document.path.clone(),
-                declarations: vec![declaration],
-                scope: Some(source_range_between(document, start, end)?),
-                body: body
-                    .map(|(body_start, body_end)| {
-                        source_range_between(document, body_start, body_end)
-                    })
-                    .transpose()?,
-                type_inputs: Vec::new(),
-                type_outputs: Vec::new(),
-            },
+            evidence,
         );
-        self.containments.push((owner.clone(), entity.clone()));
-        self.types
-            .entry(QualifiedTypeName {
-                module: module_path.clone(),
-                name: name.clone(),
-            })
-            .or_default()
-            .push(entity.clone());
+        self.builder
+            .add_relation(owner, &entity, RelationKind::Contains);
         self.types_by_owner
             .entry(owner.clone())
             .or_default()
@@ -477,7 +397,7 @@ impl RustSyntaxWalker {
         self.declared_types.insert(
             DeclarationId {
                 path: document.path.clone(),
-                start: declaration.start,
+                start: declaration_start,
             },
             entity,
         );
@@ -603,23 +523,18 @@ impl RustSyntaxWalker {
                     .map_or_else(|| index.to_string(), |variant| format!("{variant}.{index}"));
                 (name, field.ty.span())
             };
-            let declaration = source_range(document, declaration_span)?;
+            let evidence =
+                entity_evidence(document, declaration_span, field.span(), field.span(), None)?;
             let entity = self.builder.add_entity(
                 owner,
                 name,
                 EntityKind::Field(FieldData {
                     declared_type: Some(source_text(document, field.ty.span())?.trim().to_owned()),
                 }),
-                EntityEvidence {
-                    path: document.path.clone(),
-                    declarations: vec![declaration],
-                    scope: Some(source_range(document, field.span())?),
-                    body: None,
-                    type_inputs: Vec::new(),
-                    type_outputs: Vec::new(),
-                },
+                evidence,
             );
-            self.containments.push((owner.clone(), entity));
+            self.builder
+                .add_relation(owner, &entity, RelationKind::Contains);
         }
         Ok(())
     }
@@ -705,6 +620,20 @@ impl RustSyntaxWalker {
         let signature_text = source_text_between(document, start, signature.span())?
             .trim()
             .to_owned();
+        let mut evidence = entity_evidence(
+            document,
+            signature.ident.span(),
+            start,
+            end,
+            body.map(|block| {
+                (
+                    block.brace_token.span.open(),
+                    block.brace_token.span.close(),
+                )
+            }),
+        )?;
+        evidence.type_inputs = callable_type_inputs(document, signature)?;
+        evidence.type_outputs = callable_type_outputs(document, signature)?;
         let entity = self.builder.add_entity(
             owner,
             signature.ident.to_string(),
@@ -715,24 +644,10 @@ impl RustSyntaxWalker {
                 return_type: callable_return_type(document, signature)?,
                 documentation: documentation(attrs),
             }),
-            EntityEvidence {
-                path: document.path.clone(),
-                declarations: vec![source_range(document, signature.ident.span())?],
-                scope: Some(source_range_between(document, start, end)?),
-                body: body
-                    .map(|block| {
-                        source_range_between(
-                            document,
-                            block.brace_token.span.open(),
-                            block.brace_token.span.close(),
-                        )
-                    })
-                    .transpose()?,
-                type_inputs: callable_type_inputs(document, signature)?,
-                type_outputs: callable_type_outputs(document, signature)?,
-            },
+            evidence,
         );
-        self.containments.push((owner.clone(), entity));
+        self.builder
+            .add_relation(owner, &entity, RelationKind::Contains);
         Ok(())
     }
 
@@ -759,13 +674,10 @@ impl RustSyntaxWalker {
         current_module: &EntityKey,
         path: &[String],
     ) -> Lookup<EntityKey> {
-        if path.is_empty() || path == ["self"] {
+        if path.is_empty() {
             return Lookup::Unique(current_module.clone());
         }
-        let Some(path) = relative_module_path(current_path, path) else {
-            return Lookup::Absent;
-        };
-        self.lookup_module(&path)
+        self.resolve_module(current_path, current_module, path)
     }
 
     fn resolve_module(
@@ -793,13 +705,6 @@ impl RustSyntaxWalker {
                 .get(owner)
                 .and_then(|types| types.get(name)),
         )
-    }
-
-    fn add_containment_relations(&mut self) {
-        for (owner, child) in self.containments.drain(..) {
-            self.builder
-                .add_relation(&owner, &child, RelationKind::Contains);
-        }
     }
 
     fn add_import_relations(
@@ -989,11 +894,7 @@ fn source_range_between(
 }
 
 fn source_text<'a>(document: &ParsedDocument<'a>, span: Span) -> Result<&'a str, AnalysisError> {
-    let range = source_range(document, span)?;
-    document
-        .source
-        .get(range.start as usize..range.end as usize)
-        .ok_or_else(invalid_source_range)
+    source_text_between(document, span, span)
 }
 
 fn source_text_between<'a>(
@@ -1232,6 +1133,20 @@ mod tests {
         assert_eq!(
             declaration.evidence.declarations[0],
             expected_range(source, "Café")
+        );
+    }
+
+    #[test]
+    fn keeps_line_one_ranges_exact_after_a_byte_order_mark() {
+        let source = "\u{feff}pub struct Alpha;\n";
+        let facts = facts_for("bom.rs", source).expect("the source must produce facts");
+
+        let alpha = typed_entity(&facts, "Alpha", &TypeKind::Struct);
+
+        assert_eq!(declaration_text(source, alpha), "Alpha");
+        assert_eq!(
+            range_text(source, alpha.evidence.scope.expect("the scope must exist")),
+            "pub struct Alpha;"
         );
     }
 
@@ -1576,7 +1491,7 @@ mod tests {
         entity(
             facts,
             name,
-            |kind| matches!(kind, EntityKind::Type(data) if same_type_kind(&data.kind, expected)),
+            |kind| matches!(kind, EntityKind::Type(data) if data.kind == *expected),
         )
     }
 
@@ -1607,17 +1522,6 @@ mod tests {
             panic!("the entity must be callable");
         };
         data
-    }
-
-    fn same_type_kind(left: &TypeKind, right: &TypeKind) -> bool {
-        matches!(
-            (left, right),
-            (TypeKind::Class, TypeKind::Class)
-                | (TypeKind::Struct, TypeKind::Struct)
-                | (TypeKind::Enum, TypeKind::Enum)
-                | (TypeKind::Interface, TypeKind::Interface)
-                | (TypeKind::Trait, TypeKind::Trait)
-        )
     }
 
     fn assert_contains(

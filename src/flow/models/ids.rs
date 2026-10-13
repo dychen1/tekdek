@@ -99,15 +99,10 @@ identifier!(
 );
 
 impl Sha256Digest {
-    /// Builds the digest form of one raw SHA-256 hash.
+    /// Returns the digest of raw bytes in the store digest form.
     #[must_use]
-    pub fn from_hash(hash: &[u8]) -> Self {
-        use fmt::Write as _;
-        let mut text = String::from("sha256:");
-        for byte in hash {
-            let _ = write!(text, "{byte:02x}");
-        }
-        Self(text)
+    pub fn of_bytes(bytes: &[u8]) -> Self {
+        Self(crate::store::digest_of(bytes))
     }
 
     /// Returns the 64 hex digits without the prefix.

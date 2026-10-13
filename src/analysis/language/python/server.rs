@@ -32,7 +32,6 @@ pub(super) fn produce_semantic_facts(
             language: Language::Python,
             language_id: &profile.language_id,
             server: &profile.server,
-            required_capabilities: profile.required_capabilities,
             fallback: resolution_fallback,
             // Pyright analyzes each document before it answers a request.
             readiness: session::ServerReadiness::Immediate,

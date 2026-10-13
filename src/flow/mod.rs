@@ -7,12 +7,13 @@
 //!
 //! # Modules
 //! `models` the serde types. `import` freezes one agent output. `verify` checks
-//! the current generation. `lineage` owns the store layout and listings.
+//! the current generation. `lineage` owns the store layout.
 //! `validate`, `assign`, and `derive` hold the rules; `canonical` and `text` the
 //! canonical forms.
 //!
 //! # Sections
-//! `Contracts` embeds the JSON Schemas. `Errors` reports failures.
+//! `Contracts` embeds the agent output JSON Schema. `Lookup` resolves a flow name.
+//! `Errors` reports failures.
 
 pub mod assign;
 pub mod canonical;
@@ -27,13 +28,13 @@ pub mod verify;
 #[cfg(test)]
 pub(crate) mod fixtures;
 
-use std::{fmt, io};
+use std::{fmt, io, path::Path};
 
 use assign::AssignError;
 use canonical::CanonicalError;
 use derive::DeriveError;
-use lineage::LineageError;
-use models::FlowIssue;
+use lineage::{LineageError, StoredGeneration};
+use models::{FlowId, FlowIssue, IssueCode};
 
 // -----------------------------------------------------------------------------
 // Contracts
@@ -42,8 +43,30 @@ use models::FlowIssue;
 /// The embedded agent output contract, version 1.
 pub const AGENT_OUTPUT_SCHEMA: &str = include_str!("schema/agent-output.schema.json");
 
-/// The embedded frozen artifact schema, version 3.
-pub const FLOW_ARTIFACT_SCHEMA: &str = include_str!("schema/flow-artifact.schema.json");
+// -----------------------------------------------------------------------------
+// Lookup
+// -----------------------------------------------------------------------------
+
+/// Reads the current generation of the flow with this name.
+///
+/// # Errors
+/// Returns `Rejected` for an invalid name and `NoLineage` for a flow without a
+/// frozen generation. Returns a lineage error when the files cannot be read.
+pub fn current_flow(directory: &Path, name: &str) -> Result<StoredGeneration, FlowError> {
+    lineage::read_current(directory, &flow_id(name)?)?.ok_or_else(|| FlowError::NoLineage {
+        name: name.to_owned(),
+    })
+}
+
+/// Parses a flow name. An invalid name is a rejected input with an `invalid_key` issue.
+fn flow_id(name: &str) -> Result<FlowId, FlowError> {
+    FlowId::try_from(name).map_err(|error| {
+        FlowError::Rejected(vec![FlowIssue::error(
+            IssueCode::InvalidKey,
+            error.to_string(),
+        )])
+    })
+}
 
 // -----------------------------------------------------------------------------
 // Errors
@@ -160,10 +183,13 @@ mod tests {
     use serde_json::Value;
 
     use super::{
-        AGENT_OUTPUT_SCHEMA, FLOW_ARTIFACT_SCHEMA,
+        AGENT_OUTPUT_SCHEMA,
         fixtures::{self, frozen, import, output},
         models::{AgentFlowOutput, ClusterColor, FlowArtifact, wire_name},
     };
+
+    /// The frozen artifact schema, version 3.
+    const FLOW_ARTIFACT_SCHEMA: &str = include_str!("schema/flow-artifact.schema.json");
 
     fn schemas() -> (Value, Value) {
         (
@@ -380,5 +406,113 @@ mod tests {
             schema_enum(&artifact_schema, "Transition"),
             names(&transitions)
         );
+    }
+
+    /// Reads two numeric limit keywords from one schema node.
+    fn schema_limits(schema: &Value, pointer: &str, keywords: [&str; 2]) -> (usize, usize) {
+        let node = schema.pointer(pointer).expect(pointer);
+        let read = |keyword: &str| {
+            let value = node[keyword].as_u64().expect(keyword);
+            usize::try_from(value).expect(keyword)
+        };
+        (read(keywords[0]), read(keywords[1]))
+    }
+
+    #[test]
+    fn validation_limits_match_the_schema_limits() {
+        use super::validate::{
+            BEHAVIOR, BOUNDARIES, CLUSTER_COUNT, CLUSTER_DESCRIPTION, CLUSTER_LABEL,
+            NO_FLOW_EXPLANATION, PHASE_NOTE, REVISION_SUMMARY, STEP_ANNOTATION, STEP_COUNT,
+            STEP_TITLE,
+        };
+        let (artifact_schema, agent_schema) = schemas();
+        let text = ["minLength", "maxLength"];
+        let count = ["minItems", "maxItems"];
+        // Each row: the rule, then its node in the agent schema and in the artifact schema.
+        let texts = [
+            (
+                BEHAVIOR,
+                "/$defs/AgentFlow/properties/behavior",
+                "/$defs/IntentLayer/properties/behavior",
+            ),
+            (
+                BOUNDARIES,
+                "/$defs/AgentFlow/properties/boundaries/oneOf/1",
+                "/$defs/IntentLayer/properties/boundaries/oneOf/1",
+            ),
+            (
+                REVISION_SUMMARY,
+                "/$defs/AgentFlow/properties/revisionSummary/oneOf/1",
+                "/$defs/IntentLayer/properties/revisionSummary/oneOf/1",
+            ),
+            (
+                CLUSTER_LABEL,
+                "/$defs/AgentCluster/properties/label",
+                "/$defs/ClusterIntent/properties/label",
+            ),
+            (
+                CLUSTER_DESCRIPTION,
+                "/$defs/AgentCluster/properties/description",
+                "/$defs/ClusterIntent/properties/description",
+            ),
+            (
+                PHASE_NOTE,
+                "/$defs/AgentCluster/properties/phaseNote/oneOf/1",
+                "/$defs/ClusterIntent/properties/phaseNote/oneOf/1",
+            ),
+            (
+                STEP_TITLE,
+                "/$defs/AgentStep/properties/title",
+                "/$defs/FlowStep/properties/title",
+            ),
+            (
+                STEP_ANNOTATION,
+                "/$defs/AgentStep/properties/annotation",
+                "/$defs/FlowStep/properties/annotation",
+            ),
+        ];
+        for (rule, agent, artifact) in texts {
+            let expected = (rule.min, rule.max);
+            assert_eq!(
+                schema_limits(&agent_schema, agent, text),
+                expected,
+                "{agent}"
+            );
+            assert_eq!(
+                schema_limits(&artifact_schema, artifact, text),
+                expected,
+                "{artifact}"
+            );
+        }
+        let explanation = "/$defs/NoFlowOutcome/properties/explanation";
+        assert_eq!(
+            schema_limits(&agent_schema, explanation, text),
+            (NO_FLOW_EXPLANATION.min, NO_FLOW_EXPLANATION.max),
+            "{explanation}"
+        );
+        for (range, agent, artifact) in [
+            (
+                CLUSTER_COUNT,
+                "/$defs/AgentFlow/properties/clusters",
+                "/$defs/IntentLayer/properties/clusters",
+            ),
+            (
+                STEP_COUNT,
+                "/$defs/AgentFlow/properties/steps",
+                "/$defs/IntentLayer/properties/steps",
+            ),
+        ] {
+            let expected = (*range.start(), *range.end());
+            assert_eq!(
+                schema_limits(&agent_schema, agent, count),
+                expected,
+                "{agent}"
+            );
+            assert_eq!(
+                schema_limits(&artifact_schema, artifact, count),
+                expected,
+                "{artifact}"
+            );
+        }
     }
 }

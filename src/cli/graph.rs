@@ -15,8 +15,8 @@ use std::{error::Error, path::PathBuf};
 use serde::Serialize;
 use tekdek::{
     catalog,
-    query::{self, NODE_KINDS, NodeDetail, NodeRef, SearchResult},
-    store::graph::{ArtifactGraph, read_graph},
+    query::{self, NodeDetail, NodeRef, SearchResult},
+    store::graph::{ArtifactGraph, NODE_KINDS, NodeKind, read_graph},
 };
 
 use super::{failure, render, split_arguments, store_directory};
@@ -47,7 +47,7 @@ struct Command {
 enum Action {
     Search {
         text: String,
-        kind: Option<String>,
+        kind: Option<NodeKind>,
         limit: usize,
     },
     Show {
@@ -58,7 +58,7 @@ enum Action {
 impl Command {
     /// Parses the arguments after `graph` without file access.
     fn parse(arguments: impl Iterator<Item = String>) -> Result<Self, String> {
-        let (operands, mut options) = split_arguments(arguments, VALUE_OPTIONS)?;
+        let (operands, mut options, _) = split_arguments(arguments, VALUE_OPTIONS, &[])?;
         let json = options.remove("--json").is_some();
         let store = options.remove("--store").map(PathBuf::from);
         let graph = options.remove("--graph");
@@ -70,14 +70,14 @@ impl Command {
                 kind: options
                     .remove("--kind")
                     .map(|kind| {
-                        if NODE_KINDS.contains(&kind.as_str()) {
-                            Ok(kind)
-                        } else {
-                            Err(format!(
-                                "unknown node kind {kind}: use {}",
-                                NODE_KINDS.join(", ")
-                            ))
-                        }
+                        NODE_KINDS
+                            .into_iter()
+                            .find(|known| known.to_string() == kind)
+                            .ok_or_else(|| {
+                                let known: Vec<String> =
+                                    NODE_KINDS.iter().map(ToString::to_string).collect();
+                                format!("unknown node kind {kind}: use {}", known.join(", "))
+                            })
                     })
                     .transpose()?,
                 limit: options
@@ -116,9 +116,7 @@ impl Command {
 // -----------------------------------------------------------------------------
 
 /// Returns the exit code and one output document for a graph command.
-pub(super) fn run(arguments: Vec<String>) -> (u8, String) {
-    // Detect JSON mode before parsing so invalid commands also return JSON.
-    let json = arguments.iter().any(|argument| argument == "--json");
+pub(super) fn run(arguments: Vec<String>, json: bool) -> (u8, String) {
     let result = Command::parse(arguments.into_iter())
         .map_err(|message| format!("{message}\n{USAGE}"))
         .and_then(|command| execute(command).map_err(|error| error.to_string()));
@@ -131,13 +129,13 @@ fn execute(command: Command) -> Result<(u8, String), Box<dyn Error>> {
     let file = match command.graph {
         Some(file) => file,
         None => catalog::default_artifact(&store)
-            .map_err(|error| format!("cannot select a graph in {}: {error}", store.display()))?,
+            .map_err(|error| format!("cannot select a graph: {error}"))?,
     };
     let (graph, _) = read_graph(&store, &file)?;
     match command.action {
         // Rank the matching keys.
         Action::Search { text, kind, limit } => {
-            let result = query::search(&graph, &text, kind.as_deref(), limit);
+            let result = query::search(&graph, &text, kind, limit);
             let human = describe_search(&result, &file);
             Ok((0, render(command.json, &in_graph(&file, &result), human)?))
         }
@@ -182,7 +180,7 @@ fn missing_key(graph: &ArtifactGraph, file: &str, key: &str) -> String {
             .nodes
             .iter()
             .filter(|node| node.path == path && node.key != path)
-            .filter(|node| kind.is_empty() || node.kind == kind)
+            .filter(|node| kind.is_empty() || node.kind.to_string() == kind)
             .map(|node| node.key.clone())
             .take(5)
             .collect();
@@ -292,7 +290,7 @@ mod tests {
         let mut raw = vec!["--store".to_owned(), directory.display().to_string()];
         raw.extend(arguments.iter().map(|value| (*value).to_owned()));
         raw.push("--json".to_owned());
-        let (code, output) = run(raw);
+        let (code, output) = run(raw, true);
         assert_eq!(code, expected_code, "{arguments:?}: {output}");
         serde_json::from_str(&output).expect("one JSON document")
     }
@@ -316,6 +314,22 @@ mod tests {
         assert_eq!(shown["graph"], "app.json");
         assert_eq!(shown["callees"][0]["key"], "src/main.rs::callable:start");
         assert_eq!(shown["callers"], serde_json::json!([]));
+    }
+
+    #[test]
+    fn names_the_store_once_when_no_graph_can_be_selected() {
+        let directory = tempfile::tempdir().expect("folder");
+        let empty = directory.path().join("empty");
+        fs::create_dir(&empty).expect("empty store");
+        for store in [directory.path().join("no-store"), empty] {
+            let failed = execute(&store, &["search", "main"], 2);
+            let message = failed["error"].as_str().expect("message");
+            assert_eq!(
+                message.matches(&store.display().to_string()).count(),
+                1,
+                "{message}"
+            );
+        }
     }
 
     #[test]

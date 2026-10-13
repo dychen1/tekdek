@@ -17,12 +17,14 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use tekdek::flow::{
-    AGENT_OUTPUT_SCHEMA, FlowError,
-    import::{self, ImportOutcome, ImportRequest},
-    lineage,
-    models::{Author, FlowArtifact, FlowId, FlowIssue, IssueCode, wire_name},
-    verify,
+use tekdek::{
+    catalog,
+    flow::{
+        AGENT_OUTPUT_SCHEMA, current_flow,
+        import::{self, ImportOutcome, ImportRequest},
+        models::{Author, FlowArtifact, FlowIssue, wire_name},
+        verify,
+    },
 };
 
 use super::{failure, render, required, split_arguments, store_directory};
@@ -87,7 +89,7 @@ struct AuthorOptions {
 impl Command {
     /// Parses the arguments after `flow` without file access.
     fn parse(arguments: impl Iterator<Item = String>) -> Result<Self, String> {
-        let (operands, mut options) = split_arguments(arguments, VALUE_OPTIONS)?;
+        let (operands, mut options, _) = split_arguments(arguments, VALUE_OPTIONS, &[])?;
         let json = options.remove("--json").is_some();
         let store = options.remove("--store").map(PathBuf::from);
         let words: Vec<_> = operands.iter().map(String::as_str).collect();
@@ -164,9 +166,7 @@ impl AuthorOptions {
 // -----------------------------------------------------------------------------
 
 /// Returns the exit code and one output document for a flow command.
-pub(super) fn run(arguments: Vec<String>, input: &mut impl Read) -> (u8, String) {
-    // Detect JSON mode before parsing so invalid commands also return JSON.
-    let json = arguments.iter().any(|argument| argument == "--json");
+pub(super) fn run(arguments: Vec<String>, json: bool, input: &mut impl Read) -> (u8, String) {
     let result = Command::parse(arguments.into_iter())
         .map_err(|message| format!("{message}\n{USAGE}"))
         .and_then(|command| execute(command, input).map_err(|error| error.to_string()));
@@ -194,7 +194,7 @@ fn execute(command: Command, input: &mut impl Read) -> Result<(u8, String), Box<
 
 /// Lists flows with their freshness.
 fn list(directory: &Path, json: bool, graph: Option<&str>) -> Result<(u8, String), Box<dyn Error>> {
-    let listings = lineage::list_flows(directory, graph)?;
+    let listings = catalog::list_flows(directory, graph)?;
     let lines: Vec<_> = listings
         .iter()
         .map(|item| {
@@ -219,16 +219,7 @@ fn list(directory: &Path, json: bool, graph: Option<&str>) -> Result<(u8, String
 
 /// Shows the current generation of one flow. JSON output is the frozen artifact.
 fn show(directory: &Path, json: bool, name: &str) -> Result<(u8, String), Box<dyn Error>> {
-    let flow_id = FlowId::try_from(name).map_err(|error| {
-        FlowError::Rejected(vec![FlowIssue::error(
-            IssueCode::InvalidKey,
-            error.to_string(),
-        )])
-    })?;
-    let current =
-        lineage::read_current(directory, &flow_id)?.ok_or_else(|| FlowError::NoLineage {
-            name: name.to_owned(),
-        })?;
+    let current = current_flow(directory, name)?;
     let artifact = &current.artifact;
     Ok((
         0,
@@ -411,7 +402,7 @@ mod tests {
         raw.extend(arguments.iter().map(|value| (*value).to_owned()));
         // A missing option value must not consume the JSON flag.
         raw.push("--json".to_owned());
-        let (code, output) = run(raw, &mut Cursor::new(input));
+        let (code, output) = run(raw, true, &mut Cursor::new(input));
         assert_eq!(code, expected_code, "{arguments:?}: {output}");
         serde_json::from_str(&output).expect("one JSON document")
     }

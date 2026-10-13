@@ -13,25 +13,25 @@
 //! `Arguments` parses the command line.
 //! `Artifact destination` selects indexed or explicit output.
 
-use std::process::ExitCode;
-
-use super::ERROR_CODE;
-
-#[cfg(any(feature = "python", feature = "rust"))]
 use std::{
     collections::BTreeMap,
-    fs,
+    fs, io,
     path::{Path, PathBuf},
 };
-#[cfg(any(feature = "python", feature = "rust"))]
+
 use tekdek::{
     analysis::{
         self, PipelineConfig,
         config::{ConfigError, apply_cli_overrides, configured_profiles},
         language::Language,
     },
-    store::{PROJECT_STORE, create_project_store, find_project_store, graph::GraphArtifact},
+    store::{
+        PROJECT_STORE, atomic_write, create_project_store, find_project_store,
+        graph::{GraphArtifact, check_graph_name},
+    },
 };
+
+use super::split_arguments;
 
 // -----------------------------------------------------------------------------
 // Entry
@@ -50,75 +50,42 @@ store, index creates <root>/.tekdek after the analysis succeeds. index writes
 <store>/<name>.json. --output writes one file and changes no store.";
 
 /// Analyzes one codebase and writes its graph into the store.
-#[cfg(any(feature = "python", feature = "rust"))]
-pub(super) fn run(raw: impl Iterator<Item = String>) -> ExitCode {
-    let arguments = match Arguments::parse(raw) {
-        Ok(arguments) => arguments,
-        Err(message) => {
-            eprintln!("error: {message}");
-            eprintln!("{USAGE}");
-            return ExitCode::from(ERROR_CODE);
-        }
-    };
-    let destination = match artifact_destination(&arguments) {
-        Ok(destination) => destination,
-        Err(message) => {
-            eprintln!("error: {message}");
-            return ExitCode::from(ERROR_CODE);
-        }
-    };
+pub(super) fn run(raw: impl Iterator<Item = String>) -> Result<(), String> {
+    let arguments = Arguments::parse(raw).map_err(|message| format!("{message}\n{USAGE}"))?;
+    let destination = artifact_destination(&arguments)?;
     if destination.project_root {
         println!("indexing the project root {}", destination.root.display());
     }
-    let config = match pipeline_config(&arguments, &destination.root) {
-        Ok(config) => config,
-        Err(error) => {
-            eprintln!("error: {error}");
-            return ExitCode::from(ERROR_CODE);
-        }
-    };
-    let result = match analysis::run(&config) {
-        Ok(result) => result,
-        Err(error) => {
-            eprintln!("error: {error}");
-            return ExitCode::from(ERROR_CODE);
-        }
-    };
+    let config =
+        pipeline_config(&arguments, &destination.root).map_err(|error| error.to_string())?;
+    let graph = analysis::run(&config).map_err(|error| error.to_string())?;
     // Create a new store only after the analysis succeeds, so a failed first index leaves no store.
     if destination.create_store
         && let Some((store, _)) = &destination.indexed
     {
-        if let Err(error) = create_project_store(store) {
-            eprintln!(
-                "error: cannot create the store {}: {error}",
-                store.display()
-            );
-            return ExitCode::from(ERROR_CODE);
-        }
+        create_project_store(store)
+            .map_err(|error| format!("cannot create the store {}: {error}", store.display()))?;
         println!("created the store {}", store.display());
     }
-    if let Err(error) = GraphArtifact::new(&result.graph).write(&destination.output) {
-        eprintln!(
-            "error: cannot write {}: {error}",
-            destination.output.display()
-        );
-        return ExitCode::from(ERROR_CODE);
-    }
+    write_graph(&destination, &GraphArtifact::new(&graph))
+        .map_err(|error| format!("cannot write {}: {error}", destination.output.display()))?;
 
     println!(
         "{} nodes, {} edges -> {}",
-        result.graph.nodes.len(),
-        result.graph.edges.len(),
+        graph.nodes.len(),
+        graph.edges.len(),
         destination.output.display()
     );
-    ExitCode::SUCCESS
+    Ok(())
 }
 
-/// Reports that this build cannot analyze any language.
-#[cfg(not(any(feature = "python", feature = "rust")))]
-pub(super) fn run(_raw: impl Iterator<Item = String>) -> ExitCode {
-    eprintln!("error: this build has no language adapters");
-    ExitCode::from(ERROR_CODE)
+/// Writes the graph file: under the store lock into a store, or as one plain file for `--output`.
+fn write_graph(destination: &Destination, artifact: &GraphArtifact) -> io::Result<()> {
+    if destination.indexed.is_some() {
+        artifact.write(&destination.output)
+    } else {
+        atomic_write(&destination.output, &artifact.to_bytes()?)
+    }
 }
 
 /// Builds pipeline configuration from files and command-line overrides.
@@ -126,7 +93,6 @@ pub(super) fn run(_raw: impl Iterator<Item = String>) -> ExitCode {
 /// # Errors
 ///
 /// Returns an error if configuration loading or override application fails.
-#[cfg(any(feature = "python", feature = "rust"))]
 fn pipeline_config(arguments: &Arguments, root: &Path) -> Result<PipelineConfig, ConfigError> {
     let mut profiles = configured_profiles(arguments.config.as_deref())?;
     apply_cli_overrides(
@@ -143,7 +109,6 @@ fn pipeline_config(arguments: &Arguments, root: &Path) -> Result<PipelineConfig,
 // Arguments
 // -----------------------------------------------------------------------------
 
-#[cfg(any(feature = "python", feature = "rust"))]
 #[derive(Debug)]
 struct Arguments {
     root: PathBuf,
@@ -160,7 +125,6 @@ struct Arguments {
     server_arguments: BTreeMap<Language, Vec<String>>,
 }
 
-#[cfg(any(feature = "python", feature = "rust"))]
 impl Arguments {
     /// Parses command-line arguments.
     ///
@@ -172,67 +136,46 @@ impl Arguments {
     /// Returns a message if a second positional value exists, an option is
     /// invalid, or `--output` appears with `--name` or `--store`.
     fn parse(arguments: impl Iterator<Item = String>) -> Result<Self, String> {
-        let mut root = None;
-        let mut output = None;
-        let mut name = None;
-        let mut store = None;
-        let mut config = None;
-        let mut servers = Vec::new();
-        let mut server_arguments = BTreeMap::<Language, Vec<String>>::new();
-        let mut arguments = arguments.peekable();
-
-        while let Some(argument) = arguments.next() {
-            match argument.as_str() {
-                // Set the indexed artifact name.
-                "--name" => {
-                    name = Some(next_value(&mut arguments, "--name")?);
-                }
-                // Set the store of the indexed artifact.
-                "--store" => {
-                    store = Some(PathBuf::from(next_value(&mut arguments, "--store")?));
-                }
-                // Set the artifact path.
-                "--output" => {
-                    output = Some(PathBuf::from(next_value(&mut arguments, "--output")?));
-                }
-                // Set the user configuration path.
-                "--config" => {
-                    config = Some(PathBuf::from(next_value(&mut arguments, "--config")?));
-                }
-                // Set the language server.
-                "--server" => {
-                    let value = next_value(&mut arguments, "--server")?;
-                    servers.push(parse_language_value(
-                        &value,
-                        "--server",
-                        "<language>=<program>",
-                        "program",
-                    )?);
-                }
-                // Add one language server argument.
-                "--server-arg" => {
-                    let value = next_value(&mut arguments, "--server-arg")?;
-                    let (language, value) = parse_language_value(
-                        &value,
-                        "--server-arg",
-                        "<language>=<argument>",
-                        "argument",
-                    )?;
-                    server_arguments.entry(language).or_default().push(value);
-                }
-                // Reject an unknown option.
-                value if value.starts_with("--") => {
-                    return Err(format!("unknown option: {value}"));
-                }
-                // Set the codebase root.
-                value if root.is_none() => root = Some(PathBuf::from(value)),
-                // Reject a second positional value.
-                value => return Err(format!("unexpected argument: {value}")),
-            }
+        let (operands, mut options, repeated) = split_arguments(
+            arguments,
+            &["--name", "--store", "--output", "--config"],
+            &["--server", "--server-arg"],
+        )?;
+        let root = match operands.as_slice() {
+            [] => None,
+            [root] => Some(PathBuf::from(root)),
+            [_, extra, ..] => return Err(format!("unexpected argument: {extra}")),
+        };
+        let output = options.remove("--output").map(PathBuf::from);
+        let name = options.remove("--name");
+        let store = options.remove("--store").map(PathBuf::from);
+        let config = options.remove("--config").map(PathBuf::from);
+        if let Some(option) = options.keys().next() {
+            return Err(format!("unexpected option: {option}"));
         }
-
         if output.is_some() && (name.is_some() || store.is_some()) {
             return Err("--output cannot be used with --name or --store".to_owned());
+        }
+
+        let mut servers = Vec::new();
+        let mut server_arguments = BTreeMap::<Language, Vec<String>>::new();
+        for (option, value) in repeated {
+            if option == "--server" {
+                servers.push(parse_language_value(
+                    &value,
+                    "--server",
+                    "<language>=<program>",
+                    "program",
+                )?);
+            } else {
+                let (language, value) = parse_language_value(
+                    &value,
+                    "--server-arg",
+                    "<language>=<argument>",
+                    "argument",
+                )?;
+                server_arguments.entry(language).or_default().push(value);
+            }
         }
 
         Ok(Self {
@@ -253,7 +196,6 @@ impl Arguments {
 /// # Errors
 ///
 /// Returns a message if either component is empty or the language is unknown.
-#[cfg(any(feature = "python", feature = "rust"))]
 fn parse_language_value(
     value: &str,
     option: &str,
@@ -273,21 +215,6 @@ fn parse_language_value(
     Ok((language, value.to_owned()))
 }
 
-/// Consumes and returns the next option value.
-///
-/// # Errors
-///
-/// Returns a message if the option has no value.
-#[cfg(any(feature = "python", feature = "rust"))]
-fn next_value(
-    arguments: &mut impl Iterator<Item = String>,
-    option: &str,
-) -> Result<String, String> {
-    arguments
-        .next()
-        .ok_or_else(|| format!("{option} needs a value"))
-}
-
 // -----------------------------------------------------------------------------
 // Artifact destination
 // -----------------------------------------------------------------------------
@@ -296,7 +223,6 @@ fn next_value(
 ///
 /// `create_store` is true when the destination is a new project store.
 /// `project_root` is true when index analyzes the project root instead of the working directory.
-#[cfg(any(feature = "python", feature = "rust"))]
 #[derive(Debug, PartialEq, Eq)]
 struct Destination {
     root: PathBuf,
@@ -320,7 +246,6 @@ struct Destination {
 ///
 /// Returns a message if the root or artifact name is invalid, or if a root
 /// inside a project has no `--name`.
-#[cfg(any(feature = "python", feature = "rust"))]
 fn artifact_destination(arguments: &Arguments) -> Result<Destination, String> {
     if let Some(output) = &arguments.output {
         return Ok(Destination {
@@ -371,8 +296,7 @@ fn artifact_destination(arguments: &Arguments) -> Result<Destination, String> {
             (root.clone(), root.join(PROJECT_STORE), name, true)
         }
     };
-    validate_artifact_name(&name)?;
-    let file = format!("{name}.json");
+    let file = artifact_file(&name)?;
 
     Ok(Destination {
         root,
@@ -388,7 +312,6 @@ fn artifact_destination(arguments: &Arguments) -> Result<Destination, String> {
 /// # Errors
 ///
 /// Returns a message if the name is not valid UTF-8.
-#[cfg(any(feature = "python", feature = "rust"))]
 fn folder_name(root: &Path) -> Result<String, String> {
     match root.file_name() {
         Some(name) => name
@@ -399,46 +322,43 @@ fn folder_name(root: &Path) -> Result<String, String> {
     }
 }
 
-/// Validates one artifact file stem.
+/// Returns the graph file of one artifact name.
 ///
 /// # Errors
 ///
-/// Returns a message if the name is not one normal path component.
-#[cfg(any(feature = "python", feature = "rust"))]
-fn validate_artifact_name(name: &str) -> Result<(), String> {
-    let path = Path::new(name);
-    if name.is_empty()
-        || name.eq_ignore_ascii_case("index")
-        || name.contains('\\')
-        || path
-            .extension()
-            .is_some_and(|extension| extension.eq_ignore_ascii_case("json"))
-        || path.file_name().and_then(|part| part.to_str()) != Some(name)
+/// Returns a message if the name already ends with `.json`, or if its graph
+/// file fails the store rule of `check_graph_name`. That message gives the
+/// reason of the rule.
+fn artifact_file(name: &str) -> Result<String, String> {
+    if Path::new(name)
+        .extension()
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("json"))
     {
         return Err(format!("invalid artifact name: {name}"));
     }
-    Ok(())
+    let file = format!("{name}.json");
+    check_graph_name(&file).map_err(|error| format!("invalid artifact name: {name}: {error}"))?;
+    Ok(file)
 }
 
 // -----------------------------------------------------------------------------
 // Tests
 // -----------------------------------------------------------------------------
 
-#[cfg(all(test, any(feature = "python", feature = "rust")))]
+#[cfg(test)]
 mod tests {
+    #[cfg(feature = "rust")]
+    use std::fs;
     use std::path::PathBuf;
 
-    #[cfg(feature = "rust")]
-    use std::{
-        fs,
-        sync::atomic::{AtomicUsize, Ordering},
+    use tekdek::{
+        analysis::{graph::Graph, language::Language},
+        store::graph::GraphArtifact,
     };
-
-    use tekdek::analysis::language::Language;
 
     #[cfg(feature = "rust")]
     use super::pipeline_config;
-    use super::{Arguments, Destination, artifact_destination, validate_artifact_name};
+    use super::{Arguments, Destination, artifact_destination, artifact_file, run, write_graph};
 
     fn parse(arguments: &[&str]) -> Result<Arguments, String> {
         Arguments::parse(arguments.iter().map(|value| (*value).to_owned()))
@@ -550,7 +470,8 @@ mod tests {
     #[cfg(feature = "rust")]
     #[test]
     fn applies_cli_overrides_after_explicit_configuration() {
-        let config_path = test_config_path();
+        let directory = tempfile::tempdir().expect("the temporary directory should exist");
+        let config_path = directory.path().join("config.toml");
         fs::write(
             &config_path,
             r#"
@@ -580,7 +501,6 @@ mod tests {
 
         let config = pipeline_config(&arguments, &arguments.root)
             .expect("the pipeline configuration should build");
-        fs::remove_file(&config_path).expect("the test configuration should be removed");
         let rust = config
             .profiles
             .iter()
@@ -664,22 +584,137 @@ mod tests {
         assert_eq!(explicit.indexed, None);
     }
 
+    #[cfg(unix)]
     #[test]
-    fn reserves_the_artifact_index_name() {
+    fn writes_an_output_file_through_a_linked_folder_and_takes_no_store_lock() {
+        let directory = tempfile::tempdir().expect("folder");
+        let real = directory.path().join("real");
+        std::fs::create_dir(&real).expect("real folder");
+        let linked = directory.path().join("linked");
+        std::os::unix::fs::symlink(&real, &linked).expect("folder link");
+        let artifact = GraphArtifact::new(&Graph {
+            nodes: Vec::new(),
+            edges: Vec::new(),
+        });
+        let names = |folder: &std::path::Path| -> Vec<String> {
+            std::fs::read_dir(folder)
+                .expect("list")
+                .map(|entry| {
+                    entry
+                        .expect("entry")
+                        .file_name()
+                        .into_string()
+                        .expect("name")
+                })
+                .collect()
+        };
+
+        for (output, folder) in [
+            (linked.join("graph.json"), real.clone()),
+            (linked.join("out/graph.json"), real.join("out")),
+        ] {
+            let arguments =
+                parse(&["project", "--output", output.to_str().expect("path")]).expect("args");
+            let destination = artifact_destination(&arguments).expect("destination");
+            write_graph(&destination, &artifact).expect("write through the link");
+            assert!(names(&folder).contains(&"graph.json".to_owned()));
+            assert!(
+                !names(&folder).contains(&".store.lock".to_owned()),
+                "{folder:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn accepts_inline_option_values() {
+        let arguments =
+            parse(&["--name=sample", "--store=demo", "--server=rust=ra"]).expect("args");
+
+        assert_eq!(arguments.name.as_deref(), Some("sample"));
+        assert_eq!(arguments.store, Some(PathBuf::from("demo")));
+        assert_eq!(arguments.servers, [(Language::Rust, "ra".to_owned())]);
+    }
+
+    #[test]
+    fn rejects_a_short_option_as_an_unknown_option() {
         assert_eq!(
-            validate_artifact_name("INDEX"),
-            Err("invalid artifact name: INDEX".to_owned())
+            parse(&["-h"]).expect_err("-h is not a root"),
+            "unknown option: -h"
         );
     }
 
-    #[cfg(feature = "rust")]
-    fn test_config_path() -> PathBuf {
-        static NEXT_PATH: AtomicUsize = AtomicUsize::new(0);
+    #[test]
+    fn rejects_a_repeated_single_value_option() {
+        for option in ["--name", "--store", "--output", "--config"] {
+            assert_eq!(
+                parse(&[option, "a", option, "b"]).expect_err("a repeated option"),
+                format!("duplicate option: {option}")
+            );
+        }
+    }
 
-        std::env::temp_dir().join(format!(
-            "tekdek-cli-{}-{}.toml",
-            std::process::id(),
-            NEXT_PATH.fetch_add(1, Ordering::Relaxed)
-        ))
+    #[test]
+    fn refuses_a_graph_name_that_the_store_cannot_read_before_the_analysis() {
+        let store = tempfile::tempdir().expect("store");
+        let store = store.path().to_str().expect("path");
+        for name in ["a:b", " app", ".hidden", "index", "app.json"] {
+            let error = run(["no-such-root", "--name", name, "--store", store]
+                .into_iter()
+                .map(str::to_owned))
+            .expect_err("an invalid name");
+            assert!(
+                error.starts_with(&format!("invalid artifact name: {name}")),
+                "{error}"
+            );
+            if name.starts_with('.') {
+                assert!(error.contains("cannot start with a dot"), "{error}");
+            }
+        }
+    }
+
+    #[test]
+    fn keeps_the_old_graph_when_the_analysis_fails() {
+        let directory = tempfile::tempdir().expect("folder");
+        let root = directory.path().join("app");
+        let store = directory.path().join("store");
+        std::fs::create_dir_all(&root).expect("root");
+        std::fs::create_dir_all(&store).expect("store");
+        for file in ["app.py", "lib.rs"] {
+            std::fs::write(root.join(file), [0xff, 0xfe]).expect("source that is not UTF-8");
+        }
+        std::fs::write(store.join("app.json"), "old graph\n").expect("old graph");
+
+        let text = |path: &std::path::Path| path.to_str().expect("path").to_owned();
+        let error = run([
+            text(&root),
+            "--name".into(),
+            "app".into(),
+            "--store".into(),
+            text(&store),
+        ]
+        .into_iter())
+        .expect_err("a failed analysis");
+
+        assert!(error.starts_with("cannot read the codebase"), "{error}");
+        assert_eq!(
+            std::fs::read_to_string(store.join("app.json")).expect("graph"),
+            "old graph\n"
+        );
+        let names: Vec<_> = std::fs::read_dir(&store)
+            .expect("list")
+            .map(|entry| entry.expect("entry").file_name())
+            .collect();
+        assert_eq!(names, ["app.json"]);
+    }
+
+    #[test]
+    fn reserves_the_artifact_index_name() {
+        assert_eq!(
+            artifact_file("INDEX"),
+            Err(
+                "invalid artifact name: INDEX: the graph file must end with .json and must not be index.json"
+                    .to_owned()
+            )
+        );
     }
 }

@@ -8,6 +8,8 @@
 //! `Provenance` records which stage created one graph item.
 
 pub mod build;
+#[cfg(test)]
+mod fixtures;
 mod lookup;
 mod semantic;
 
@@ -119,5 +121,4 @@ pub struct Provenance<E> {
 pub enum ProvenanceOrigin {
     Syntax,
     Semantic,
-    Derived,
 }

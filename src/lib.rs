@@ -12,10 +12,15 @@
 //! `catalog` builds the catalog of graphs and flows for the viewer.
 //! `query` searches graph nodes and lists their neighbors for agents.
 //! `serve` serves the embedded viewer and the listed files of one store.
+//! `source_view` cuts the source of the step functions of one flow for the viewer.
+
+#[cfg(not(any(feature = "python", feature = "rust")))]
+compile_error!("enable the python or rust feature");
 
 pub mod analysis;
 pub mod catalog;
 pub mod flow;
 pub mod query;
 pub mod serve;
+mod source_view;
 pub mod store;

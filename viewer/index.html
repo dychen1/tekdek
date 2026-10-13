@@ -6,9 +6,10 @@
 <link rel="icon" href="data:,">
 <title>Code map</title>
 <!--
-  The viewer page shell: icon symbols, the map stage, the sidebar, the right column, and the controls.
-  `src/main.ts` owns the behavior and `styles/deck.css` owns the style. Nothing here reads a data field.
-  Start the viewer server (`make serve`) and open `http://127.0.0.1:8000/viewer/`.
+  The viewer page shell: icon symbols, the canvas frame, the explorer, the map tools, the flow band,
+  the code column, the bottom bar, and the connector layer. Nothing here reads a data field.
+  `src/main.ts` owns the behavior and `styles/deck.css` owns the style.
+  Run `tekdek serve` and open the URL that it prints.
 -->
 <script>
 // Apply the saved Tokyo Night variant before first paint.
@@ -18,14 +19,6 @@ try { const v = localStorage.getItem('tekdek.deck.variant'); if (v === 'storm' |
 <script type="module" src="./dist/app.js"></script>
 </head>
 <body class="booting">
-<!-- DIRECTION CONTRACT
-THESIS: The whole repository is one vertical file staircase in a Tokyo Night terminal world. A cluster lifts its functions as boxes onto one raised colored deck, seen straight on, while the tree stays below.
-OWN-WORLD: Terminals and editors themed Tokyo Night. Blue-black ground, periwinkle text, blue for focus and the cursor, orange for the step number, magenta for keys. One monospace family.
-STORY: Press the right arrow. The camera pitches a little, straight on. The deck rises on a soft shadow, boxes follow in step order and leave dashed slots and tethers, the stack at right fills, and an arrow ties the deck to it.
-FIRST VIEWPORT: The flat staircase in a dashed frame, the guided file tree at left, the flow callout and an empty stack at right, the prompt-like controls with a blinking cursor above a help line.
-FORM: user-selected prototype; handoff design-explorations/unified-view/round-4/design-handoff.md; selection option-20 Lift Deck Tokyo
-FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, and DESIGN.md
--->
 <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
   <symbol id="i-chev" viewBox="0 0 16 16"><path d="M4 6l4 4 4-4"/></symbol>
   <symbol id="i-minus" viewBox="0 0 16 16"><path d="M4 8h8"/></symbol>
@@ -33,43 +26,37 @@ FINISH: unreviewed and undocumented is unfinished; this build ends with the fini
   <symbol id="i-prev" viewBox="0 0 16 16"><path d="M4 3.5v9M12 3.5v9L6 8z"/></symbol>
   <symbol id="i-next" viewBox="0 0 16 16"><path d="M12 3.5v9M4 3.5v9L10 8z"/></symbol>
   <symbol id="i-x" viewBox="0 0 16 16"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/></symbol>
-  <symbol id="i-folder" viewBox="0 0 16 16"><path d="M2.5 4.5a1 1 0 0 1 1-1h3l1.5 1.5h4.5a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1z"/></symbol>
   <symbol id="i-left" viewBox="0 0 16 16"><path d="M12.5 8h-9M7 4.5L3.5 8 7 11.5"/></symbol>
   <symbol id="i-right" viewBox="0 0 16 16"><path d="M3.5 8h9M9 4.5l3.5 3.5L9 11.5"/></symbol>
   <symbol id="i-ptr" viewBox="0 0 16 16"><path d="M6 3.5l4.5 4.5L6 12.5"/></symbol>
+  <symbol id="i-full" viewBox="0 0 16 16"><path d="M3 6.5V3h3.5M9.5 3H13v3.5M13 9.5V13H9.5M6.5 13H3V9.5"/></symbol>
+  <symbol id="i-exit" viewBox="0 0 16 16"><path d="M6.5 3v3.5H3M13 6.5H9.5V3M9.5 13V9.5H13M3 9.5h3.5V13"/></symbol>
 </svg>
 
-
-<svg class="arrow-layer" id="arrowLayer" aria-hidden="true">
-  <path class="arr" id="arrPath" pathLength="1" d="M0 0"/>
-  <path class="head" id="arrHead" d="M0 0"/>
-  <circle class="dot" id="arrDot" r="3.5" cx="0" cy="0"/>
-</svg>
+<div class="frame" id="frame" aria-hidden="true"></div>
 
 <aside class="sidebar" aria-label="Code explorer">
   <div class="sb-head" id="sbHead"></div>
-  <nav class="sb-tree" id="sbTree" aria-label="Directories and files"><i class="vp" id="vpBar" aria-hidden="true"></i></nav>
+  <nav class="sb-tree" id="sbTree" aria-label="Directories and files"></nav>
 </aside>
 
 <div class="maptools" id="maptools">
-  <button class="tbtn" id="fitBtn" type="button">fit</button>
+  <button class="tbtn" id="compactBtn" type="button" aria-pressed="true" title="Fold the functions off the flow path (c)">compact</button>
   <button class="tbtn icon" id="zoomOut" type="button" aria-label="Zoom out"><svg class="ic" aria-hidden="true"><use href="#i-minus"/></svg></button>
-  <span class="zl" id="zoomLbl" aria-live="off">100%</span>
+  <span class="zl" id="zoomLbl">100%</span>
   <button class="tbtn icon" id="zoomIn" type="button" aria-label="Zoom in"><svg class="ic" aria-hidden="true"><use href="#i-plus"/></svg></button>
   <button class="tbtn" id="keyBtn" type="button" aria-expanded="false" aria-controls="keyPop">key</button>
   <div class="pop keypop" id="keyPop" role="group" aria-label="Map key">
     <div class="kp-hd" aria-hidden="true"><span>cluster</span><span>steps</span></div>
     <ul class="kp-cl" id="kpClusters" aria-label="Flow clusters and their steps"></ul>
     <ul class="kp-list">
-      <li><svg class="kp-edge" width="28" height="10" viewBox="0 0 28 10" aria-hidden="true"><path d="M1 5H21"/><path class="ah-edge" d="M21 1.5 27 5 21 8.5z"/></svg><span>Static call relationship in the source, caller to callee. Not a runtime execution count.</span></li>
-      <li><i class="kp-slot" aria-hidden="true"></i><span>Dashed slot: where a lifted function lives in the tree. A tether joins it to its box.</span></li>
-      <li><i class="kp-lift" aria-hidden="true"></i><span>A lifted box. The current step floats highest and casts a shadow on the deck.</span></li>
+      <li><svg class="kp-g" width="28" height="8" viewBox="0 0 28 8" aria-hidden="true"><path class="g1" d="M0 4H28"/></svg><span>Guide: the current file's tree guide, continued from the explorer into its box.</span></li>
+      <li><i class="kp-slot" aria-hidden="true"></i><span>Dashed slot: where a lifted function lives in the file, with its step.</span></li>
+      <li><i class="kp-lift" aria-hidden="true"></i><span>Lifted box: a function of the current cluster. The current step floats highest, tethered to its slot.</span></li>
+      <li><svg class="kp-g" width="28" height="8" viewBox="0 0 28 8" aria-hidden="true"><path class="g3" d="M1 4H21"/><path class="h3" d="M20 1 27 4 20 7z"/></svg><span>Arrow: the current box to its source in the code column.</span></li>
     </ul>
-    <dl class="kp-keys">
-      <dt><kbd aria-label="Left or right arrow"><svg class="ic" aria-hidden="true"><use href="#i-left"/></svg>/<svg class="ic" aria-hidden="true"><use href="#i-right"/></svg></kbd></dt><dd>previous or next step</dd>
-      <dt><kbd>esc</kbd></dt><dd>close this key, then clear the flow</dd>
-      <dt><kbd>f</kbd></dt><dd>fit the map</dd>
-      <dt><kbd>?</kbd></dt><dd>show or hide this key</dd>
+    <dl class="kp-keys" aria-label="More keys">
+      <dt><kbd>c</kbd></dt><dd>fold or name the functions off the flow path</dd>
     </dl>
     <div class="kp-theme" role="group" aria-labelledby="kpThemeLbl">
       <span id="kpThemeLbl">theme</span>
@@ -82,44 +69,42 @@ FINISH: unreviewed and undocumented is unfinished; this build ends with the fini
   </div>
 </div>
 
-<div class="rcol">
-  <section class="pane callout" id="callout" aria-label="Cluster"></section>
-  <section class="pane dock" id="dock" aria-label="Extracted stack"></section>
-</div>
+<div class="fh-top" id="fhTop"><span id="flowPick"></span><span class="fh-meta" id="fhMeta"></span></div>
+
+<section class="pane card" id="card" aria-label="Step and source">
+  <div class="status" id="status" role="status" aria-live="polite" hidden></div>
+  <div class="cd-head" id="cdHead"></div>
+  <div class="cd-step" id="cdStep"></div>
+  <header class="reader-head" id="codeHead"><div class="cw-path" id="where" title="Where the current step lives"></div>
+    <button class="cbtn quiet fsbtn" id="fullBtn" type="button" aria-pressed="false" title="Full screen (f)" aria-label="Full screen (f)"><svg class="ic" aria-hidden="true"><use href="#i-full"/></svg></button></header>
+  <div class="code" id="code" tabindex="0" aria-label="Source of the current function"></div>
+</section>
 
 <section class="controls" id="controls" aria-label="Flow controls">
   <div class="c1">
     <button class="cbtn" id="prevBtn" type="button" aria-label="Previous step"><svg class="ic" aria-hidden="true"><use href="#i-prev"/></svg></button>
     <button class="cbtn" id="nextBtn" type="button" aria-label="Next step"><svg class="ic" aria-hidden="true"><use href="#i-next"/></svg></button>
-    <div class="counter" id="counter">Step 0 / 0</div>
-    <div class="chip none" id="chip"><span id="chipText"></span></div>
+    <div class="counter" id="counter" aria-live="polite">Step 0 / 0</div>
+    <div class="cexpl" id="cExpl"><div class="chip none" id="chip"><span id="chipText">No flow</span></div><span class="cmeta" id="cMeta"></span></div>
     <button class="cbtn quiet" id="clearBtn" type="button" aria-label="Clear the flow"><svg class="ic" aria-hidden="true"><use href="#i-x"/></svg></button>
   </div>
-  <div class="c-title"><span class="ctt" id="cTitle" aria-live="polite"></span><i class="cursor" id="cursor" aria-hidden="true"></i></div>
-  <div class="c-ann-row">
-    <div class="c-ann-box" id="annBox"><div class="c-node" id="cNode"></div><p class="c-ann" id="cAnn"></p></div>
-    <button class="cbtn quiet" id="annBtn" type="button" aria-expanded="false" aria-controls="annBox" aria-label="Show the full annotation"><svg class="ic" aria-hidden="true"><use href="#i-chev"/></svg></button>
-  </div>
+  <p class="c-desc" id="cDesc"></p>
   <div class="ticks" id="ticks" role="group" aria-label="Steps"></div>
 </section>
-<p class="help" id="help" aria-label="Shortcuts"><span class="hk"><svg class="ic" aria-hidden="true"><use href="#i-left"/></svg>/<svg class="ic" aria-hidden="true"><use href="#i-right"/></svg><span class="vh">Left or right arrow</span></span>step<i class="hsep" aria-hidden="true"></i><span class="hk">f</span>fit<i class="hsep" aria-hidden="true"></i><span class="hk">esc</span>clear<i class="hsep" aria-hidden="true"></i><span class="hk">?</span>key</p>
+<p class="help" aria-label="Shortcuts"><span class="hk">j</span>back<i class="hsep" aria-hidden="true"></i><span class="hk">k</span>forward<i class="hsep" aria-hidden="true"></i><span class="hk"><svg class="ic" aria-hidden="true"><use href="#i-left"/></svg>/<svg class="ic" aria-hidden="true"><use href="#i-right"/></svg><span class="vh">Left or right arrow</span></span>step<i class="hsep" aria-hidden="true"></i><span class="hk">f</span>full screen<i class="hsep" aria-hidden="true"></i><span class="hk">esc</span>clear<i class="hsep" aria-hidden="true"></i><span class="hk">?</span>key</p>
 
-<!-- The map follows the controls in DOM order, so Tab reaches the tree, the tools, the panes, and the controls first. -->
-<main class="stage" id="stage" aria-label="Map"><div class="camera" id="camera"><div class="world boot" id="world"></div></div>
-  <svg class="links" id="links" aria-hidden="true">
-    <defs>
-      <marker id="ah-air" viewBox="0 0 8 8" refX="8" refY="4" markerWidth="6" markerHeight="6" orient="auto"><path class="ah-air" d="M0,.5 L8,4 L0,7.5 z"/></marker>
-      <marker id="ah-edge" viewBox="0 0 8 8" refX="8" refY="4" markerWidth="6" markerHeight="6" orient="auto"><path class="ah-edge" d="M0,.5 L8,4 L0,7.5 z"/></marker>
-    </defs>
-    <g id="tetherG"></g>
-    <g class="base" id="baseG"></g>
-    <g class="int" id="intG"></g>
-  </svg>
+<!-- The map follows the controls in DOM order, so Tab reaches the tree, the tools, the code column, and the controls first. -->
+<main class="cv" id="cv" aria-label="Map: the current file and the current cluster">
+  <div class="fileblk" id="fileblk" role="group" aria-label="Functions of the current file"><div class="fb-in" id="fbIn"></div></div>
 </main>
 
-<div class="pop fn-pop" id="fnPop" role="tooltip"></div>
+<svg class="links" id="links" aria-hidden="true">
+  <g class="guide away" id="guideG"><path id="guidePath" d="M0 0"/></g>
+  <g class="tether away" id="tetherG"><path class="tp" id="tetherPath" d="M0 0"/><circle class="td" id="tetherDot" r="3.5" cx="0" cy="0"/></g>
+  <g class="arrowg away" id="arrowG"><path class="arr" id="arrPath" d="M0 0"/><path class="head" id="arrHead" d="M0 0"/><circle class="dot" id="arrDot" r="3.5" cx="0" cy="0"/></g>
+</svg>
+
 <div class="pop tip" id="tip" role="tooltip"></div>
-<div class="status" id="status" role="status" aria-live="polite" hidden></div>
 <div class="pop pickpop" id="pickPop" role="dialog" aria-modal="false"></div>
 </body>
 </html>

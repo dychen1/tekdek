@@ -1,16 +1,15 @@
 //! Flow lineages in the store.
 //!
-//! This module owns the store layout of frozen flows, their reads and atomic
-//! writes, and their listings. The store directory is the input.
+//! This module owns the store layout of frozen flows, and their reads and atomic
+//! writes. The store directory is the input.
 //!
 //! Layout:
 //! `flows/<flowId>/generations/<ordinal>-<digest12>.json` holds one frozen
 //! generation. `flows/<flowId>/current.json` names the current generation.
 //!
 //! # Sections
-//! `Reads` reads the current or a named generation.
+//! `Reads` reads the current or a named generation, and lists the lineages.
 //! `Writes` freezes one generation and moves the pointer.
-//! `Listings` lists lineages for the catalog and the CLI.
 //! `Errors` reports failures.
 
 use std::{
@@ -21,15 +20,12 @@ use std::{
 use serde::{Deserialize, Serialize};
 
 use super::models::{FLOW_ARTIFACT_SCHEMA_VERSION, FlowArtifact, FlowId, Sha256Digest};
-use crate::store::{
-    graph::{check_graph_name, read_graph},
-    reject_symlink, write_bytes,
-};
+use crate::store::{read_bytes, reject_symlink, write_bytes};
 
 /// Names the current generation of one flow.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct CurrentPointer {
+struct CurrentPointer {
     pub generation_digest: Sha256Digest,
     pub ordinal: u32,
 }
@@ -56,17 +52,17 @@ pub fn generation_file(flow_id: &FlowId, ordinal: u32, digest: &Sha256Digest) ->
 
 /// Reads the current generation of one flow, or `None` when the flow has no lineage.
 ///
+/// A pointer that is not a regular file counts as no lineage.
+///
 /// # Errors
-/// Returns an error for a link, an unreadable file, an invalid document, or a
-/// pointer that names another generation.
+/// Returns an error for a link, an unreadable file, an invalid document, a
+/// generation of another flow, or a pointer that names another generation.
 pub fn read_current(
     directory: &Path,
     flow_id: &FlowId,
 ) -> Result<Option<StoredGeneration>, LineageError> {
     let lineage = lineage_path(directory, flow_id)?;
-    let pointer_path = lineage.join("current.json");
-    reject_symlink(&pointer_path)?;
-    let bytes = match fs::read(&pointer_path) {
+    let bytes = match read_bytes(&lineage.join("current.json")) {
         Ok(bytes) => bytes,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(error.into()),
@@ -89,7 +85,8 @@ pub fn read_current(
 /// Reads one generation by ordinal and digest.
 ///
 /// # Errors
-/// Returns an error for a link, an unreadable file, or an invalid document.
+/// Returns an error for a link, an unreadable file, an invalid document, or a
+/// generation that states another flow than the lineage folder.
 pub fn read_generation(
     directory: &Path,
     flow_id: &FlowId,
@@ -98,26 +95,20 @@ pub fn read_generation(
 ) -> Result<StoredGeneration, LineageError> {
     let file = generation_file(flow_id, ordinal, digest);
     let path = flows_path(directory)?.join(&file);
-    for step in [
-        path.parent().and_then(Path::parent),
-        path.parent(),
-        Some(path.as_path()),
-    ]
-    .into_iter()
-    .flatten()
+    for folder in [path.parent().and_then(Path::parent), path.parent()]
+        .into_iter()
+        .flatten()
     {
-        reject_symlink(step)?;
+        reject_symlink(folder)?;
     }
-    let bytes = fs::read(&path).map_err(|error| {
-        io::Error::new(
-            error.kind(),
-            format!("cannot read {}: {error}", path.display()),
-        )
-    })?;
-    Ok(StoredGeneration {
-        artifact: parse_artifact(&bytes)?,
-        file,
-    })
+    let artifact = parse_artifact(&read_bytes(&path)?)?;
+    if artifact.flow_id != *flow_id {
+        return Err(LineageError::FlowMismatch {
+            folder: flow_id.to_string(),
+            stated: artifact.flow_id.to_string(),
+        });
+    }
+    Ok(StoredGeneration { artifact, file })
 }
 
 /// Parses one artifact after its schema header check.
@@ -125,7 +116,7 @@ pub fn read_generation(
 /// # Errors
 /// Returns `UnknownSchema` for another schema version and a JSON error for any
 /// other shape problem.
-pub fn parse_artifact(bytes: &[u8]) -> Result<FlowArtifact, LineageError> {
+fn parse_artifact(bytes: &[u8]) -> Result<FlowArtifact, LineageError> {
     #[derive(Deserialize)]
     #[serde(rename_all = "camelCase")]
     struct Header {
@@ -138,133 +129,6 @@ pub fn parse_artifact(bytes: &[u8]) -> Result<FlowArtifact, LineageError> {
         });
     }
     Ok(serde_json::from_slice(bytes)?)
-}
-
-// -----------------------------------------------------------------------------
-// Writes
-// -----------------------------------------------------------------------------
-
-/// Writes one generation and moves the current pointer to it.
-///
-/// The generation file is written first, so a reader never sees a pointer to a
-/// missing file. An identical existing generation file is kept.
-///
-/// # Errors
-/// Returns an error for a link, a file failure, or a different file at the same path.
-pub fn write_current(directory: &Path, artifact: &FlowArtifact) -> Result<String, LineageError> {
-    let file = generation_file(
-        &artifact.flow_id,
-        artifact.generation.ordinal,
-        &artifact.digests.generation,
-    );
-    let flows = flows_path(directory)?;
-    let lineage = lineage_path(directory, &artifact.flow_id)?;
-    let generations = lineage.join("generations");
-    reject_symlink(&generations)?;
-    fs::create_dir_all(&generations)?;
-    let path = flows.join(&file);
-    reject_symlink(&path)?;
-    let mut bytes = serde_json::to_vec_pretty(artifact)?;
-    bytes.push(b'\n');
-    match fs::read(&path) {
-        Ok(existing) if existing == bytes => {}
-        Ok(_) => return Err(LineageError::Conflict { file }),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => write_bytes(&path, &bytes)?,
-        Err(error) => return Err(error.into()),
-    }
-    let pointer = CurrentPointer {
-        generation_digest: artifact.digests.generation.clone(),
-        ordinal: artifact.generation.ordinal,
-    };
-    let mut pointer_bytes = serde_json::to_vec_pretty(&pointer)?;
-    pointer_bytes.push(b'\n');
-    write_bytes(&lineage.join("current.json"), &pointer_bytes)?;
-    Ok(file)
-}
-
-// -----------------------------------------------------------------------------
-// Listings
-// -----------------------------------------------------------------------------
-
-/// One flow listing. `file` is relative to `flows/`.
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct FlowListing {
-    pub name: String,
-    pub file: String,
-    pub schema_version: u32,
-    pub behavior: String,
-    pub step_count: usize,
-    pub cluster_count: usize,
-    pub stale: bool,
-}
-
-/// One listing and the graph binding that decides its freshness.
-pub struct LineageListing {
-    pub graph_artifact: String,
-    pub graph_digest: String,
-    pub listing: FlowListing,
-}
-
-/// Lists the current generation of every lineage. An invalid lineage produces a warning.
-///
-/// `stale` stays false: the caller compares `graph_digest` with the graph it holds.
-///
-/// # Errors
-/// Returns an error for a link or a directory failure.
-pub fn lineage_listings(directory: &Path) -> io::Result<Vec<LineageListing>> {
-    let mut listings = Vec::new();
-    for id in lineage_ids(directory)? {
-        let current = match read_current(directory, &id) {
-            Ok(Some(current)) => current,
-            Ok(None) => continue,
-            Err(error) => {
-                eprintln!("warning: skipping the flow {id}: {error}");
-                continue;
-            }
-        };
-        let artifact = current.artifact;
-        listings.push(LineageListing {
-            graph_artifact: artifact.facts.binding.graph_artifact.clone(),
-            graph_digest: artifact.facts.binding.graph_digest.to_string(),
-            listing: FlowListing {
-                name: id.to_string(),
-                file: current.file,
-                schema_version: FLOW_ARTIFACT_SCHEMA_VERSION,
-                behavior: artifact.intent.behavior,
-                step_count: artifact.intent.steps.len(),
-                cluster_count: artifact.intent.clusters.len(),
-                stale: false,
-            },
-        });
-    }
-    Ok(listings)
-}
-
-/// Lists flows in name order, with an optional graph filter.
-///
-/// A flow is stale when its bound graph changed or is missing.
-///
-/// # Errors
-/// Returns an error for an invalid graph name, a link, or a directory failure.
-pub fn list_flows(directory: &Path, graph_file: Option<&str>) -> io::Result<Vec<FlowListing>> {
-    if let Some(file) = graph_file {
-        check_graph_name(file)?;
-    }
-    let mut result = Vec::new();
-    for lineage in lineage_listings(directory)? {
-        if graph_file.is_some_and(|file| file != lineage.graph_artifact) {
-            continue;
-        }
-        let stale = read_graph(directory, &lineage.graph_artifact)
-            .map_or(true, |(_, digest)| digest != lineage.graph_digest);
-        result.push(FlowListing {
-            stale,
-            ..lineage.listing
-        });
-    }
-    result.sort_by(|left, right| left.name.cmp(&right.name));
-    Ok(result)
 }
 
 /// Lists the flow IDs that have a current pointer, in name order.
@@ -299,6 +163,48 @@ pub fn lineage_ids(directory: &Path) -> io::Result<Vec<FlowId>> {
     Ok(ids)
 }
 
+// -----------------------------------------------------------------------------
+// Writes
+// -----------------------------------------------------------------------------
+
+/// Writes one generation and moves the current pointer to it.
+///
+/// The generation file is written first, so a reader never sees a pointer to a
+/// missing file. An identical existing generation file is kept. An entry that
+/// is not a regular file counts as missing.
+///
+/// # Errors
+/// Returns an error for a link, a file failure, or a different file at the same path.
+pub fn write_current(directory: &Path, artifact: &FlowArtifact) -> Result<String, LineageError> {
+    let file = generation_file(
+        &artifact.flow_id,
+        artifact.generation.ordinal,
+        &artifact.digests.generation,
+    );
+    let flows = flows_path(directory)?;
+    let lineage = lineage_path(directory, &artifact.flow_id)?;
+    let generations = lineage.join("generations");
+    reject_symlink(&generations)?;
+    fs::create_dir_all(&generations)?;
+    let path = flows.join(&file);
+    let mut bytes = serde_json::to_vec_pretty(artifact)?;
+    bytes.push(b'\n');
+    match read_bytes(&path) {
+        Ok(existing) if existing == bytes => {}
+        Ok(_) => return Err(LineageError::Conflict { file }),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => write_bytes(&path, &bytes)?,
+        Err(error) => return Err(error.into()),
+    }
+    let pointer = CurrentPointer {
+        generation_digest: artifact.digests.generation.clone(),
+        ordinal: artifact.generation.ordinal,
+    };
+    let mut pointer_bytes = serde_json::to_vec_pretty(&pointer)?;
+    pointer_bytes.push(b'\n');
+    write_bytes(&lineage.join("current.json"), &pointer_bytes)?;
+    Ok(file)
+}
+
 fn flows_path(directory: &Path) -> io::Result<PathBuf> {
     reject_symlink(directory)?;
     let flows = directory.join("flows");
@@ -323,6 +229,7 @@ pub enum LineageError {
     UnknownSchema { stated: u32 },
     PointerMismatch { flow: String },
     Conflict { file: String },
+    FlowMismatch { folder: String, stated: String },
 }
 
 impl fmt::Display for LineageError {
@@ -341,6 +248,11 @@ impl fmt::Display for LineageError {
             Self::PointerMismatch { flow } => write!(
                 formatter,
                 "pointer_mismatch: the current pointer of {flow} names a different generation"
+            ),
+            // Identify a generation that belongs to another flow.
+            Self::FlowMismatch { folder, stated } => write!(
+                formatter,
+                "flow_mismatch: the lineage {folder} holds a generation of the flow {stated}"
             ),
             // Refuse to replace a frozen file.
             Self::Conflict { file } => write!(
@@ -370,5 +282,137 @@ impl From<io::Error> for LineageError {
 impl From<serde_json::Error> for LineageError {
     fn from(error: serde_json::Error) -> Self {
         Self::Json(error)
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Tests
+// -----------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use std::{fs, path::Path};
+
+    use super::{LineageError, read_current, write_current};
+    use crate::flow::{
+        FlowError,
+        fixtures::{self, frozen, import, output},
+        models::FlowId,
+        verify::verify_flow,
+    };
+
+    fn id(name: &str) -> FlowId {
+        FlowId::try_from(name).expect("flow ID")
+    }
+
+    /// Freezes one initial generation and one revision of `name`.
+    fn freeze_with_revision(path: &Path, name: &str) {
+        frozen(import(path, name, &output()));
+        let initial = fixtures::current(path, name);
+        let mut revised = output();
+        for (step, stored) in revised["flow"]["steps"]
+            .as_array_mut()
+            .expect("steps")
+            .iter_mut()
+            .zip(&initial.intent.steps)
+        {
+            step["priorStepId"] = stored.id.as_str().into();
+        }
+        revised["flow"]["steps"][5]["title"] = "Hold the store lock".into();
+        revised["flow"]["revisionSummary"] = "Rename the last step to name the lock.".into();
+        frozen(import(path, name, &revised));
+    }
+
+    /// Copies the pointer and the generation files of one lineage into another folder.
+    fn copy_lineage(path: &Path, from: &str, to: &str) {
+        let source = path.join("flows").join(from);
+        let target = path.join("flows").join(to);
+        fs::create_dir_all(target.join("generations")).expect("target folder");
+        fs::copy(source.join("current.json"), target.join("current.json")).expect("pointer");
+        for entry in fs::read_dir(source.join("generations")).expect("generations") {
+            let file = entry.expect("entry").file_name();
+            fs::copy(
+                source.join("generations").join(&file),
+                target.join("generations").join(&file),
+            )
+            .expect("generation");
+        }
+    }
+
+    fn is_flow_mismatch(error: &LineageError) -> bool {
+        matches!(error, LineageError::FlowMismatch { .. })
+    }
+
+    #[test]
+    fn a_revision_copied_under_another_flow_is_rejected() {
+        let directory = fixtures::store();
+        let path = directory.path();
+        freeze_with_revision(path, "flow-b");
+        copy_lineage(path, "flow-b", "flow-a");
+
+        let error = read_current(path, &id("flow-a")).expect_err("wrong flow");
+
+        assert!(is_flow_mismatch(&error), "{error}");
+        assert!(matches!(
+            verify_flow(path, "flow-a"),
+            Err(FlowError::Lineage(LineageError::FlowMismatch { .. }))
+        ));
+        assert!(
+            read_current(path, &id("flow-b"))
+                .expect("own flow")
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn an_initial_generation_copied_under_another_flow_is_rejected() {
+        let directory = fixtures::store();
+        let path = directory.path();
+        frozen(import(path, "flow-b", &output()));
+        copy_lineage(path, "flow-b", "flow-a");
+
+        let error = read_current(path, &id("flow-a")).expect_err("wrong flow");
+
+        assert!(is_flow_mismatch(&error), "{error}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_pipe_at_the_generation_path_does_not_block_a_write() {
+        let directory = fixtures::store();
+        let path = directory.path().to_owned();
+        let generation = frozen(import(&path, "flow-a", &output()));
+        let artifact = fixtures::current(&path, "flow-a");
+        let file = path.join("flows").join(&generation.file);
+        let bytes = fs::read(&file).expect("generation");
+        fs::remove_file(&file).expect("remove generation");
+        let made = std::process::Command::new("mkfifo")
+            .arg(&file)
+            .status()
+            .expect("mkfifo");
+        assert!(made.success(), "mkfifo must create the pipe");
+
+        let (sender, receiver) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = sender.send(write_current(&path, &artifact).map_err(|error| error.to_string()));
+        });
+        let written = receiver
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .expect("the write must not block on the pipe");
+
+        assert_eq!(written, Ok(generation.file));
+        assert_eq!(fs::read(&file).expect("generation"), bytes);
+    }
+
+    #[test]
+    fn a_renamed_lineage_folder_is_rejected() {
+        let directory = fixtures::store();
+        let path = directory.path();
+        freeze_with_revision(path, "flow-b");
+        fs::rename(path.join("flows/flow-b"), path.join("flows/flow-a")).expect("rename");
+
+        let error = read_current(path, &id("flow-a")).expect_err("renamed folder");
+
+        assert!(is_flow_mismatch(&error), "{error}");
     }
 }

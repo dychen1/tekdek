@@ -1,10 +1,10 @@
-// Tests for the data layer: the graph digest check, the graph adapter, and the frozen flow adapter.
+// Tests for the data layer: the graph digest check, load failures, the graph adapter, and the frozen flow adapter.
 
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { deckFlow, deckGraph, displayName, fileTree, pickFlow, frozenFlows, withMembership } from "../src/data/adapt.ts";
-import { digestOf, LoadError, verifyGraph } from "../src/data/load.ts";
+import { deckFlow, deckGraph, displayName, fileTree, pickArtifact, pickFlow, frozenFlows } from "../src/data/adapt.ts";
+import { digestOf, loadFlow, loadIndex, loadSource, LoadError, verifyGraph } from "../src/data/load.ts";
 
 import { artifact, DIGEST, graphDocument, must } from "./fixtures.ts";
 
@@ -25,6 +25,22 @@ test("the graph check rejects changed bytes and unsupported documents with their
     (error) => error instanceof LoadError && error.reason === "graph");
 });
 
+test("a load whose answer is not JSON fails with the cause of its file", async (t) => {
+  t.mock.method(globalThis, "fetch", async () => new Response("{", { status: 200 }));
+  await assert.rejects(loadFlow({ name: "a", file: "a/generations/1-000000000000.json" }),
+    (error) => error instanceof LoadError && error.reason === "flow");
+  await assert.rejects(loadIndex(), (error) => error instanceof LoadError && error.reason === "fetch");
+  await assert.rejects(loadSource("demo.json", "a"), (error) => error instanceof LoadError && error.reason === "fetch");
+});
+
+test("a load that the server refuses or never answers is a fetch failure", async (t) => {
+  const answer = t.mock.method(globalThis, "fetch", async () => new Response("{}", { status: 500 }));
+  await assert.rejects(loadFlow({ name: "a", file: "a.json" }), (error) => error instanceof LoadError && error.reason === "fetch");
+  await assert.rejects(loadSource("demo.json", "a"), (error) => error instanceof LoadError && error.reason === "fetch");
+  answer.mock.mockImplementation(async () => { throw new TypeError("network down"); });
+  await assert.rejects(loadIndex(), (error) => error instanceof LoadError && error.reason === "fetch");
+});
+
 test("method names keep their type and nested functions keep their parent", () => {
   assert.equal(displayName("src/a.rs::type:Store::callable:open", "open"), "Store::open");
   assert.equal(displayName("src/a.py::callable:outer::callable:inner", "inner"), "outer::inner");
@@ -38,16 +54,16 @@ test("the file tree lists files before subdirectories, each in name order", () =
 });
 
 test("the deck graph keeps distinct calls between two callables and drops self calls", () => {
-  const graph = deckGraph(graphDocument(), "tekdek");
+  const graph = deckGraph(graphDocument());
   const keys = graph.calls.map(call => `${call.source}>${call.target}`);
   assert.equal(new Set(keys).size, keys.length);
   assert.ok(graph.calls.every(call => call.source !== call.target));
-  assert.ok(graph.files.includes("src/extra.rs"));
+  assert.ok("extra.rs" in must(graph.tree["src/"]));
   assert.equal(must(graph.functions.find(fn => fn.id.endsWith("callable:open"))).name, "Store::open");
 });
 
 test("a frozen flow gives its clusters in intent order with frozen colors and assigned members", () => {
-  const graph = deckGraph(graphDocument(), "tekdek");
+  const graph = deckGraph(graphDocument());
   const flow = deckFlow(artifact, graph, DIGEST);
   assert.equal(flow.name, "flow-generation");
   assert.equal(flow.steps.length, 25);
@@ -59,7 +75,7 @@ test("a frozen flow gives its clusters in intent order with frozen colors and as
 
 test("a step whose function left the graph is marked missing and leaves the members", () => {
   const gone = must(artifact.intent.steps[0], "first step").nodeKey;
-  const graph = deckGraph(graphDocument({ drop: [gone] }), "tekdek");
+  const graph = deckGraph(graphDocument({ drop: [gone] }));
   const flow = deckFlow(artifact, graph, "sha256:other");
   assert.equal(must(flow.steps[0], "first step").missing, true);
   assert.ok(!flow.clusters.some(cluster => cluster.members.includes(gone)));
@@ -67,16 +83,8 @@ test("a step whose function left the graph is marked missing and leaves the memb
 });
 
 test("a file that is not a frozen schema 3 flow is rejected", () => {
-  const graph = deckGraph(graphDocument(), "tekdek");
+  const graph = deckGraph(graphDocument());
   assert.throws(() => deckFlow({ ...artifact, schemaVersion: 2 }, graph, DIGEST), /schema 3/);
-});
-
-test("membership marks each function with the cluster that holds it", () => {
-  const graph = deckGraph(graphDocument(), "tekdek");
-  const marked = withMembership(graph, deckFlow(artifact, graph, DIGEST));
-  assert.equal(marked.functions.filter(fn => fn.cluster).length, 21);
-  assert.equal(must(marked.functions.find(fn => fn.id === "src/main.rs::callable:main")).cluster, "route-command");
-  assert.equal(graph.functions.filter(fn => fn.cluster).length, 0, "the source graph stays unmarked");
 });
 
 test("only frozen schema 3 flows show, and the picker opens the requested flow, else the first one", () => {
@@ -87,4 +95,27 @@ test("only frozen schema 3 flows show, and the picker opens the requested flow, 
   assert.equal(must(pickFlow(flows, "missing")).name, "a");
   assert.equal(pickFlow([], null), null);
   assert.deepEqual(frozenFlows(undefined), []);
+});
+
+test("the page opens the requested codebase, else the index default, else the first one", () => {
+  const artifacts = [{ file: "a.json", digest: "sha256:a" }, { file: "b.json", digest: "sha256:b" }];
+  const index = { defaultArtifact: "b.json", artifacts };
+  assert.equal(must(pickArtifact(index, "a.json")).file, "a.json");
+  assert.equal(must(pickArtifact(index, "missing.json")).file, "b.json");
+  assert.equal(must(pickArtifact(index, null)).file, "b.json");
+  assert.equal(must(pickArtifact({ defaultArtifact: "gone.json", artifacts }, null)).file, "a.json");
+  assert.equal(must(pickArtifact({ artifacts }, null)).file, "a.json");
+  assert.equal(pickArtifact({ artifacts: [] }, null), null);
+});
+
+test("the flow adapter carries the transition, the fact text, and the generation of each step", () => {
+  const graph = deckGraph(graphDocument());
+  const flow = deckFlow(artifact, graph, DIGEST);
+  assert.equal(flow.generation, artifact.generation.ordinal);
+  assert.equal(must(flow.steps[0]).transition, "flow_start");
+  const views = new Map(artifact.view.steps.map(view => [view.stepId, view.transition]));
+  for (const step of flow.steps) assert.equal(step.transition, views.get(step.id) ?? null);
+  const fact = must(artifact.facts.nodes.find(node => node.key === must(flow.steps[1]).node));
+  assert.equal(must(flow.steps[1]).signature, fact.signature ?? null);
+  assert.equal("behavior" in flow, false);
 });

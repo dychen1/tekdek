@@ -1,8 +1,9 @@
 /* Artifact loading. This module owns every fetch of the viewer: the artifact index, one graph file with its
-   SHA-256 digest check, and one frozen flow generation. Each failure is a LoadError with its cause.
+   SHA-256 digest check, one frozen flow generation, and the function source of one flow. Each failure is a
+   LoadError with its cause.
    # Sections
-   errors, fetch, index, graph, flow */
-import type { ArtifactEntry, ArtifactIndex, FlowArtifact, FlowEntry, GraphDocument } from "./models.ts";
+   errors, fetch, index, graph, flow, source */
+import type { ArtifactEntry, ArtifactIndex, FlowArtifact, FlowEntry, GraphDocument, SourceDocument, SourceView } from "./models.ts";
 
 // ============ errors ============
 
@@ -18,19 +19,27 @@ export class LoadError extends Error {
 
 const artifactUrl = (path: string) => "/artifacts/" + path.split("/").map(encodeURIComponent).join("/");
 
-async function fetchBytes(path: string): Promise<Response> {
+/** Fetches one URL. No answer or an HTTP error is a `fetch` failure. */
+async function fetchOk(url: string, what: string): Promise<Response> {
   let response: Response;
-  try { response = await fetch(artifactUrl(path), { cache: "no-store" }); }
-  catch { throw new LoadError("fetch", `The viewer server did not answer the request for ${path}.`); }
-  if (!response.ok) throw new LoadError("fetch", `Could not load ${path} (HTTP ${response.status}).`);
+  try { response = await fetch(url, { cache: "no-store" }); }
+  catch { throw new LoadError("fetch", `The viewer server did not answer the request for ${what}.`); }
+  if (!response.ok) throw new LoadError("fetch", `Could not load ${what} (HTTP ${response.status}).`);
   return response;
+}
+
+/** Fetches and parses one JSON answer. An answer that is not JSON is a failure with the caller's reason. */
+async function fetchJson<T>(url: string, what: string, reason: LoadReason): Promise<T> {
+  const response = await fetchOk(url, what);
+  try { return await response.json() as T; }
+  catch { throw new LoadError(reason, `The answer for ${what} is not valid JSON.`); }
 }
 
 // ============ index ============
 
 /** Loads the artifact index. An index with no codebase is an `empty` failure. */
 export async function loadIndex(): Promise<ArtifactIndex> {
-  const index = await (await fetchBytes("index.json")).json() as ArtifactIndex;
+  const index = await fetchJson<ArtifactIndex>(artifactUrl("index.json"), "index.json", "fetch");
   if (!index?.artifacts?.length) throw new LoadError("empty", "No codebase is indexed yet.");
   return index;
 }
@@ -58,12 +67,22 @@ export async function verifyGraph(bytes: ArrayBuffer, entry: Pick<ArtifactEntry,
 
 /** Loads and verifies the graph file of one codebase. */
 export async function loadGraph(entry: ArtifactEntry): Promise<GraphDocument> {
-  return verifyGraph(await (await fetchBytes(entry.file)).arrayBuffer(), entry);
+  return verifyGraph(await (await fetchOk(artifactUrl(entry.file), entry.file)).arrayBuffer(), entry);
 }
 
 // ============ flow ============
 
 /** Loads the frozen generation that an index entry points to. The adapter checks its shape. */
 export async function loadFlow(entry: FlowEntry): Promise<FlowArtifact> {
-  return await (await fetchBytes(`flows/${entry.file}`)).json() as FlowArtifact;
+  const path = `flows/${entry.file}`;
+  return fetchJson<FlowArtifact>(artifactUrl(path), path, "flow");
+}
+
+// ============ source ============
+
+/** Loads the source of every step function of one flow. The server cuts it from the project files. */
+export async function loadSource(artifact: string, flow: string): Promise<Map<string, SourceView>> {
+  const url = `/source?artifact=${encodeURIComponent(artifact)}&flow=${encodeURIComponent(flow)}`;
+  const document = await fetchJson<SourceDocument>(url, `the source of ${flow}`, "fetch");
+  return new Map((document.functions ?? []).map(view => [view.key, view]));
 }

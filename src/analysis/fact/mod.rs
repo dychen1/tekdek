@@ -108,7 +108,7 @@ pub enum EntityKind {
 }
 
 impl EntityKind {
-    /// Returns the kind name used in keys and artifacts.
+    /// Returns the kind name used in entity keys.
     #[must_use]
     pub fn tag(&self) -> &'static str {
         match self {
@@ -131,7 +131,6 @@ pub enum TypeKind {
     Class,
     Struct,
     Enum,
-    Interface,
     Trait,
 }
 

@@ -1,60 +1,64 @@
 /* Viewer page. This module owns page boot, the codebase and flow pickers, the loading and error states,
-   and the URL state (`?artifact=&flow=&step=`). It creates one deck for the selected codebase and flow,
-   and replaces it on a change.
+   the source load, and the URL state (`?artifact=&flow=&step=`). It creates one deck for the selected
+   codebase and flow, and replaces it on a change.
    # Sections
-   status, loading, pickers, URL state, boot */
-import type { ArtifactEntry, ArtifactIndex, DeckFlow, DeckGraph, FlowEntry } from "./data/models.ts";
-import { deckFlow, deckGraph, pickFlow, frozenFlows } from "./data/adapt.ts";
-import { loadFlow, loadGraph, loadIndex, LoadError, type LoadReason } from "./data/load.ts";
+   status, loading, pickers and badges, URL state, boot */
+import type { ArtifactEntry, ArtifactIndex, DeckFlow, DeckGraph, FlowEntry, SourceView } from "./data/models.ts";
+import { deckFlow, deckGraph, pickArtifact, pickFlow, frozenFlows } from "./data/adapt.ts";
+import { loadFlow, loadGraph, loadIndex, loadSource, LoadError, type LoadReason } from "./data/load.ts";
 import { createDeck, type DeckInstance } from "./deck/deck.ts";
-import { codebasePicker, esc, flowPicker, icon } from "./deck/panels.ts";
+import { codebasePicker, flowPicker, icon } from "./deck/markup.ts";
+import { esc } from "./layout/util.ts";
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 
 // ============ status ============
 
-/** Shows one loading line with a cursor in the map area, or hides it. */
+/** Shows one loading line with a cursor at the top of the code column, or hides it. The code viewer hides while it shows. */
 function showLoading(line: string | null) {
   const status = $("status");
   status.hidden = line === null;
   if (line === null) { status.replaceChildren(); return; }
+  showReader(false);
   status.innerHTML = `<div class="st-line"><span>${esc(line)}</span><i class="cursor" aria-hidden="true"></i></div>`;
 }
 
-/** Fills the panes and controls while no deck is loaded. The chrome stays visible and inert. */
+/** Shows or hides the code header and the code viewer. They hide while no deck is loaded. */
+function showReader(visible: boolean) {
+  for (const id of ["codeHead", "code"]) $(id).style.display = visible ? "" : "none";
+}
+
+/** Fills the code column and empties the flow band while no deck is loaded. The chrome stays visible and inert.
+ *  A deck part returns its own elements to the shell state when the deck is destroyed. */
 function showShell(badge: string, color: string, desc: string, meta: string) {
-  document.body.style.setProperty("--cc", color);
-  $("callout").innerHTML = `<span class="pbadge" style="--c:${color}"><span>${esc(badge)}</span></span>` +
-    `<p class="co-desc">${desc}</p>` + (meta ? `<p class="co-meta">${meta}</p>` : "");
-  $("dock").innerHTML = `<div class="dk-head"><span class="pbadge">Extracted stack</span></div><p class="dk-empty">Nothing is lifted.</p>`;
-  $("counter").textContent = "Step 0 / 0";
-  $("chip").classList.add("none");
-  $("chipText").textContent = "No flow";
-  $("cTitle").textContent = badge;
-  $("cNode").textContent = "";
-  $("cAnn").textContent = "";
-  $("ticks").replaceChildren();
+  document.documentElement.style.setProperty("--cc", color);
+  $("cdHead").innerHTML = `<span class="pbadge" style="--c:${esc(color)}"><span>${esc(badge)}</span></span>`;
+  $("cdStep").innerHTML = `<p class="cd-ann">${desc}</p>` + (meta ? `<p class="cd-empty">${meta}</p>` : "");
+  showReader(false);
+  renderFlowBand(null);
   setChrome(false);
 }
 
 /** Enables or disables every control that needs a deck. */
 function setChrome(enabled: boolean) {
-  for (const id of ["prevBtn", "nextBtn", "clearBtn", "annBtn", "fitBtn", "zoomOut", "zoomIn", "keyBtn"]) {
+  for (const id of ["prevBtn", "nextBtn", "clearBtn", "compactBtn", "zoomOut", "zoomIn", "keyBtn", "fullBtn"]) {
     $<HTMLButtonElement>(id).disabled = !enabled;
   }
 }
 
 /** The recovery step for each cause of a load failure. */
 const RECOVERY: Record<LoadReason, string> = {
-  fetch: "Run <code>make serve</code> from the repository root, then reload this page.",
-  digest: "Reindex the source with <code>cargo run -- &lt;path&gt;</code>, then reload this page.",
-  graph: "Reindex the source with <code>cargo run -- &lt;path&gt;</code> to write a current graph.",
-  flow: "Freeze the flow again with <code>flow import</code>, then reload this page.",
-  empty: "Index a codebase with <code>cargo run -- &lt;path&gt;</code>, then reload this page.",
+  fetch: "Start the viewer server with <code>tekdek serve</code>, then reload this page.",
+  digest: "Reindex the codebase with <code>tekdek index</code>, then reload this page.",
+  graph: "Reindex the codebase with <code>tekdek index</code> to write a current graph.",
+  flow: "Freeze the flow again with <code>tekdek flow import</code>, then reload this page.",
+  empty: "Index a codebase with <code>tekdek index</code>, then reload this page.",
 };
 
-/** Shows a load failure in the callout, with one recovery step. */
-function fail(error: unknown) {
+/** Shows a load failure in the code column, with one recovery step.
+ *  A failure of a load that a newer load replaced is dropped: the newer load owns the page. */
+function fail(error: unknown, mine = ticket) {
+  if (mine !== ticket) return;
   deck?.destroy(); deck = null;
   showLoading(null);
   const reason = error instanceof LoadError ? error.reason : "fetch";
@@ -71,51 +75,61 @@ let flowEntry: FlowEntry | null = null;
 let deck: DeckInstance | null = null;
 let ticket = 0;
 
-/** Loads one codebase, verifies its graph, and opens the requested flow. */
+/** Loads one codebase, verifies its graph, and opens the requested flow. A failure shows unless a newer load started. */
 async function openArtifact(file: string, flowName: string | null, step: number) {
   const mine = ++ticket;
-  const next = index!.artifacts.find(item => item.file === file) ?? null;
-  if (!next) throw new LoadError("fetch", `The artifact index has no codebase named ${file}.`);
-  deck?.destroy(); deck = null;
-  entry = next; graph = null;
-  renderRepoBadge();
-  const name = entry.label ?? entry.file;
-  showShell("loading", "var(--accent)", `Reading and checking ${esc(name)}.`, "");
-  showLoading(`loading ${name}`);
-  const document = await loadGraph(entry);
-  if (mine !== ticket) return;
-  graph = deckGraph(document, entry.label ?? entry.file.replace(/\.json$/, ""));
-  await openFlow(pickFlow(frozenFlows(entry.flows), flowName), step);
+  try {
+    const next = index!.artifacts.find(item => item.file === file) ?? null;
+    if (!next) throw new LoadError("fetch", `The artifact index has no codebase named ${file}.`);
+    deck?.destroy(); deck = null;
+    entry = next; graph = null;
+    renderRepoBadge();
+    const name = entry.label ?? entry.file;
+    showShell("loading", "var(--accent)", `Reading and checking ${esc(name)}.`, "");
+    showLoading(`loading ${name}`);
+    const document = await loadGraph(entry);
+    if (mine !== ticket) return;
+    graph = deckGraph(document);
+    await openFlow(pickFlow(frozenFlows(entry.flows), flowName), step);
+  } catch (error) {
+    fail(error, mine);
+  }
 }
 
-/** Loads one flow of the current codebase and replaces the deck. */
+/** Loads one flow of the current codebase and the source of its step functions, then replaces the deck.
+ *  A failed source load still plays the flow: every code viewer shows the unreadable note. */
 async function openFlow(next: FlowEntry | null, step: number) {
   const mine = ++ticket;
-  let flow: DeckFlow | null = null;
-  if (next) {
-    showLoading(`loading flow ${next.name}`);
-    const artifact = await loadFlow(next);
-    if (mine !== ticket) return;
-    try { flow = deckFlow(artifact, graph!, entry!.digest, next); }
-    catch (error) {
-      throw new LoadError("flow", `The flow file of ${next.name} is not a flow that this viewer reads. ${error instanceof Error ? error.message : ""}`.trim());
+  try {
+    let flow: DeckFlow | null = null;
+    let sources: ReadonlyMap<string, SourceView> = new Map();
+    if (next) {
+      showLoading(`loading flow ${next.name}`);
+      const artifact = await loadFlow(next);
+      if (mine !== ticket) return;
+      sources = await loadSource(entry!.file, next.name).catch(() => new Map<string, SourceView>());
+      if (mine !== ticket) return;
+      try { flow = deckFlow(artifact, graph!, entry!.digest, next); }
+      catch (error) {
+        throw new LoadError("flow", `The flow file of ${next.name} is not a flow that this viewer reads. ${error instanceof Error ? error.message : ""}`.trim());
+      }
     }
+    flowEntry = next;
+    deck?.destroy();
+    showLoading(null);
+    setChrome(true);
+    showReader(true);
+    deck = createDeck({ graph: graph!, flow, sources, onStep: n => writeUrl(n) });
+    renderFlowBand(flow);
+    (window as unknown as { __deck: unknown }).__deck = deck.inspect;
+    writeUrl(0);
+    if (step > 0) deck.go(step);
+  } catch (error) {
+    fail(error, mine);
   }
-  flowEntry = next;
-  deck?.destroy();
-  showLoading(null);
-  setChrome(true);
-  deck = createDeck({
-    graph: graph!, flow, flowCount: frozenFlows(entry!.flows).length,
-    onFlowPick: anchor => openPicker(anchor, "flow"),
-    onStep: n => writeUrl(n),
-  });
-  (window as unknown as { __deck: unknown }).__deck = deck.inspect;
-  writeUrl(0);
-  if (step > 0) deck.go(step);
 }
 
-// ============ pickers ============
+// ============ pickers and badges ============
 
 const pickPop = $("pickPop");
 let pickAnchor: HTMLElement | null = null;
@@ -153,17 +167,19 @@ pickPop.addEventListener("click", e => {
   closePicker(false);
   if (item.dataset.flow !== undefined) {
     const next = frozenFlows(entry?.flows).find(flow => flow.name === item.dataset.flow) ?? null;
-    if (next && next.name !== flowEntry?.name) openFlow(next, 0).catch(fail);
+    if (next && next.name !== flowEntry?.name) void openFlow(next, 0);
   } else if (item.dataset.artifact && item.dataset.artifact !== entry?.file) {
-    openArtifact(item.dataset.artifact, null, 0).catch(fail);
+    void openArtifact(item.dataset.artifact, null, 0);
   }
 });
+// No key in the picker reaches the deck keys, so the deck never changes under an open list.
 pickPop.addEventListener("keydown", e => {
+  e.stopPropagation();
   const items = [...pickPop.querySelectorAll<HTMLElement>(".pk-item")];
   const i = items.indexOf(document.activeElement as HTMLElement);
   const j = e.key === "ArrowDown" ? i + 1 : e.key === "ArrowUp" ? i - 1 : e.key === "Home" ? 0 : e.key === "End" ? items.length - 1 : null;
   if (j === null) return;
-  e.preventDefault(); e.stopPropagation();
+  e.preventDefault();
   items[Math.max(0, Math.min(items.length - 1, j))]?.focus();
 });
 document.addEventListener("pointerdown", e => {
@@ -171,20 +187,34 @@ document.addEventListener("pointerdown", e => {
 });
 // Escape closes an open picker before the deck sees it: the picker first, then the key, then the flow.
 addEventListener("keydown", e => {
-  if (!pickAnchor) return;
-  if (e.key === "Escape") { e.preventDefault(); e.stopImmediatePropagation(); closePicker(true); }
-  else if (["ArrowLeft", "ArrowRight"].includes(e.key) && pickPop.contains(document.activeElement)) e.stopImmediatePropagation();
+  if (pickAnchor && e.key === "Escape") { e.preventDefault(); e.stopImmediatePropagation(); closePicker(true); }
 }, { capture: true });
+
+/** A name badge: a button that opens a picker when `label` is set, else a plain label. `inner` is escaped markup. */
+function badgeHtml(id: string, cls: string, inner: string, label: string | null): string {
+  return label
+    ? `<button class="${cls}" id="${id}" type="button" aria-haspopup="dialog" aria-expanded="false" aria-label="${label}">${inner}${icon("chev")}</button>`
+    : `<span class="${cls}" id="${id}">${inner}</span>`;
+}
 
 /** The codebase badge: a picker when the index holds more than one codebase. */
 function renderRepoBadge() {
-  const head = $("sbHead");
   const name = esc(entry?.label ?? entry?.file ?? "codebase");
-  if ((index?.artifacts.length ?? 0) > 1) {
-    head.innerHTML = `<button class="sb-title" id="sbRepo" type="button" aria-haspopup="dialog" aria-expanded="false" aria-label="Codebase ${name}. Choose another codebase">${name}${icon("chev")}</button>`;
-    const button = $("sbRepo");
-    button.addEventListener("click", () => openPicker(button, "codebase"));
-  } else head.innerHTML = `<span class="sb-title" id="sbRepo">${name}</span>`;
+  const pick = (index?.artifacts.length ?? 0) > 1;
+  $("sbHead").innerHTML = badgeHtml("repoPick", "sb-title", name, pick ? `Codebase ${name}. Choose another codebase` : null);
+  if (pick) { const button = $("repoPick"); button.addEventListener("click", () => openPicker(button, "codebase")); }
+}
+
+/** The flow badge and its freshness in the top band, or an empty band without a flow.
+ *  The badge is a picker when the codebase has more than one flow. */
+function renderFlowBand(flow: DeckFlow | null) {
+  const name = esc(flow?.name ?? "");
+  const pick = !!flow && frozenFlows(entry?.flows).length > 1;
+  $("flowPick").outerHTML = flow ? badgeHtml("flowPick", "pbadge", `<span>${name}</span>`, pick ? `Flow ${name}. Choose another flow` : null) : '<span id="flowPick"></span>';
+  if (pick) { const button = $("flowPick"); button.addEventListener("click", () => openPicker(button, "flow")); }
+  $("fhMeta").innerHTML = flow
+    ? `${flow.stale ? '<b style="color:var(--warn)">stale</b>' : '<b class="fresh">fresh</b>'} · generation ${esc(flow.generation)}`
+    : "";
 }
 
 // ============ URL state ============
@@ -210,9 +240,7 @@ async function boot() {
   showLoading("loading the artifact index");
   index = await loadIndex();
   const want = readUrl();
-  const file = index.artifacts.some(item => item.file === want.artifact) ? want.artifact!
-    : index.artifacts.some(item => item.file === index!.defaultArtifact) ? index.defaultArtifact! : index.artifacts[0].file;
-  await openArtifact(file, want.flow, want.step);
+  await openArtifact(pickArtifact(index, want.artifact)!.file, want.flow, want.step);
 }
 
 boot().catch(fail);

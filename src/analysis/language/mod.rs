@@ -8,11 +8,13 @@
 //!
 //! # Modules
 //!
-//! `python` analyzes Python with Pyright.
+//! `python` analyzes Python with Pyright. `rust` analyzes Rust with
+//! rust-analyzer. `profile` names each language and its built-in settings.
 //!
 //! # Sections
 //!
 //! `Language contract` defines the adapter trait and the production order.
+//! `Document paths` checks the source path rule that both syntax adapters share.
 
 mod profile;
 #[cfg(feature = "python")]
@@ -20,15 +22,14 @@ pub mod python;
 #[cfg(feature = "rust")]
 pub mod rust;
 
+use std::path::Component;
+
 use crate::analysis::{
     fact::{AnalysisError, FactSet, SemanticFact, SyntaxFacts},
     source::{DocumentSnapshot, Sources},
 };
 
-pub use profile::{
-    CapabilityPolicy, Language, LanguageProfile, RequiredCapability, ServerCommand,
-    builtin_profiles,
-};
+pub use profile::{Language, LanguageProfile, ServerCommand, builtin_profiles};
 #[cfg(feature = "python")]
 pub use python::PythonAdapter;
 #[cfg(feature = "rust")]
@@ -96,4 +97,40 @@ pub trait LanguageAdapter {
 
         Ok(FactSet::new(self.language(), syntax, semantic))
     }
+}
+
+// -----------------------------------------------------------------------------
+// Document paths
+// -----------------------------------------------------------------------------
+
+/// Returns one strict relative UTF-8 document path.
+///
+/// # Errors
+///
+/// Returns an error if the path is absolute, has a part that is not a normal
+/// name, or is not valid UTF-8.
+fn document_path(document: &DocumentSnapshot) -> Result<&str, AnalysisError> {
+    if document.path.is_absolute() {
+        return Err(AnalysisError::new(format!(
+            "the document path must be relative: {}",
+            document.path.display()
+        )));
+    }
+    if document
+        .path
+        .components()
+        .any(|component| !matches!(component, Component::Normal(_)))
+    {
+        return Err(AnalysisError::new(format!(
+            "the document path must contain only normal components: {}",
+            document.path.display()
+        )));
+    }
+
+    document.path.to_str().ok_or_else(|| {
+        AnalysisError::new(format!(
+            "the document path is not valid UTF-8: {}",
+            document.path.display()
+        ))
+    })
 }

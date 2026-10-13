@@ -1,12 +1,11 @@
 //! Analysis pipeline.
 //!
-//! This module runs the analysis stages in order and writes the graph artifact.
+//! This module runs the analysis stages in order and returns the code graph.
 //!
 //! # Sections
 //!
 //! `Stages` runs the analysis.
 //! `Configuration` defines the required root and optional settings.
-//! `Result` names every output.
 //! `Errors` reports a failure from any stage.
 
 use std::{
@@ -22,37 +21,33 @@ use super::language::RustAdapter;
 use super::{
     fact::{AnalysisError, FactSet},
     graph::{Graph, build::build_graph},
-    language::{Language, LanguageProfile, builtin_profiles},
+    language::{Language, LanguageAdapter, LanguageProfile, builtin_profiles},
     preflight::{
         detect_languages, detect_required_languages, enabled_extensions, preflight_server_programs,
-        profile,
     },
     source::{self, DEFAULT_EXCLUDED_DIRECTORIES},
 };
-use crate::store::graph::GraphArtifact;
 
 // -----------------------------------------------------------------------------
 // Stages
 // -----------------------------------------------------------------------------
 
-/// Analyzes one codebase and returns its graph and detected languages.
+/// Analyzes one codebase and returns its graph.
 ///
 /// # Errors
 ///
 /// Returns an error if loading, fact production, or graph construction fails.
-pub fn run(config: &PipelineConfig) -> Result<PipelineResult, PipelineError> {
+pub fn run(config: &PipelineConfig) -> Result<Graph, PipelineError> {
     let documents = load_documents(config)?;
-    let languages = detect_required_languages(&documents, &config.profiles)?;
-    preflight_server_programs(&config.profiles, &languages)?;
+    let profiles = detect_required_languages(&documents, &config.profiles)?;
+    preflight_server_programs(&profiles)?;
 
-    let mut fact_sets = Vec::with_capacity(languages.len());
-    for language in &languages {
-        let profile = profile(&config.profiles, *language)?;
+    let mut fact_sets = Vec::with_capacity(profiles.len());
+    for profile in profiles {
         fact_sets.push(produce_facts(&config.root, profile, &documents)?);
     }
 
-    let graph = build_graph(fact_sets, &documents).map_err(PipelineError::Graph)?;
-    Ok(PipelineResult { graph, languages })
+    build_graph(fact_sets, &documents).map_err(PipelineError::Graph)
 }
 
 /// Returns the enabled languages that have source files under the root, in stable order.
@@ -64,102 +59,48 @@ pub fn run(config: &PipelineConfig) -> Result<PipelineResult, PipelineError> {
 /// Returns an error if the source files cannot be read.
 pub fn detect_project_languages(config: &PipelineConfig) -> Result<Vec<Language>, PipelineError> {
     let documents = load_documents(config)?;
-    Ok(detect_languages(&documents, &config.profiles))
+    Ok(detect_languages(&documents, &config.profiles)
+        .into_iter()
+        .map(|profile| profile.language)
+        .collect())
 }
 
 fn load_documents(config: &PipelineConfig) -> Result<Vec<source::DocumentSnapshot>, PipelineError> {
-    let excluded = config
-        .excluded_directories
-        .iter()
-        .map(String::as_str)
-        .collect::<Vec<_>>();
     let extensions = enabled_extensions(&config.profiles);
     Ok(source::load_documents(
         &config.root,
         &extensions,
-        &excluded,
+        DEFAULT_EXCLUDED_DIRECTORIES,
     )?)
 }
 
-/// Analyzes one codebase and writes its graph artifact.
+/// Runs the adapter of one profile.
 ///
-/// The function does not change the output if analysis fails.
-///
-/// # Errors
-///
-/// Returns an analysis error or an artifact write error.
-pub fn run_and_write(
-    config: &PipelineConfig,
-    output: &Path,
-) -> Result<PipelineResult, PipelineOutputError> {
-    let result = run(config).map_err(PipelineOutputError::Analysis)?;
-    GraphArtifact::new(&result.graph)
-        .write(output)
-        .map_err(|source| PipelineOutputError::Artifact {
-            path: output.to_path_buf(),
-            source,
-        })?;
-    Ok(result)
-}
-
+/// A profile exists only for a compiled adapter, so the last arm cannot run.
 fn produce_facts(
     root: &Path,
     profile: &LanguageProfile,
     documents: &[source::DocumentSnapshot],
 ) -> Result<FactSet, PipelineError> {
+    let root = root.to_path_buf();
     let result = match profile.language {
-        Language::Python => produce_python_facts(root, profile, documents),
-        Language::Rust => produce_rust_facts(root, profile, documents),
+        #[cfg(feature = "python")]
+        Language::Python => PythonAdapter::new(root, profile.clone()).produce_facts(documents),
+        #[cfg(feature = "rust")]
+        Language::Rust => RustAdapter::new(root, profile.clone()).produce_facts(documents),
+        #[allow(
+            unreachable_patterns,
+            reason = "a build with both language features compiles every adapter"
+        )]
+        language => Err(AnalysisError::new(format!(
+            "the {language} adapter is not available in this build"
+        ))),
     };
 
     result.map_err(|source| PipelineError::Language {
         language: profile.language,
         source,
     })
-}
-
-#[cfg(feature = "python")]
-fn produce_python_facts(
-    root: &Path,
-    profile: &LanguageProfile,
-    documents: &[source::DocumentSnapshot],
-) -> Result<FactSet, AnalysisError> {
-    use super::language::LanguageAdapter;
-    let mut adapter = PythonAdapter::new(root.to_path_buf(), profile.clone());
-    adapter.produce_facts(documents)
-}
-
-#[cfg(not(feature = "python"))]
-fn produce_python_facts(
-    _root: &Path,
-    _profile: &LanguageProfile,
-    _documents: &[source::DocumentSnapshot],
-) -> Result<FactSet, AnalysisError> {
-    Err(AnalysisError::new(
-        "the Python adapter is not available in this build",
-    ))
-}
-
-#[cfg(feature = "rust")]
-fn produce_rust_facts(
-    root: &Path,
-    profile: &LanguageProfile,
-    documents: &[source::DocumentSnapshot],
-) -> Result<FactSet, AnalysisError> {
-    use super::language::LanguageAdapter;
-    let mut adapter = RustAdapter::new(root.to_path_buf(), profile.clone());
-    adapter.produce_facts(documents)
-}
-
-#[cfg(not(feature = "rust"))]
-fn produce_rust_facts(
-    _root: &Path,
-    _profile: &LanguageProfile,
-    _documents: &[source::DocumentSnapshot],
-) -> Result<FactSet, AnalysisError> {
-    Err(AnalysisError::new(
-        "the Rust adapter is not available in this build",
-    ))
 }
 
 // -----------------------------------------------------------------------------
@@ -169,7 +110,6 @@ fn produce_rust_facts(
 pub struct PipelineConfig {
     pub root: PathBuf,
     pub profiles: Vec<LanguageProfile>,
-    pub excluded_directories: Vec<String>,
 }
 
 impl PipelineConfig {
@@ -178,21 +118,8 @@ impl PipelineConfig {
         Self {
             root,
             profiles: builtin_profiles(),
-            excluded_directories: DEFAULT_EXCLUDED_DIRECTORIES
-                .iter()
-                .map(|directory| (*directory).to_owned())
-                .collect(),
         }
     }
-}
-
-// -----------------------------------------------------------------------------
-// Result
-// -----------------------------------------------------------------------------
-
-pub struct PipelineResult {
-    pub graph: Graph,
-    pub languages: Vec<Language>,
 }
 
 // -----------------------------------------------------------------------------
@@ -212,34 +139,6 @@ pub enum PipelineError {
     },
     /// Graph construction cannot merge the language facts.
     Graph(AnalysisError),
-}
-
-#[derive(Debug)]
-pub enum PipelineOutputError {
-    /// Analysis failed before artifact writing.
-    Analysis(PipelineError),
-    /// The analyzed graph could not be written.
-    Artifact { path: PathBuf, source: io::Error },
-}
-
-impl fmt::Display for PipelineOutputError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Analysis(error) => error.fmt(formatter),
-            Self::Artifact { path, source } => {
-                write!(formatter, "cannot write {}: {source}", path.display())
-            }
-        }
-    }
-}
-
-impl Error for PipelineOutputError {
-    fn source(&self) -> Option<&(dyn Error + 'static)> {
-        match self {
-            Self::Analysis(error) => Some(error),
-            Self::Artifact { source, .. } => Some(source),
-        }
-    }
 }
 
 impl fmt::Display for PipelineError {
@@ -286,18 +185,15 @@ impl From<io::Error> for PipelineError {
 
 #[cfg(all(test, feature = "python", feature = "rust"))]
 mod tests {
-    use std::{
-        fs,
-        path::{Path, PathBuf},
-        process,
-        sync::atomic::{AtomicU64, Ordering},
-    };
+    use std::{fs, path::Path};
 
-    use super::{PipelineConfig, PipelineError, PipelineOutputError, run, run_and_write};
+    use tempfile::TempDir;
+
+    use super::{PipelineConfig, PipelineError, run};
     use crate::{
         analysis::{
             language::{Language, LanguageProfile},
-            lsp::session::tests::FakeServer,
+            lsp::fake_server::FakeServer,
         },
         store::graph::GraphArtifact,
     };
@@ -310,8 +206,8 @@ mod tests {
         let server = FakeServer::new();
         let config = pipeline_config(&repository, &server, "serve");
 
-        let result = run(&config).expect("both fake language servers should complete");
-        let artifact = GraphArtifact::new(&result.graph);
+        let graph = run(&config).expect("both fake language servers should complete");
+        let artifact = GraphArtifact::new(&graph);
         let artifact =
             serde_json::to_value(artifact).expect("the artifact should serialize to JSON");
 
@@ -336,34 +232,26 @@ mod tests {
     }
 
     #[test]
-    fn preserves_an_existing_artifact_when_one_language_server_fails() {
+    fn names_the_language_whose_server_fails() {
         let repository = TestRepository::new();
         repository.write("app.py", "def run():\n    pass\n");
         repository.write("src/lib.rs", "pub fn run() {}\n");
-        let output = repository.path().join("result.json");
-        let sentinel = b"existing artifact";
-        fs::write(&output, sentinel).expect("the existing artifact should be written");
         let server = FakeServer::new();
         let config = pipeline_config(&repository, &server, "protocol-error");
 
-        let Err(error) = run_and_write(&config, &output) else {
+        let Err(error) = run(&config) else {
             panic!("the Rust fake server should return an error");
         };
 
         assert!(
             matches!(
                 error,
-                PipelineOutputError::Analysis(PipelineError::Language {
+                PipelineError::Language {
                     language: Language::Rust,
                     ..
-                })
+                }
             ),
             "the error should identify the failed adapter"
-        );
-        assert_eq!(
-            fs::read(&output).expect("the existing artifact should remain readable"),
-            sentinel,
-            "a failed pipeline must preserve the requested artifact"
         );
     }
 
@@ -386,36 +274,25 @@ mod tests {
     }
 
     struct TestRepository {
-        directory: PathBuf,
+        directory: TempDir,
     }
 
     impl TestRepository {
         fn new() -> Self {
-            static NEXT_ID: AtomicU64 = AtomicU64::new(0);
-
-            let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
-            let directory =
-                std::env::temp_dir().join(format!("tekdek-pipeline-{}-{id}", process::id()));
-            fs::create_dir(&directory).expect("the test repository should be created");
+            let directory = tempfile::tempdir().expect("the test repository should be created");
             Self { directory }
         }
 
         fn path(&self) -> &Path {
-            &self.directory
+            self.directory.path()
         }
 
         fn write(&self, path: &str, content: &str) {
-            let path = self.directory.join(path);
+            let path = self.directory.path().join(path);
             if let Some(parent) = path.parent() {
                 fs::create_dir_all(parent).expect("the source directory should be created");
             }
             fs::write(path, content).expect("the source file should be written");
-        }
-    }
-
-    impl Drop for TestRepository {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.directory);
         }
     }
 }

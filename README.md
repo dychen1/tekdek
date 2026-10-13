@@ -132,16 +132,18 @@ The agent names 1 to 8 clusters for the phases of a flow and labels each step wi
 
 ## Lift Deck
 
-The viewer shows the codebase as one vertical file tree. When a flow starts, the tree opens the path to each function of the flow once. Then the tree does not move until you clear the flow. Each cluster lifts its functions onto a raised colored deck, with tethers to their places in the tree. The callout describes the current cluster, and the controls show the step title and annotation.
+The viewer has five parts. The explorer at left shows the files of the codebase. The current file's functions branch out of the explorer into a file box. The current cluster's functions sit on a pinned deck, and the current step's function is tethered to its slot in the file box. The code column at right shows the step title, its annotation, the transition from the step before, the callers and callees, and the whole function source. The bottom bar shows the cluster description and a strip of every step.
 
 | Key | Action |
 | --- | --- |
-| Left and Right | Previous or next step |
-| Esc | Close the key, then clear the flow |
-| F | Fit the map |
+| K or Right | Next step |
+| J or Left | Previous step |
+| F | Show the code full screen, or return |
+| C | Fold or name the functions that are not in the flow |
+| Esc | Close the key, then leave full screen, then clear the flow |
 | ? | Show or hide the key |
 
-The URL keeps the graph, the flow, and the step: `?artifact=<file>&flow=<name>&step=<n>`. `tekdek serve` binds to the loopback address, serves the viewer from the binary, and reads only the store files that its catalog lists: the graph files and the current generation of each flow.
+The URL keeps the graph, the flow, and the step: `?artifact=<file>&flow=<name>&step=<n>`. `tekdek serve` binds to the loopback address, serves the viewer from the binary, and reads only the store files that its catalog lists. It also reads the source files of a flow's step functions, inside the project folder that holds the store. A function whose source changed after the last index shows a note in place of its source.
 
 ## Language Analysis
 
@@ -240,7 +242,9 @@ cachePriming.enable = false
 |   |   `-- schema/            # Agent output and flow artifact JSON Schemas
 |   |-- catalog.rs             # Catalog of graphs and flows for the viewer
 |   |-- query.rs               # Graph search and node neighbors for agents
-|   `-- serve.rs               # Viewer server with the embedded viewer
+|   |-- serve.rs               # Viewer server with the embedded viewer
+|   |-- serve/files.rs         # Store and project file reads that follow no link
+|   `-- source_view.rs         # Function source cuts for the code column of the viewer
 |-- tools/build-viewer.ts      # esbuild script that build.rs runs
 |-- viewer/
 |   |-- index.html             # Lift Deck page

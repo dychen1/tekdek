@@ -1,0 +1,185 @@
+//! Fake language server.
+//!
+//! The lsp tests compile this standalone program with `rustc` and start it as
+//! a language server. The first argument selects the mode, for example
+//! `serve`, `reject`, or `status-quiescent`. On `shutdown`, the program writes
+//! a `shutdown-requested` marker next to its executable.
+
+use std::{
+    env, fs,
+    io::{self, BufRead, Write},
+    process,
+};
+
+fn main() -> io::Result<()> {
+    let mode = env::args().nth(1).unwrap_or_default();
+    if mode == "fail" {
+        eprintln!("invalid project configuration");
+        process::exit(1);
+    }
+
+    let stdin = io::stdin();
+    let stdout = io::stdout();
+    let mut input = stdin.lock();
+    let mut output = stdout.lock();
+
+    while let Some(message) = read_message(&mut input)? {
+        let request_id = request_id(&message);
+
+        if message.contains(r#""method":"initialize""#) {
+            let request_id = required_id(request_id)?;
+            if mode == "reject" {
+                eprintln!("rejected project configuration");
+                write_error(&mut output, request_id, "invalid initialization")?;
+                continue;
+            }
+            if mode == "undecodable-initialize" {
+                eprintln!("broken capability report");
+                write_result(&mut output, request_id, r#"{"capabilities":5}"#)?;
+                continue;
+            }
+            if !message.contains(r#""initializationOptions":{"analysis":{"mode":"test"}}"#) {
+                eprintln!("initialization options were not forwarded");
+                process::exit(1);
+            }
+            write_result(
+                &mut output,
+                request_id,
+                r#"{"capabilities":{"documentSymbolProvider":true,"callHierarchyProvider":true,"referencesProvider":true,"typeDefinitionProvider":true}}"#,
+            )?;
+        } else if message.contains(r#""method":"initialized""#) {
+            // A well-behaved server reports readiness when the client asks.
+            // The status modes replace that report to test the waiting client.
+            if mode == "status-quiescent" {
+                write_notification(
+                    &mut output,
+                    "experimental/serverStatus",
+                    r#"{"health":"ok","quiescent":false}"#,
+                )?;
+                write_notification(
+                    &mut output,
+                    "experimental/serverStatus",
+                    r#"{"health":"ok","quiescent":true}"#,
+                )?;
+            } else if mode == "status-error" {
+                write_notification(
+                    &mut output,
+                    "experimental/serverStatus",
+                    r#"{"health":"error","quiescent":false,"message":"workspace failed to load"}"#,
+                )?;
+            } else if mode != "status-silent" {
+                write_notification(
+                    &mut output,
+                    "experimental/serverStatus",
+                    r#"{"health":"ok","quiescent":true}"#,
+                )?;
+            }
+        } else if message.contains(r#""method":"textDocument/documentSymbol""#) {
+            let request_id = required_id(request_id)?;
+            if mode == "protocol-error" || mode == "capture-and-shutdown-error" {
+                write_error(&mut output, request_id, "document symbol capture failed")?;
+                continue;
+            }
+            if mode == "semantic-reject-stderr" {
+                eprintln!("semantic request diagnostic");
+                write_error(&mut output, request_id, "document symbol capture failed")?;
+                continue;
+            }
+            write_result(
+                &mut output,
+                request_id,
+                r#"[{"name":"run","kind":12,"range":{"start":{"line":0,"character":0},"end":{"line":1,"character":8}},"selectionRange":{"start":{"line":0,"character":4},"end":{"line":0,"character":7}}}]"#,
+            )?;
+        } else if message.contains(r#""method":"textDocument/prepareCallHierarchy""#)
+            || message.contains(r#""method":"textDocument/references""#)
+        {
+            write_result(&mut output, required_id(request_id)?, "[]")?;
+        } else if message.contains(r#""method":"textDocument/typeDefinition""#) {
+            write_result(&mut output, required_id(request_id)?, "null")?;
+        } else if message.contains(r#""method":"shutdown""#) {
+            let executable = env::current_exe()?;
+            let directory = executable
+                .parent()
+                .ok_or_else(|| io::Error::other("the fake server executable has no parent"))?;
+            fs::write(directory.join("shutdown-requested"), "requested")?;
+            if mode == "shutdown-error" || mode == "capture-and-shutdown-error" {
+                write_error(&mut output, required_id(request_id)?, "shutdown failed")?;
+                continue;
+            }
+            write_result(&mut output, required_id(request_id)?, "null")?;
+        } else if message.contains(r#""method":"exit""#) {
+            break;
+        }
+    }
+
+    Ok(())
+}
+
+fn read_message(reader: &mut impl BufRead) -> io::Result<Option<String>> {
+    let mut content_length = None;
+    loop {
+        let mut line = String::new();
+        if reader.read_line(&mut line)? == 0 {
+            return Ok(None);
+        }
+        if line == "\r\n" || line == "\n" {
+            break;
+        }
+        if let Some((name, value)) = line.split_once(':')
+            && name.eq_ignore_ascii_case("content-length")
+        {
+            content_length = Some(
+                value
+                    .trim()
+                    .parse::<usize>()
+                    .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?,
+            );
+        }
+    }
+
+    let length = content_length
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "missing Content-Length"))?;
+    let mut body = vec![0; length];
+    reader.read_exact(&mut body)?;
+    String::from_utf8(body)
+        .map(Some)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
+}
+
+fn request_id(message: &str) -> Option<&str> {
+    let value = message.split_once(r#""id":"#)?.1.trim_start();
+    let length = value.bytes().take_while(u8::is_ascii_digit).count();
+    (length > 0).then_some(&value[..length])
+}
+
+fn required_id(request_id: Option<&str>) -> io::Result<&str> {
+    request_id.ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "missing request id"))
+}
+
+fn write_result(writer: &mut impl Write, request_id: &str, result: &str) -> io::Result<()> {
+    write_message(
+        writer,
+        format!(r#"{{"jsonrpc":"2.0","id":{request_id},"result":{result}}}"#),
+    )
+}
+
+fn write_notification(writer: &mut impl Write, method: &str, params: &str) -> io::Result<()> {
+    write_message(
+        writer,
+        format!(r#"{{"jsonrpc":"2.0","method":{method:?},"params":{params}}}"#),
+    )
+}
+
+fn write_error(writer: &mut impl Write, request_id: &str, message: &str) -> io::Result<()> {
+    write_message(
+        writer,
+        format!(
+            r#"{{"jsonrpc":"2.0","id":{request_id},"error":{{"code":-32002,"message":{message:?}}}}}"#
+        ),
+    )
+}
+
+fn write_message(writer: &mut impl Write, body: String) -> io::Result<()> {
+    write!(writer, "Content-Length: {}\r\n\r\n{body}", body.len())?;
+    writer.flush()
+}

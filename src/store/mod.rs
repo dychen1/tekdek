@@ -1,13 +1,14 @@
 //! Artifact store.
 //!
-//! This module owns the store folder on disk: its location, its lock, its atomic
-//! writes, its link checks, and the content digest of stored bytes. The `graph`
-//! submodule owns the graph artifact. The flow modules write through these
-//! helpers.
+//! This module owns the store folder on disk: its location, its lock, its
+//! reads, its atomic writes, its link checks, and the content digest of stored
+//! bytes. The `graph` submodule owns the graph artifact. The flow modules read
+//! and write through these helpers.
 //!
 //! # Sections
 //!
 //! `Project store` finds and creates the `.tekdek` folder of a project.
+//! `Reads` opens and reads one regular file without following a link.
 //! `Writes` replaces files atomically.
 //! `Locks and links` guards one store operation.
 //! `Digests` names stored bytes.
@@ -16,11 +17,11 @@ pub mod graph;
 
 use std::{
     fmt::Write as _,
-    fs, io,
+    fs::{self, File, Metadata},
+    io::{self, Read},
     path::{Path, PathBuf},
 };
 
-use serde::Serialize;
 use sha2::{Digest, Sha256};
 
 // -----------------------------------------------------------------------------
@@ -86,26 +87,117 @@ pub fn create_project_store(store: &Path) -> io::Result<()> {
 }
 
 // -----------------------------------------------------------------------------
+// Reads
+// -----------------------------------------------------------------------------
+
+/// Why `open_regular` cannot open a file.
+pub(crate) enum OpenFailure {
+    Link,
+    Missing(io::Error),
+    NotFile,
+    Other(io::Error),
+}
+
+/// Opens one regular file at `base` joined with `parts`.
+///
+/// No component of the path, `base` included, can be a symbolic link. The open
+/// uses `O_NOFOLLOW` and `O_NONBLOCK`: a link that appears after the walk fails
+/// with `ELOOP`, and a pipe does not block the open.
+pub(crate) fn open_regular(base: &Path, parts: &[&str]) -> Result<(File, Metadata), OpenFailure> {
+    let check = |path: &Path| match fs::symlink_metadata(path) {
+        // Refuse a symbolic link at any component.
+        Ok(metadata) if metadata.file_type().is_symlink() => Err(OpenFailure::Link),
+        // Keep walking when the component exists.
+        Ok(_) => Ok(()),
+        // Report a component that does not exist.
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Err(OpenFailure::Missing(error)),
+        // Report any other failure.
+        Err(error) => Err(OpenFailure::Other(error)),
+    };
+    let mut path = base.to_path_buf();
+    check(&path)?;
+    for part in parts {
+        path.push(part);
+        check(&path)?;
+    }
+    let mut options = fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+    }
+    let file = options.open(&path).map_err(|error| {
+        #[cfg(unix)]
+        if error.raw_os_error() == Some(libc::ELOOP) {
+            return OpenFailure::Link;
+        }
+        OpenFailure::Other(error)
+    })?;
+    let metadata = file.metadata().map_err(OpenFailure::Other)?;
+    if !metadata.is_file() {
+        return Err(OpenFailure::NotFile);
+    }
+    Ok((file, metadata))
+}
+
+/// Reads one regular store file. The error names the path.
+///
+/// A path that is not a regular file, such as a folder or a pipe, counts as a
+/// missing file: its error kind is `NotFound`. A symbolic link is
+/// `InvalidInput`. A pipe never blocks the read.
+pub(crate) fn read_bytes(path: &Path) -> io::Result<Vec<u8>> {
+    let cannot = |kind: io::ErrorKind, reason: &dyn std::fmt::Display| {
+        io::Error::new(kind, format!("cannot read {}: {reason}", path.display()))
+    };
+    let (mut file, _) = open_regular(path, &[]).map_err(|failure| match failure {
+        // Refuse a link with the message of the link check.
+        OpenFailure::Link => io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("the store path is a symbolic link: {}", path.display()),
+        ),
+        // Report a folder or a pipe as a missing file.
+        OpenFailure::NotFile => cannot(io::ErrorKind::NotFound, &"the path is not a regular file"),
+        // Keep the kind and the text of any other failure.
+        OpenFailure::Missing(error) | OpenFailure::Other(error) => cannot(error.kind(), &error),
+    })?;
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes)
+        .map_err(|error| cannot(error.kind(), &error))?;
+    Ok(bytes)
+}
+
+// -----------------------------------------------------------------------------
 // Writes
 // -----------------------------------------------------------------------------
 
-/// Writes compact JSON followed by one newline, atomically.
-pub(crate) fn write_json(path: &Path, value: &impl Serialize) -> io::Result<()> {
-    let mut document = serde_json::to_vec(value).map_err(io::Error::other)?;
-    document.push(b'\n');
-    write_bytes(path, &document)
-}
-
-/// Replaces one file atomically through a synced temporary file in the same directory.
+/// Replaces one store file atomically. The file and its folder must not be symbolic links.
 pub(crate) fn write_bytes(path: &Path, document: &[u8]) -> io::Result<()> {
     if let Some(directory) = path
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
     {
         reject_symlink(directory)?;
-        fs::create_dir_all(directory)?;
     }
     reject_symlink(path)?;
+    atomic_write(path, document)
+}
+
+/// Replaces one file atomically through a synced temporary file in the same folder.
+///
+/// This write takes no store lock and checks no link. It creates a missing folder.
+///
+/// # Errors
+///
+/// Returns an error if the folder, the temporary file, or the rename fails.
+pub fn atomic_write(path: &Path, document: &[u8]) -> io::Result<()> {
+    if let Some(directory) = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
+        fs::create_dir_all(directory)?;
+    }
     let temporary = path.with_extension(format!("{}.tmp", temporary_suffix()));
     let mut file = fs::OpenOptions::new()
         .write(true)
