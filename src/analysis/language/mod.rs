@@ -27,6 +27,7 @@ use std::path::Component;
 use crate::analysis::{
     fact::{AnalysisError, FactSet, ImportSite, SemanticFact, SyntaxFacts},
     source::{DocumentSnapshot, Sources},
+    timing,
 };
 
 pub use profile::{Language, LanguageProfile, ServerCommand, builtin_profiles};
@@ -93,8 +94,10 @@ pub trait LanguageAdapter {
     ///
     /// Returns an error when the adapter cannot complete a step.
     fn produce_facts(&mut self, documents: &[DocumentSnapshot]) -> Result<FactSet, AnalysisError> {
+        let started = timing::start();
         let sources = self.select_sources(documents)?;
         let syntax = self.produce_syntax_facts(&sources)?;
+        timing::record_stage(started, || format!("{} syntax facts", self.language()));
         let semantic = self.produce_semantic_facts(&sources, &syntax.import_sites)?;
 
         Ok(FactSet::new(self.language(), syntax, semantic))

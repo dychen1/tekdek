@@ -26,6 +26,7 @@ use super::{
         detect_languages, detect_required_languages, enabled_extensions, preflight_server_programs,
     },
     source::{self, DEFAULT_EXCLUDED_DIRECTORIES},
+    timing,
 };
 
 // -----------------------------------------------------------------------------
@@ -40,23 +41,29 @@ pub struct Indexed {
 
 /// Analyzes one codebase and returns its graph.
 ///
-/// The source hash comes from the same document read as the graph.
+/// The source hash comes from the same document read as the graph. With
+/// `TEKDEK_TIMINGS` set, a successful run prints its timings to standard error.
 ///
 /// # Errors
 ///
 /// Returns an error if loading, fact production, or graph construction fails.
 pub fn run(config: &PipelineConfig) -> Result<Indexed, PipelineError> {
+    let started = timing::start();
     let documents = load_documents(config)?;
     let source_hash = source::sources_hash(&documents).to_string();
     let profiles = detect_required_languages(&documents, &config.profiles)?;
     preflight_server_programs(&profiles)?;
+    timing::record_stage(started, || "load".to_owned());
 
     let mut fact_sets = Vec::with_capacity(profiles.len());
     for profile in profiles {
         fact_sets.push(produce_facts(&config.root, profile, &documents)?);
     }
 
+    let graph_started = timing::start();
     let graph = build_graph(fact_sets, &documents).map_err(PipelineError::Graph)?;
+    timing::record_stage(graph_started, || "graph build".to_owned());
+    timing::report(started);
     Ok(Indexed { graph, source_hash })
 }
 

@@ -27,6 +27,7 @@ use crate::analysis::{
 };
 
 use super::{FallbackPolicy, LspClient, LspError, capture, file_uri, normalize};
+use crate::analysis::timing;
 
 pub struct SessionConfig<'a> {
     pub root: &'a Path,
@@ -84,6 +85,7 @@ pub fn produce_semantic_facts(
         .and_then(|name| name.to_str())
         .unwrap_or("workspace")
         .to_owned();
+    let started = timing::start();
     let mut client = LspClient::start(&config.server.program, &config.server.arguments)?;
     let result = client.initialize(
         initialize_parameters(
@@ -96,7 +98,12 @@ pub fn produce_semantic_facts(
     )?;
     let captured = validate_capabilities(&result.capabilities).and_then(|()| {
         await_readiness(&mut client, config)?;
-        capture::capture_document_semantics(&mut client, config, &root, sources, import_sites)
+        timing::record_stage(started, || format!("{} server start", config.language));
+        let started = timing::start();
+        let captured =
+            capture::capture_document_semantics(&mut client, config, &root, sources, import_sites);
+        timing::record_stage(started, || format!("{} capture", config.language));
+        captured
     });
     let shutdown = client.shutdown();
 

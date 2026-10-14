@@ -32,7 +32,7 @@ use serde_json::{Value, json};
 use url::Url;
 
 use super::LspError;
-use crate::analysis::program::find_program;
+use crate::analysis::{program::find_program, timing};
 
 // -----------------------------------------------------------------------------
 // Client
@@ -159,7 +159,10 @@ impl LspClient {
                 R::METHOD
             ))
         })?;
-        self.request_value(R::METHOD, &parameters, timeout)
+        let started = timing::start();
+        let result = self.request_value(R::METHOD, &parameters, timeout);
+        timing::record_request(started, R::METHOD);
+        result
             .and_then(|result| {
                 serde_json::from_value(result).map_err(|error| {
                     LspError::new(format!("cannot decode the {} result: {error}", R::METHOD))
