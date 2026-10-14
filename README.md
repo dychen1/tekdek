@@ -143,7 +143,7 @@ The viewer has five parts. The explorer at left shows the files of the codebase.
 | Esc | Close the key, then leave full screen, then clear the flow |
 | ? | Show or hide the key |
 
-The URL keeps the graph, the flow, and the step: `?artifact=<file>&flow=<name>&step=<n>`. `tekdek serve` binds to the loopback address, serves the viewer from the binary, and reads only the store files that its catalog lists. It also reads the source files of a flow's step functions, inside the project folder that holds the store. A function whose source changed after the last index shows a note in place of its source.
+The URL keeps the graph, the flow, and the step: `?artifact=<file>&flow=<name>&step=<n>`. `tekdek serve` binds to the loopback address, serves the viewer from the binary, and reads only the store files that its catalog lists. It also reads the source files of a flow's step functions, inside the project folder that holds the store. A function whose source changed after the last index shows a note in place of its source. Before it serves a `.tekdek` store, `tekdek serve` reindexes the project graph if the source changed after the last index, the same as `tekdek index` with no options. `--no-index` skips that step.
 
 ## Language Analysis
 
@@ -171,7 +171,7 @@ tekdek flow import <name> --graph <file> --input <path or -> [--check]
 tekdek flow verify <name>
 tekdek flow agent-contract
 
-tekdek serve [--store <directory>] [--port <n>] [--flow <name>] [--open]
+tekdek serve [--store <directory>] [--port <n>] [--flow <name>] [--open] [--no-index]
 tekdek doctor [<root>] [--config <path>] [--json]
 tekdek help
 tekdek version

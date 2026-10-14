@@ -15,6 +15,7 @@
 
 use std::{
     collections::BTreeMap,
+    ffi::OsStr,
     fs, io,
     path::{Path, PathBuf},
 };
@@ -23,11 +24,12 @@ use tekdek::{
     analysis::{
         self, PipelineConfig,
         config::{ConfigError, apply_cli_overrides, configured_profiles},
+        graph::Graph,
         language::Language,
     },
     store::{
         PROJECT_STORE, atomic_write, create_project_store, find_project_store,
-        graph::{GraphArtifact, check_graph_name},
+        graph::{GraphArtifact, check_graph_name, read_graph},
     },
 };
 
@@ -58,7 +60,7 @@ pub(super) fn run(raw: impl Iterator<Item = String>) -> Result<(), String> {
     }
     let config =
         pipeline_config(&arguments, &destination.root).map_err(|error| error.to_string())?;
-    let graph = analysis::run(&config).map_err(|error| error.to_string())?;
+    let indexed = analysis::run(&config).map_err(|error| error.to_string())?;
     // Create a new store only after the analysis succeeds, so a failed first index leaves no store.
     if destination.create_store
         && let Some((store, _)) = &destination.indexed
@@ -67,16 +69,86 @@ pub(super) fn run(raw: impl Iterator<Item = String>) -> Result<(), String> {
             .map_err(|error| format!("cannot create the store {}: {error}", store.display()))?;
         println!("created the store {}", store.display());
     }
-    write_graph(&destination, &GraphArtifact::new(&graph))
+    let artifact = GraphArtifact::new(&indexed.graph).with_source_hash(indexed.source_hash);
+    write_graph(&destination, &artifact)
         .map_err(|error| format!("cannot write {}: {error}", destination.output.display()))?;
 
-    println!(
+    println!("{}", summary(&indexed.graph, &destination.output));
+    Ok(())
+}
+
+/// Returns the result line of one index run.
+fn summary(graph: &Graph, output: &Path) -> String {
+    format!(
         "{} nodes, {} edges -> {}",
         graph.nodes.len(),
         graph.edges.len(),
-        destination.output.display()
+        output.display()
+    )
+}
+
+// -----------------------------------------------------------------------------
+// Project refresh
+// -----------------------------------------------------------------------------
+
+/// Reindexes the project graph when the project's source files changed after its last index.
+///
+/// Only a `.tekdek` store and the graph named after its project folder qualify. The reindex
+/// works as `tekdek index` with no options. A graph from an older version has no source hash,
+/// so it counts as out of date. Returns the result line, or `None` when nothing changed or the
+/// store has no project graph.
+///
+/// # Errors
+///
+/// Returns a message if the graph or the source files cannot be read, or if the analysis fails.
+pub(super) fn refresh_project_graph(store: &Path) -> Result<Option<String>, String> {
+    let Some((project, file)) = project_graph(store)? else {
+        return Ok(None);
+    };
+    let (graph, _) = read_graph(store, &file).map_err(|error| error.to_string())?;
+    let mut config = PipelineConfig::new(project.clone());
+    config.profiles = configured_profiles(None).map_err(|error| error.to_string())?;
+    let current = analysis::source_hash(&config).map_err(|error| error.to_string())?;
+    if graph.source_hash.as_deref() == Some(current.as_str()) {
+        return Ok(None);
+    }
+
+    eprintln!(
+        "the source changed after the last index: reindexing {}",
+        project.display()
     );
-    Ok(())
+    let indexed = analysis::run(&config).map_err(|error| error.to_string())?;
+    let output = store.join(&file);
+    GraphArtifact::new(&indexed.graph)
+        .with_source_hash(indexed.source_hash)
+        .write(&output)
+        .map_err(|error| format!("cannot write {}: {error}", output.display()))?;
+    Ok(Some(summary(&indexed.graph, &output)))
+}
+
+/// Returns the project folder and the project graph file of a `.tekdek` store, if the file exists.
+///
+/// A project folder whose name is not a valid graph name has no project graph.
+///
+/// # Errors
+///
+/// Returns a message if the store path cannot be resolved.
+fn project_graph(store: &Path) -> Result<Option<(PathBuf, String)>, String> {
+    if store.file_name() != Some(OsStr::new(PROJECT_STORE)) {
+        return Ok(None);
+    }
+    let store = fs::canonicalize(store)
+        .map_err(|error| format!("cannot resolve {}: {error}", store.display()))?;
+    let Some(project) = store.parent() else {
+        return Ok(None);
+    };
+    let Ok(file) = folder_name(project).and_then(|name| artifact_file(&name)) else {
+        return Ok(None);
+    };
+    Ok(store
+        .join(&file)
+        .is_file()
+        .then(|| (project.to_path_buf(), file)))
 }
 
 /// Writes the graph file: under the store lock into a store, or as one plain file for `--output`.
@@ -358,7 +430,10 @@ mod tests {
 
     #[cfg(feature = "rust")]
     use super::pipeline_config;
-    use super::{Arguments, Destination, artifact_destination, artifact_file, run, write_graph};
+    use super::{
+        Arguments, Destination, artifact_destination, artifact_file, configured_profiles,
+        folder_name, refresh_project_graph, run, write_graph,
+    };
 
     fn parse(arguments: &[&str]) -> Result<Arguments, String> {
         Arguments::parse(arguments.iter().map(|value| (*value).to_owned()))
@@ -705,6 +780,67 @@ mod tests {
             .map(|entry| entry.expect("entry").file_name())
             .collect();
         assert_eq!(names, ["app.json"]);
+    }
+
+    #[test]
+    fn refreshes_only_the_project_graph_of_a_project_store() {
+        let project = tempfile::tempdir().expect("project");
+        let root = std::fs::canonicalize(project.path())
+            .expect("root")
+            .join("app");
+        std::fs::create_dir(&root).expect("app");
+        std::fs::write(root.join("lib.rs"), "pub fn run() {}\n").expect("source");
+
+        // A store that is not named .tekdek is never reindexed.
+        let other = root.join("snapshot");
+        std::fs::create_dir(&other).expect("other store");
+        assert_eq!(refresh_project_graph(&other), Ok(None));
+
+        // A project store without the graph named after the project has nothing to refresh.
+        let store = root.join(".tekdek");
+        std::fs::create_dir(&store).expect("store");
+        assert_eq!(refresh_project_graph(&store), Ok(None));
+
+        // A project graph whose source hash matches the source is current.
+        let mut config = tekdek::analysis::PipelineConfig::new(root.clone());
+        config.profiles = configured_profiles(None).expect("profiles");
+        let hash = tekdek::analysis::source_hash(&config).expect("hash");
+        let file = artifact_file(&folder_name(&root).expect("name")).expect("file");
+        let empty = Graph {
+            nodes: Vec::new(),
+            edges: Vec::new(),
+        };
+        GraphArtifact::new(&empty)
+            .with_source_hash(hash)
+            .write(&store.join(&file))
+            .expect("graph");
+        assert_eq!(refresh_project_graph(&store), Ok(None));
+    }
+
+    #[test]
+    fn reports_a_source_that_the_refresh_cannot_read() {
+        let project = tempfile::tempdir().expect("project");
+        let root = std::fs::canonicalize(project.path())
+            .expect("root")
+            .join("app");
+        std::fs::create_dir(&root).expect("app");
+        std::fs::write(root.join("lib.rs"), b"pub fn \xff() {}\n").expect("source");
+        let store = root.join(".tekdek");
+        let file = artifact_file(&folder_name(&root).expect("name")).expect("file");
+        std::fs::create_dir(&store).expect("store");
+        let empty = Graph {
+            nodes: Vec::new(),
+            edges: Vec::new(),
+        };
+        GraphArtifact::new(&empty)
+            .write(&store.join(&file))
+            .expect("graph");
+
+        let error = refresh_project_graph(&store).expect_err("unreadable source");
+        assert!(error.contains("lib.rs"), "{error}");
+        // The graph stays as it was.
+        let (graph, _) = tekdek::store::graph::read_graph(&store, &file).expect("graph");
+        assert_eq!(graph.source_hash, None);
     }
 
     #[test]

@@ -31,5 +31,7 @@ pub mod program;
 pub mod source;
 
 #[cfg(any(feature = "python", feature = "rust"))]
-pub use pipeline::{PipelineConfig, PipelineError, detect_project_languages, run};
+pub use pipeline::{
+    Indexed, PipelineConfig, PipelineError, detect_project_languages, run, source_hash,
+};
 pub use program::{find_program, find_sibling_program};

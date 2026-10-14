@@ -95,7 +95,7 @@ pub fn run(arguments: Vec<String>, input: &mut impl Read) -> ExitCode {
 // -----------------------------------------------------------------------------
 
 /// The options that take no value. Each command removes the flags it accepts.
-const FLAGS: [&str; 3] = ["--json", "--check", "--open"];
+const FLAGS: [&str; 4] = ["--json", "--check", "--open", "--no-index"];
 
 /// The operands, the single options, and the repeated options of one command line.
 type SplitArguments = (Vec<String>, BTreeMap<String, String>, Vec<(String, String)>);

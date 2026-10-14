@@ -8,7 +8,7 @@
 //!
 //! `Documents` defines one source snapshot and one selected view.
 //! `Source Coordinates` defines byte ranges and their source paths.
-//! `Content Hashes` identifies the text of one source range.
+//! `Content Hashes` identifies the text of one source range or of all documents.
 //! `Loading` reads matching documents from a codebase root.
 
 use std::{ffi::OsStr, fmt, fs, io, path::Path, path::PathBuf};
@@ -100,13 +100,35 @@ impl ContentHash {
     /// Hashes one text slice.
     #[must_use]
     pub fn of(text: &str) -> Self {
-        let mut hash = OFFSET_BASIS;
-        for byte in text.as_bytes() {
-            hash ^= u64::from(*byte);
-            hash = hash.wrapping_mul(PRIME);
-        }
-        Self(hash)
+        Self(fold(OFFSET_BASIS, text.as_bytes()))
     }
+}
+
+/// Hashes the path and text of every document, in path order.
+///
+/// A changed, added, removed, or renamed document changes the hash.
+#[must_use]
+pub fn sources_hash(documents: &[DocumentSnapshot]) -> ContentHash {
+    let mut ordered = documents.iter().collect::<Vec<_>>();
+    ordered.sort_by(|left, right| left.path.cmp(&right.path));
+    let mut hash = OFFSET_BASIS;
+    for document in ordered {
+        let path = document.path.to_string_lossy();
+        for part in [path.as_bytes(), document.content.as_bytes()] {
+            hash = fold(hash, &part.len().to_le_bytes());
+            hash = fold(hash, part);
+        }
+    }
+    ContentHash(hash)
+}
+
+/// Adds bytes to an FNV-1a hash.
+fn fold(mut hash: u64, bytes: &[u8]) -> u64 {
+    for byte in bytes {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(PRIME);
+    }
+    hash
 }
 
 impl fmt::Display for ContentHash {
@@ -262,6 +284,7 @@ mod tests {
     use super::{
         ContentHash, DEFAULT_EXCLUDED_DIRECTORIES, DocumentSnapshot, SourceRange,
         document_has_extension, has_extension, is_excluded, is_hidden, load_documents,
+        sources_hash,
     };
 
     fn document(content: &str) -> DocumentSnapshot {
@@ -269,6 +292,32 @@ mod tests {
             path: PathBuf::from("app.py"),
             content: content.to_owned(),
         }
+    }
+
+    #[test]
+    fn hashes_all_documents_in_path_order() {
+        let at = |path: &str, content: &str| DocumentSnapshot {
+            path: PathBuf::from(path),
+            content: content.to_owned(),
+        };
+        let hash = |documents: &[DocumentSnapshot]| sources_hash(documents).to_string();
+        let base = hash(&[at("a.rs", "fn a() {}"), at("b.rs", "fn b() {}")]);
+
+        assert_eq!(
+            hash(&[at("b.rs", "fn b() {}"), at("a.rs", "fn a() {}")]),
+            base
+        );
+        assert_ne!(
+            hash(&[at("a.rs", "fn a() {}"), at("b.rs", "fn c() {}")]),
+            base
+        );
+        assert_ne!(
+            hash(&[at("a.rs", "fn a() {}"), at("c.rs", "fn b() {}")]),
+            base
+        );
+        assert_ne!(hash(&[at("a.rs", "fn a() {}")]), base);
+        // A path and a text that join to the same bytes still differ.
+        assert_ne!(hash(&[at("ab", "c")]), hash(&[at("a", "bc")]));
     }
 
     #[test]

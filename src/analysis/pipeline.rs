@@ -32,13 +32,22 @@ use super::{
 // Stages
 // -----------------------------------------------------------------------------
 
+/// A graph and the hash of the source files that it was built from.
+pub struct Indexed {
+    pub graph: Graph,
+    pub source_hash: String,
+}
+
 /// Analyzes one codebase and returns its graph.
+///
+/// The source hash comes from the same document read as the graph.
 ///
 /// # Errors
 ///
 /// Returns an error if loading, fact production, or graph construction fails.
-pub fn run(config: &PipelineConfig) -> Result<Graph, PipelineError> {
+pub fn run(config: &PipelineConfig) -> Result<Indexed, PipelineError> {
     let documents = load_documents(config)?;
+    let source_hash = source::sources_hash(&documents).to_string();
     let profiles = detect_required_languages(&documents, &config.profiles)?;
     preflight_server_programs(&profiles)?;
 
@@ -47,7 +56,19 @@ pub fn run(config: &PipelineConfig) -> Result<Graph, PipelineError> {
         fact_sets.push(produce_facts(&config.root, profile, &documents)?);
     }
 
-    build_graph(fact_sets, &documents).map_err(PipelineError::Graph)
+    let graph = build_graph(fact_sets, &documents).map_err(PipelineError::Graph)?;
+    Ok(Indexed { graph, source_hash })
+}
+
+/// Returns the hash of the source files that `run` reads now.
+///
+/// This function starts no language server.
+///
+/// # Errors
+///
+/// Returns an error if the source files cannot be read.
+pub fn source_hash(config: &PipelineConfig) -> Result<String, PipelineError> {
+    Ok(source::sources_hash(&load_documents(config)?).to_string())
 }
 
 /// Returns the enabled languages that have source files under the root, in stable order.
@@ -206,7 +227,9 @@ mod tests {
         let server = FakeServer::new();
         let config = pipeline_config(&repository, &server, "serve");
 
-        let graph = run(&config).expect("both fake language servers should complete");
+        let graph = run(&config)
+            .expect("both fake language servers should complete")
+            .graph;
         let artifact = GraphArtifact::new(&graph);
         let artifact =
             serde_json::to_value(artifact).expect("the artifact should serialize to JSON");

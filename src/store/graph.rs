@@ -53,6 +53,13 @@ pub struct GraphArtifact {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ArtifactGraph {
     pub languages: Vec<String>,
+    /// The hash of the source files that the graph was built from. A graph from an older version has none.
+    #[serde(
+        rename = "sourceHash",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub source_hash: Option<String>,
     pub nodes: Vec<ArtifactNode>,
     pub edges: Vec<ArtifactEdge>,
 }
@@ -181,6 +188,7 @@ impl GraphArtifact {
             schema_version: SCHEMA_VERSION,
             graph: ArtifactGraph {
                 languages,
+                source_hash: None,
                 nodes: graph
                     .identified_nodes()
                     .map(|(id, node)| artifact_node(id, node))
@@ -188,6 +196,13 @@ impl GraphArtifact {
                 edges: graph.edges.iter().map(artifact_edge).collect(),
             },
         }
+    }
+
+    /// Records the hash of the source files that the graph was built from.
+    #[must_use]
+    pub fn with_source_hash(mut self, hash: String) -> Self {
+        self.graph.source_hash = Some(hash);
+        self
     }
 }
 
@@ -523,6 +538,23 @@ mod tests {
 
         let written = artifact.to_bytes().expect("bytes");
         assert_eq!(digest_of(&written), digest_of(&bytes));
+    }
+
+    #[test]
+    fn keeps_the_source_hash_and_reads_a_graph_without_one() {
+        let artifact = GraphArtifact::new(&two_node_graph()).with_source_hash("00ff".to_owned());
+        let bytes = artifact.to_bytes().expect("bytes");
+        let value: serde_json::Value = serde_json::from_slice(&bytes).expect("value");
+        assert_eq!(value["graph"]["sourceHash"], "00ff");
+        let read = GraphArtifact::read(&bytes).expect("read");
+        assert_eq!(read.graph.source_hash.as_deref(), Some("00ff"));
+
+        let older = GraphArtifact::new(&two_node_graph())
+            .to_bytes()
+            .expect("bytes");
+        assert!(!String::from_utf8_lossy(&older).contains("sourceHash"));
+        let read = GraphArtifact::read(&older).expect("an older graph should stay readable");
+        assert_eq!(read.graph.source_hash, None);
     }
 
     #[test]
