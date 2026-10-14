@@ -1,6 +1,6 @@
 //! User configuration.
 //!
-//! This module loads strict language overrides and applies command-line overrides.
+//! This module loads strict language overrides from one configuration file.
 
 use std::{
     collections::BTreeMap,
@@ -37,35 +37,6 @@ pub fn configured_profiles(path: Option<&Path>) -> Result<Vec<LanguageProfile>, 
     };
 
     profiles_from_toml(&document)
-}
-
-/// Applies language server command-line overrides.
-///
-/// Server program overrides are applied in input order. The last program for
-/// one language wins. Argument overrides then replace configured arguments.
-///
-/// # Errors
-///
-/// Returns an error if an override names an adapter that is not in this build.
-pub fn apply_cli_overrides(
-    profiles: &mut [LanguageProfile],
-    servers: &[(Language, String)],
-    arguments: &BTreeMap<Language, Vec<String>>,
-) -> Result<(), ConfigError> {
-    for (language, program) in servers {
-        profile_mut(profiles, *language)?
-            .server
-            .program
-            .clone_from(program);
-    }
-    for (language, values) in arguments {
-        profile_mut(profiles, *language)?
-            .server
-            .arguments
-            .clone_from(values);
-    }
-
-    Ok(())
 }
 
 #[derive(Debug)]
@@ -179,16 +150,6 @@ fn default_config_path() -> Option<PathBuf> {
     dirs::config_dir().map(|path| path.join("tekdek/config.toml"))
 }
 
-fn profile_mut(
-    profiles: &mut [LanguageProfile],
-    language: Language,
-) -> Result<&mut LanguageProfile, ConfigError> {
-    profiles
-        .iter_mut()
-        .find(|profile| profile.language == language)
-        .ok_or_else(|| unavailable_language(language))
-}
-
 fn unavailable_language(language: Language) -> ConfigError {
     ConfigError::Invalid(format!(
         "language is not available in this build: {language}"
@@ -197,9 +158,9 @@ fn unavailable_language(language: Language) -> ConfigError {
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::BTreeMap, fs};
+    use std::fs;
 
-    use super::{apply_cli_overrides, configured_profiles, profiles_from_toml};
+    use super::{configured_profiles, profiles_from_toml};
     use crate::analysis::language::builtin_profiles;
 
     #[cfg(feature = "rust")]
@@ -286,31 +247,6 @@ mod tests {
             .initialization_options;
 
         assert_eq!(options["diagnostics"]["enable"], true);
-    }
-
-    #[test]
-    fn applies_cli_overrides_after_configured_values() {
-        let mut profiles = builtin_profiles();
-        let language = profiles
-            .first()
-            .expect("this test requires a compiled adapter")
-            .language;
-        let mut arguments = BTreeMap::new();
-        arguments.insert(language, vec!["cli-argument".to_owned()]);
-
-        apply_cli_overrides(
-            &mut profiles,
-            &[
-                (language, "first-server".to_owned()),
-                (language, "last-server".to_owned()),
-            ],
-            &arguments,
-        )
-        .expect("the compiled language should accept overrides");
-        let profile = profile(&profiles, language);
-
-        assert_eq!(profile.server.program, "last-server");
-        assert_eq!(profile.server.arguments, ["cli-argument"]);
     }
 
     fn profile(

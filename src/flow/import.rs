@@ -1,8 +1,9 @@
 //! Flow import.
 //!
 //! This module freezes one agent output as the next generation of one flow.
-//! Agent output bytes and a graph artifact of the store are the inputs. One
-//! generation file and a moved current pointer are the outputs.
+//! Agent output bytes and a graph artifact of the store, with the edges of its
+//! semantic cache, are the inputs. One generation file and a moved current
+//! pointer are the outputs.
 //!
 //! An import validates the complete output before any write. It writes nothing
 //! when any error issue exists. A dry run does the complete import, including
@@ -36,8 +37,9 @@ use super::{
     validate::{self, CheckedFlow, PriorContext},
 };
 use crate::store::{
-    graph::{ArtifactGraph, check_graph_name, read_graph},
+    graph::{ArtifactGraph, check_graph_name},
     lock_store,
+    semantic::read_merged_graph,
 };
 
 // -----------------------------------------------------------------------------
@@ -107,7 +109,7 @@ pub fn import_flow(
     } else {
         Some(lock_store(directory)?)
     };
-    let (graph, graph_digest) = read_graph(directory, request.graph_file)?;
+    let (graph, graph_digest) = read_merged_graph(directory, request.graph_file)?;
     let binding = FactBinding {
         graph_artifact: request.graph_file.to_owned(),
         graph_digest: Sha256Digest::try_from(graph_digest)

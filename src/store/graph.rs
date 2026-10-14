@@ -27,7 +27,9 @@ use std::{collections::BTreeSet, fmt, io, path::Path};
 
 use serde::{Deserialize, Serialize};
 
-use super::{digest_of, lock_store, read_bytes, reject_symlink, write_bytes};
+use super::{
+    digest_of, lock_store, read_bytes, reject_symlink, semantic::SEMANTIC_SUFFIX, write_bytes,
+};
 use crate::analysis::{
     fact::{self, EntityKind},
     graph::{Edge, Graph, Node, NodeId, ProvenanceOrigin},
@@ -149,7 +151,7 @@ impl fmt::Display for NodeKind {
 }
 
 /// The kind of one graph edge. Serde refuses any other value on read.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RelationKind {
     Contains,
@@ -298,7 +300,7 @@ fn artifact_range(range: SourceRange) -> ArtifactRange {
     }
 }
 
-fn relation_kind(kind: fact::RelationKind) -> RelationKind {
+pub(crate) fn relation_kind(kind: fact::RelationKind) -> RelationKind {
     match kind {
         // Encode containment.
         fact::RelationKind::Contains => RelationKind::Contains,
@@ -429,7 +431,8 @@ impl ArtifactGraph {
 ///
 /// # Errors
 /// Returns `InvalidInput` for a path, a leading dot, a control character, outer
-/// whitespace, another extension, or the reserved name `index.json`.
+/// whitespace, another extension, the reserved name `index.json`, or the name of
+/// a semantic cache, `<graph>.semantic.json`.
 pub fn check_graph_name(file: &str) -> io::Result<()> {
     let invalid = |message: String| io::Error::new(io::ErrorKind::InvalidInput, message);
     if file.is_empty()
@@ -451,6 +454,12 @@ pub fn check_graph_name(file: &str) -> io::Result<()> {
         return Err(invalid(
             "the graph file must end with .json and must not be index.json".to_owned(),
         ));
+    }
+    // A case-insensitive file system holds `app.Semantic.json` and the cache of `app.json` in one file.
+    if file.to_ascii_lowercase().ends_with(SEMANTIC_SUFFIX) {
+        return Err(invalid(format!(
+            "invalid store name {file:?}: a graph file name cannot end with {SEMANTIC_SUFFIX}"
+        )));
     }
     Ok(())
 }
@@ -599,6 +608,8 @@ mod tests {
             "",
             ".hidden.json",
             "a:b.json",
+            "app.semantic.json",
+            "app.Semantic.json",
         ] {
             assert!(check_graph_name(name).is_err(), "{name:?}");
         }

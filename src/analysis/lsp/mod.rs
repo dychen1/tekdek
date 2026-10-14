@@ -2,9 +2,9 @@
 //!
 //! This module owns shared capture models, the resolution policy, and LSP
 //! errors. `client` runs the server process and transports messages.
-//! `session` runs one server from start to shutdown. `capture` sends the
-//! document requests. `normalize` checks the capture and converts it into
-//! semantic facts.
+//! `session` starts one server and waits until it is ready. `capture` builds
+//! and sends the requests of the resolver. `normalize` checks the captured
+//! facts and converts them into semantic facts.
 //!
 //! # Sections
 //!
@@ -16,7 +16,7 @@ pub(crate) mod capture;
 mod client;
 #[cfg(test)]
 pub(crate) mod fake_server;
-mod normalize;
+pub(crate) mod normalize;
 pub(crate) mod session;
 
 use std::{error::Error, fmt, io};
@@ -93,13 +93,28 @@ pub(crate) type FallbackPolicy = fn(&ProtocolSymbolSite) -> ResolutionFallback;
 #[derive(Debug)]
 pub struct LspError {
     message: String,
+    /// True when a request to the server or its transport failed, so the server can be broken.
+    server_failure: bool,
 }
 
 impl LspError {
     pub(crate) fn new(message: impl Into<String>) -> Self {
         Self {
             message: message.into(),
+            server_failure: false,
         }
+    }
+
+    /// Marks the error as a failed request to the server or a failed transport.
+    pub(crate) fn server_failure(self) -> Self {
+        Self {
+            server_failure: true,
+            ..self
+        }
+    }
+
+    pub(crate) fn is_server_failure(&self) -> bool {
+        self.server_failure
     }
 
     pub(crate) fn into_message(self) -> String {

@@ -2,7 +2,7 @@
 //!
 //! This module checks the current generation of one flow without writing files:
 //! it recomputes every derived layer and digest, and it compares the fact layer
-//! with the bound graph when that graph is unchanged.
+//! with the bound graph and its semantic cache when that graph is unchanged.
 
 use std::{collections::BTreeSet, path::Path};
 
@@ -13,7 +13,7 @@ use super::{
     models::{FlowIssue, GenerationPurpose, IssueCode, Sha256Digest},
     validate,
 };
-use crate::store::graph::read_graph;
+use crate::store::semantic::read_merged_graph;
 
 /// The result of one verification. `issues` is empty for a valid generation.
 #[derive(Debug, Serialize)]
@@ -53,7 +53,7 @@ pub fn verify_flow(directory: &Path, name: &str) -> Result<VerifyReport, FlowErr
     let mut issues =
         validate::verify_artifact(artifact, parent.as_ref().map(|parent| &parent.artifact));
     let binding = &artifact.facts.binding;
-    let stale = match read_graph(directory, &binding.graph_artifact) {
+    let stale = match read_merged_graph(directory, &binding.graph_artifact) {
         Ok((graph, digest)) if digest == binding.graph_digest.as_str() => {
             let keys: BTreeSet<&str> = artifact
                 .facts

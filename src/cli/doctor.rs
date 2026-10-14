@@ -92,7 +92,7 @@ pub(super) fn run(arguments: Vec<String>, json: bool) -> (u8, String) {
 }
 
 fn check(arguments: Vec<String>) -> Result<(u8, String), String> {
-    let (operands, mut options, _) = split_arguments(arguments.into_iter(), &["--config"], &[])
+    let (operands, mut options) = split_arguments(arguments.into_iter(), &["--config"])
         .map_err(|message| format!("{message}\n{USAGE}"))?;
     let json = options.remove("--json").is_some();
     let config = options.remove("--config").map(PathBuf::from);

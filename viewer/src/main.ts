@@ -4,7 +4,7 @@
    # Sections
    status, loading, pickers and badges, URL state, boot */
 import type { ArtifactEntry, ArtifactIndex, DeckFlow, DeckGraph, FlowEntry, SourceView } from "./data/models.ts";
-import { deckFlow, deckGraph, pickArtifact, pickFlow, frozenFlows } from "./data/adapt.ts";
+import { bindingDigest, deckFlow, deckGraph, pickArtifact, pickFlow, frozenFlows } from "./data/adapt.ts";
 import { loadFlow, loadGraph, loadIndex, loadSource, LoadError, type LoadReason } from "./data/load.ts";
 import { createDeck, type DeckInstance } from "./deck/deck.ts";
 import { codebasePicker, flowPicker, icon } from "./deck/markup.ts";
@@ -49,7 +49,7 @@ function setChrome(enabled: boolean) {
 /** The recovery step for each cause of a load failure. */
 const RECOVERY: Record<LoadReason, string> = {
   fetch: "Start the viewer server with <code>tekdek serve</code>, then reload this page.",
-  digest: "Reindex the codebase with <code>tekdek index</code>, then reload this page.",
+  digest: "Reload this page: the graph or its semantic cache changed while the page loaded.",
   graph: "Reindex the codebase with <code>tekdek index</code> to write a current graph.",
   flow: "Freeze the flow again with <code>tekdek flow import</code>, then reload this page.",
   empty: "Index a codebase with <code>tekdek index</code>, then reload this page.",
@@ -109,7 +109,7 @@ async function openFlow(next: FlowEntry | null, step: number) {
       if (mine !== ticket) return;
       sources = await loadSource(entry!.file, next.name).catch(() => new Map<string, SourceView>());
       if (mine !== ticket) return;
-      try { flow = deckFlow(artifact, graph!, entry!.digest, next); }
+      try { flow = deckFlow(artifact, graph!, bindingDigest(entry!), next); }
       catch (error) {
         throw new LoadError("flow", `The flow file of ${next.name} is not a flow that this viewer reads. ${error instanceof Error ? error.message : ""}`.trim());
       }

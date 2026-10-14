@@ -37,7 +37,7 @@ impl SignatureRole {
     }
 }
 
-pub(super) struct SyntaxGraphIndex<'a> {
+pub(crate) struct SyntaxGraphIndex<'a> {
     graph: &'a Graph,
     paths: HashMap<(Language, &'a str), PathRanges>,
     constructors: HashMap<NodeId, NodeId>,
@@ -57,7 +57,7 @@ struct PathRanges {
 
 impl<'a> SyntaxGraphIndex<'a> {
     /// Indexes the syntax graph and the import statements of one language.
-    pub(super) fn new(graph: &'a Graph, imports: &'a [(NodeId, ImportSite)]) -> Self {
+    pub(crate) fn new(graph: &'a Graph, imports: &'a [(NodeId, ImportSite)]) -> Self {
         let mut paths = HashMap::<(Language, &str), PathRanges>::new();
 
         for (id, node) in graph.identified_nodes() {
@@ -109,7 +109,7 @@ impl<'a> SyntaxGraphIndex<'a> {
     }
 
     /// Returns the smallest node body that owns one source byte offset.
-    pub(super) fn body_owner_at(
+    pub(crate) fn body_owner_at(
         &self,
         language: Language,
         path: &str,
@@ -174,7 +174,7 @@ impl<'a> SyntaxGraphIndex<'a> {
     }
 
     /// Returns `true` when an import statement contains one byte offset.
-    pub(super) fn is_import_position(&self, language: Language, path: &str, offset: u32) -> bool {
+    pub(crate) fn is_import_position(&self, language: Language, path: &str, offset: u32) -> bool {
         self.import_ranges
             .get(&(language, path))
             .is_some_and(|ranges| ranges.iter().any(|range| contains(*range, offset)))
@@ -197,7 +197,7 @@ impl<'a> SyntaxGraphIndex<'a> {
 }
 
 /// Indexes the last direct constructor of each class.
-fn constructors_by_class(graph: &Graph) -> HashMap<NodeId, NodeId> {
+pub(crate) fn constructors_by_class(graph: &Graph) -> HashMap<NodeId, NodeId> {
     let mut constructors = HashMap::<NodeId, NodeId>::new();
 
     for edge in &graph.edges {

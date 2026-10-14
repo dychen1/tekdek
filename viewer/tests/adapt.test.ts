@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { deckFlow, deckGraph, displayName, fileTree, pickArtifact, pickFlow, frozenFlows } from "../src/data/adapt.ts";
+import { bindingDigest, deckFlow, deckGraph, displayName, fileTree, pickArtifact, pickFlow, frozenFlows } from "../src/data/adapt.ts";
 import { digestOf, loadFlow, loadIndex, loadSource, LoadError, verifyGraph } from "../src/data/load.ts";
 
 import { artifact, DIGEST, graphDocument, must } from "./fixtures.ts";
@@ -80,6 +80,14 @@ test("a step whose function left the graph is marked missing and leaves the memb
   assert.equal(must(flow.steps[0], "first step").missing, true);
   assert.ok(!flow.clusters.some(cluster => cluster.members.includes(gone)));
   assert.equal(flow.stale, true, "another graph digest makes the flow stale");
+});
+
+test("a flow stays fresh when the served graph adds cached edges to the graph file that it binds", () => {
+  const graph = deckGraph(graphDocument());
+  const merged = { digest: "sha256:merged", graphDigest: DIGEST };
+  assert.equal(bindingDigest(merged), DIGEST);
+  assert.equal(deckFlow(artifact, graph, bindingDigest(merged)).stale, false);
+  assert.equal(bindingDigest({ digest: DIGEST }), DIGEST, "an older server sends the file digest only");
 });
 
 test("a file that is not a frozen schema 3 flow is rejected", () => {

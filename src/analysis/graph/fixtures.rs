@@ -23,7 +23,7 @@ pub(super) fn to_syntax_graph(
     language: Language,
     facts: SyntaxFacts,
 ) -> Result<Graph, AnalysisError> {
-    build_graph(vec![FactSet::new(language, facts, Vec::new())], &[])
+    build_graph(vec![FactSet::new(language, facts)], &[])
 }
 
 pub(super) fn fixture_key(id: u32) -> EntityKey {

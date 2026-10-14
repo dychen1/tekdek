@@ -23,7 +23,9 @@ serve starts the Lift Deck on 127.0.0.1 and prints its URL. The default store
 is the nearest .tekdek folder. The default port is 8000; port 0 selects a free
 port. --flow prints the URL that opens one flow. --open opens the URL in a browser.
 Before it serves a .tekdek store, serve reindexes the project graph if the source
-changed after the last index, as tekdek index does. --no-index skips that step.";
+changed after the last index, as tekdek index does. --no-index skips that step.
+serve sends each graph with the semantic edges in its cache, and starts no
+language server.";
 
 const DEFAULT_PORT: u16 = 8000;
 
@@ -41,7 +43,7 @@ pub(super) fn run(raw: impl Iterator<Item = String>) -> Result<(), String> {
     let store = store_directory(arguments.store)?;
     let server = ViewerServer::bind(&store, arguments.port).map_err(|error| error.to_string())?;
     if arguments.index {
-        match refresh_project_graph(&store) {
+        match refresh_project_graph(&store, None) {
             Ok(Some(summary)) => eprintln!("{summary}"),
             Ok(None) => {}
             Err(error) => {
@@ -68,7 +70,7 @@ pub(super) fn run(raw: impl Iterator<Item = String>) -> Result<(), String> {
 
 /// Parses the arguments after `serve`.
 fn parse(raw: impl Iterator<Item = String>) -> Result<Arguments, String> {
-    let (operands, mut options, _) = split_arguments(raw, &["--store", "--port", "--flow"], &[])?;
+    let (operands, mut options) = split_arguments(raw, &["--store", "--port", "--flow"])?;
     if let Some(operand) = operands.first() {
         return Err(format!("unexpected argument: {operand}"));
     }

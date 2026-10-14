@@ -110,6 +110,9 @@ export function pickFlow(flows: readonly FlowEntry[], requested: string | null):
   return flows.find(flow => flow.name === requested) ?? flows[0] ?? null;
 }
 
+/** Returns the graph file digest that flows of a codebase bind. A server without `graphDigest` serves the file as it is. */
+export const bindingDigest = (entry: Pick<ArtifactEntry, "digest" | "graphDigest">) => entry.graphDigest ?? entry.digest;
+
 /** Picks the codebase to open: the requested file, else the index default, else the first codebase. */
 export function pickArtifact(index: ArtifactIndex, requested: string | null): ArtifactEntry | null {
   const find = (file: string | null | undefined) => index.artifacts.find(item => item.file === file);

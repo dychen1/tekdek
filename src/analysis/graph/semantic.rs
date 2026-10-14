@@ -19,7 +19,7 @@ use crate::analysis::{
     },
     graph::{Edge, Graph, NodeId, ProvenanceOrigin},
     language::Language,
-    source::SourceSpan,
+    source::{SourceRange, SourceSpan},
 };
 
 // -----------------------------------------------------------------------------
@@ -32,26 +32,20 @@ use crate::analysis::{
 /// # Errors
 ///
 /// Returns an error if a selected semantic position has no permitted node.
-pub(super) fn build_semantic_edges(
+pub(crate) fn build_semantic_edges(
     graph: &Graph,
     language: Language,
     semantic_facts: &[SemanticFact],
     imports: &[(NodeId, ImportSite)],
 ) -> Result<Vec<Edge>, AnalysisError> {
     let lookup = SyntaxGraphIndex::new(graph, imports);
-    let call_positions = collect_call_positions(semantic_facts);
+    let call_sites = collect_call_sites(semantic_facts);
     let mut edges = EdgeAccumulator::new(ProvenanceOrigin::Semantic);
 
     add_import_edges(&lookup, language, semantic_facts, imports, &mut edges);
     add_call_edges(&lookup, language, semantic_facts, &mut edges)?;
     add_type_use_edges(&lookup, language, semantic_facts, &mut edges)?;
-    add_reference_edges(
-        &lookup,
-        language,
-        semantic_facts,
-        &call_positions,
-        &mut edges,
-    )?;
+    add_reference_edges(&lookup, language, semantic_facts, &call_sites, &mut edges)?;
 
     let mut edges = edges.finish()?;
     edges.sort_by_key(|edge| (edge.source.0, semantic_edge_rank(edge.kind), edge.target.0));
@@ -80,9 +74,10 @@ fn remove_stated_type_uses(edges: &mut Vec<Edge>) {
     });
 }
 
-/// Collects call positions that suppress duplicate references.
-fn collect_call_positions(semantic_facts: &[SemanticFact]) -> HashSet<SourcePosition> {
-    semantic_facts
+/// Collects the call sites that suppress duplicate references, by path.
+pub(crate) fn collect_call_sites(semantic_facts: &[SemanticFact]) -> CallSites<'_> {
+    let mut sites = CallSites::new();
+    for site in semantic_facts
         .iter()
         .filter_map(|fact| match fact {
             SemanticFact::Call { call_sites, .. } => Some(call_sites),
@@ -91,11 +86,31 @@ fn collect_call_positions(semantic_facts: &[SemanticFact]) -> HashSet<SourcePosi
             | SemanticFact::Definition { .. } => None,
         })
         .flatten()
-        .filter_map(|site| match site {
-            ReportedLocation::Selected(span) => Some(source_position(span)),
-            ReportedLocation::Unselected => None,
+    {
+        if let ReportedLocation::Selected(span) = site {
+            sites
+                .entry(span.path.as_str())
+                .or_default()
+                .push(span.range);
+        }
+    }
+    sites
+}
+
+/// Tests whether one occurrence is the callee name of a call site.
+///
+/// A call site can start before its name, for example at the path of a
+/// qualified Rust call: the name then ends the call site. Another name inside
+/// the path, such as a type or a generic argument, stays a reference.
+pub(crate) fn is_call_site(call_sites: &CallSites<'_>, occurrence: &SourceSpan) -> bool {
+    let name = occurrence.range;
+    call_sites
+        .get(occurrence.path.as_str())
+        .is_some_and(|ranges| {
+            ranges.iter().any(|range| {
+                range.start == name.start || (range.start < name.start && name.end == range.end)
+            })
         })
-        .collect()
 }
 
 /// Adds import edges from the definitions of imported names.
@@ -265,7 +280,7 @@ fn add_reference_edges(
     lookup: &SyntaxGraphIndex<'_>,
     language: Language,
     semantic_facts: &[SemanticFact],
-    call_positions: &HashSet<SourcePosition>,
+    call_sites: &CallSites<'_>,
     edges: &mut EdgeAccumulator,
 ) -> Result<(), AnalysisError> {
     // Index type definitions for alias resolution.
@@ -295,7 +310,7 @@ fn add_reference_edges(
                 continue;
             };
             // Drop an occurrence when a call or import edge already states it.
-            if call_positions.contains(&source_position(observation))
+            if is_call_site(call_sites, observation)
                 || lookup.is_import_position(language, &observation.path, observation.range.start)
             {
                 continue;
@@ -533,13 +548,6 @@ fn is_exact_type(lookup: &SyntaxGraphIndex<'_>, target: NodeMatch) -> bool {
     !target.used_owner && matches!(&lookup.node(target.node).kind, EntityKind::Type(_))
 }
 
-fn source_position(span: &SourceSpan) -> SourcePosition {
-    SourcePosition {
-        path: span.path.clone(),
-        offset: span.range.start,
-    }
-}
-
 /// Creates an error for a source location without an owner.
 fn location_owner_error(location_kind: &str, observation: &SourceSpan) -> AnalysisError {
     AnalysisError {
@@ -570,6 +578,9 @@ pub(super) struct NodeMatch {
     node: NodeId,
     used_owner: bool,
 }
+
+/// The call site ranges of each source path.
+pub(crate) type CallSites<'a> = HashMap<&'a str, Vec<SourceRange>>;
 
 #[derive(Eq, Hash, PartialEq)]
 struct SourcePosition {
@@ -672,6 +683,39 @@ mod tests {
         assert_eq!(edges[0].source, NodeId(0));
         assert_eq!(edges[0].target, NodeId(1));
         assert_eq!(edges[0].kind, RelationKind::UsesValue);
+    }
+
+    #[test]
+    fn drops_only_the_callee_name_of_a_call_site_that_starts_before_it() {
+        let graph = rust_semantic_validation_graph();
+        let run = || anchor("src/lib.rs", 10, ResolutionFallback::Ignore, "run");
+        let semantic = vec![
+            // A qualified call such as `Type::<run>::run` starts at the path.
+            SemanticFact::Call {
+                caller: run(),
+                callee: run(),
+                call_sites: locations(&[("src/lib.rs", 40, 53)]),
+            },
+            // The callee name ends the call site; a name inside the path stays a use.
+            SemanticFact::Reference {
+                target: run(),
+                occurrences: locations(&[("src/lib.rs", 50, 53), ("src/lib.rs", 45, 48)]),
+            },
+        ];
+
+        let edges = build_semantic_edges(&graph, Language::Rust, &semantic, &[])
+            .expect("the call and the reference should resolve");
+
+        assert_eq!(
+            edges
+                .iter()
+                .map(|edge| (edge.source, edge.target, edge.kind, edge.weight))
+                .collect::<Vec<_>>(),
+            [
+                (NodeId(0), NodeId(1), RelationKind::Calls, 1),
+                (NodeId(0), NodeId(1), RelationKind::UsesValue, 1)
+            ]
+        );
     }
 
     #[test]

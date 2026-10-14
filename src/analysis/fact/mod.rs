@@ -1,6 +1,6 @@
 //! Fact Models
 //!
-//! `FactSet` contains codebase facts.
+//! `FactSet` contains the syntax facts of one language, as the index makes them.
 //!
 //! `SyntaxFacts` come from parsing source. They define entities, syntax
 //! relations with source evidence, and import sites.
@@ -9,7 +9,8 @@
 //! references, type definitions, and import definitions with symbol anchors
 //! and source locations.
 //!
-//! The `graph` module builds the codebase graph from these facts.
+//! The `graph` module builds the syntax graph from syntax facts, and the
+//! resolver adds the edges of semantic facts.
 //!
 //! # Sections
 //!
@@ -40,17 +41,12 @@ pub use syntax::SyntaxFactBuilder;
 pub struct FactSet {
     pub language: Language,
     pub syntax: SyntaxFacts,
-    pub semantic: Vec<SemanticFact>,
 }
 
 impl FactSet {
     #[must_use]
-    pub fn new(language: Language, syntax: SyntaxFacts, semantic: Vec<SemanticFact>) -> Self {
-        Self {
-            language,
-            syntax,
-            semantic,
-        }
+    pub fn new(language: Language, syntax: SyntaxFacts) -> Self {
+        Self { language, syntax }
     }
 }
 

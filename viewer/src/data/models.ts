@@ -8,8 +8,9 @@
 /** One flow in the artifact index. `file` points to a frozen schema 3 generation under `flows/`. */
 export interface FlowEntry { name: string; file: string; stepCount?: number; clusterCount?: number; schemaVersion?: number; stale?: boolean }
 
-/** One indexed codebase. */
-export interface ArtifactEntry { label?: string; file: string; digest: string; flows?: FlowEntry[] }
+/** One indexed codebase. `digest` names the graph document that the server sends, with its cached semantic edges;
+ *  `graphDigest` names the graph file that flows bind. An older server sends no `graphDigest`: the two are the same. */
+export interface ArtifactEntry { label?: string; file: string; digest: string; graphDigest?: string; flows?: FlowEntry[] }
 
 /** The artifact index that the viewer server returns. */
 export interface ArtifactIndex { defaultArtifact?: string; artifacts: ArtifactEntry[] }

@@ -4,8 +4,9 @@
 //! artifact into a store. Command arguments are the input. One graph file and
 //! status lines are the output.
 //!
-//! Use `tekdek index [<root>]` with optional artifact, store, configuration,
-//! and language server overrides.
+//! Use `tekdek index [<root>]` with optional artifact, store, and
+//! configuration options. The index parses the source and starts no language
+//! server.
 //!
 //! # Sections
 //!
@@ -14,7 +15,6 @@
 //! `Artifact destination` selects indexed or explicit output.
 
 use std::{
-    collections::BTreeMap,
     ffi::OsStr,
     fs, io,
     path::{Path, PathBuf},
@@ -23,13 +23,13 @@ use std::{
 use tekdek::{
     analysis::{
         self, PipelineConfig,
-        config::{ConfigError, apply_cli_overrides, configured_profiles},
+        config::{ConfigError, configured_profiles},
         graph::Graph,
-        language::Language,
     },
     store::{
         PROJECT_STORE, atomic_write, create_project_store, find_project_store,
         graph::{GraphArtifact, check_graph_name, read_graph},
+        update_project_ignore,
     },
 };
 
@@ -42,14 +42,13 @@ use super::split_arguments;
 pub(super) const USAGE: &str = "usage: tekdek index [<root>]
   [--name <name>] [--store <directory>] | [--output <path>]
   [--config <path>]
-  [--server <language>=<program>]
-  [--server-arg <language>=<argument>]...
 The default store is the nearest .tekdek folder in the root or its parents, up
 to the top folder of the Git work tree. Without a root, index analyzes the
 working directory, or the project root when a store exists: the folder that
 holds the store. A root inside the project of a store needs --name. Without a
 store, index creates <root>/.tekdek after the analysis succeeds. index writes
-<store>/<name>.json. --output writes one file and changes no store.";
+<store>/<name>.json. --output writes one file and changes no store. index
+parses the source only. graph show and flow import ask the language servers.";
 
 /// Analyzes one codebase and writes its graph into the store.
 pub(super) fn run(raw: impl Iterator<Item = String>) -> Result<(), String> {
@@ -72,6 +71,14 @@ pub(super) fn run(raw: impl Iterator<Item = String>) -> Result<(), String> {
     let artifact = GraphArtifact::new(&indexed.graph).with_source_hash(indexed.source_hash);
     write_graph(&destination, &artifact)
         .map_err(|error| format!("cannot write {}: {error}", destination.output.display()))?;
+    if let Some((store, _)) = &destination.indexed
+        && let Err(error) = update_project_ignore(store)
+    {
+        eprintln!(
+            "warning: cannot add the daemon files to the ignore file of {}: {error}",
+            store.display()
+        );
+    }
 
     println!("{}", summary(&indexed.graph, &destination.output));
     Ok(())
@@ -94,20 +101,24 @@ fn summary(graph: &Graph, output: &Path) -> String {
 /// Reindexes the project graph when the project's source files changed after its last index.
 ///
 /// Only a `.tekdek` store and the graph named after its project folder qualify. The reindex
-/// works as `tekdek index` with no options. A graph from an older version has no source hash,
+/// works as `tekdek index --config <config>`, or as `tekdek index` without a configuration file. A graph from an older version has no source hash,
 /// so it counts as out of date. Returns the result line, or `None` when nothing changed or the
 /// store has no project graph.
 ///
 /// # Errors
 ///
 /// Returns a message if the graph or the source files cannot be read, or if the analysis fails.
-pub(super) fn refresh_project_graph(store: &Path) -> Result<Option<String>, String> {
+pub(super) fn refresh_project_graph(
+    store: &Path,
+    config: Option<&Path>,
+) -> Result<Option<String>, String> {
     let Some((project, file)) = project_graph(store)? else {
         return Ok(None);
     };
     let (graph, _) = read_graph(store, &file).map_err(|error| error.to_string())?;
+    let profiles = configured_profiles(config).map_err(|error| error.to_string())?;
     let mut config = PipelineConfig::new(project.clone());
-    config.profiles = configured_profiles(None).map_err(|error| error.to_string())?;
+    config.profiles = profiles;
     let current = analysis::source_hash(&config).map_err(|error| error.to_string())?;
     if graph.source_hash.as_deref() == Some(current.as_str()) {
         return Ok(None);
@@ -160,20 +171,14 @@ fn write_graph(destination: &Destination, artifact: &GraphArtifact) -> io::Resul
     }
 }
 
-/// Builds pipeline configuration from files and command-line overrides.
+/// Builds the pipeline configuration of one root from the configuration file.
 ///
 /// # Errors
 ///
-/// Returns an error if configuration loading or override application fails.
+/// Returns an error if the configuration file cannot be loaded.
 fn pipeline_config(arguments: &Arguments, root: &Path) -> Result<PipelineConfig, ConfigError> {
-    let mut profiles = configured_profiles(arguments.config.as_deref())?;
-    apply_cli_overrides(
-        &mut profiles,
-        &arguments.servers,
-        &arguments.server_arguments,
-    )?;
     let mut config = PipelineConfig::new(root.to_path_buf());
-    config.profiles = profiles;
+    config.profiles = configured_profiles(arguments.config.as_deref())?;
     Ok(config)
 }
 
@@ -189,30 +194,18 @@ struct Arguments {
     name: Option<String>,
     store: Option<PathBuf>,
     config: Option<PathBuf>,
-    servers: Vec<(Language, String)>,
-    #[allow(
-        clippy::struct_field_names,
-        reason = "server_arguments is the required command-line term"
-    )]
-    server_arguments: BTreeMap<Language, Vec<String>>,
 }
 
 impl Arguments {
     /// Parses command-line arguments.
-    ///
-    /// Repeated server programs use the last value. Repeated server arguments
-    /// accumulate in input order and replace profile defaults as one group.
     ///
     /// # Errors
     ///
     /// Returns a message if a second positional value exists, an option is
     /// invalid, or `--output` appears with `--name` or `--store`.
     fn parse(arguments: impl Iterator<Item = String>) -> Result<Self, String> {
-        let (operands, mut options, repeated) = split_arguments(
-            arguments,
-            &["--name", "--store", "--output", "--config"],
-            &["--server", "--server-arg"],
-        )?;
+        let (operands, mut options) =
+            split_arguments(arguments, &["--name", "--store", "--output", "--config"])?;
         let root = match operands.as_slice() {
             [] => None,
             [root] => Some(PathBuf::from(root)),
@@ -229,27 +222,6 @@ impl Arguments {
             return Err("--output cannot be used with --name or --store".to_owned());
         }
 
-        let mut servers = Vec::new();
-        let mut server_arguments = BTreeMap::<Language, Vec<String>>::new();
-        for (option, value) in repeated {
-            if option == "--server" {
-                servers.push(parse_language_value(
-                    &value,
-                    "--server",
-                    "<language>=<program>",
-                    "program",
-                )?);
-            } else {
-                let (language, value) = parse_language_value(
-                    &value,
-                    "--server-arg",
-                    "<language>=<argument>",
-                    "argument",
-                )?;
-                server_arguments.entry(language).or_default().push(value);
-            }
-        }
-
         Ok(Self {
             root_given: root.is_some(),
             root: root.unwrap_or_else(|| PathBuf::from(".")),
@@ -257,34 +229,8 @@ impl Arguments {
             name,
             store,
             config,
-            servers,
-            server_arguments,
         })
     }
-}
-
-/// Parses one language-qualified option value.
-///
-/// # Errors
-///
-/// Returns a message if either component is empty or the language is unknown.
-fn parse_language_value(
-    value: &str,
-    option: &str,
-    expected: &str,
-    value_name: &str,
-) -> Result<(Language, String), String> {
-    let (language, value) = value
-        .split_once('=')
-        .ok_or_else(|| format!("{option} needs {expected}"))?;
-    if language.is_empty() {
-        return Err(format!("{option} needs a non-empty language"));
-    }
-    if value.is_empty() {
-        return Err(format!("{option} needs a non-empty {value_name}"));
-    }
-    let language = Language::parse(language)?;
-    Ok((language, value.to_owned()))
 }
 
 // -----------------------------------------------------------------------------
@@ -419,17 +365,10 @@ fn artifact_file(name: &str) -> Result<String, String> {
 
 #[cfg(test)]
 mod tests {
-    #[cfg(feature = "rust")]
-    use std::fs;
     use std::path::PathBuf;
 
-    use tekdek::{
-        analysis::{graph::Graph, language::Language},
-        store::graph::GraphArtifact,
-    };
+    use tekdek::{analysis::graph::Graph, store::graph::GraphArtifact};
 
-    #[cfg(feature = "rust")]
-    use super::pipeline_config;
     use super::{
         Arguments, Destination, artifact_destination, artifact_file, configured_profiles,
         folder_name, refresh_project_graph, run, write_graph,
@@ -437,153 +376,6 @@ mod tests {
 
     fn parse(arguments: &[&str]) -> Result<Arguments, String> {
         Arguments::parse(arguments.iter().map(|value| (*value).to_owned()))
-    }
-
-    #[test]
-    fn accepts_language_qualified_server_overrides() {
-        let arguments = parse(&[
-            ".",
-            "--server",
-            "rust=/opt/rust-analyzer",
-            "--server-arg",
-            "rust=--log-file",
-            "--server-arg",
-            "rust=/tmp/ra.log",
-        ])
-        .expect("the arguments should be valid");
-
-        assert_eq!(
-            arguments.servers,
-            vec![(Language::Rust, "/opt/rust-analyzer".to_owned())]
-        );
-        assert_eq!(
-            arguments.server_arguments[&Language::Rust],
-            ["--log-file", "/tmp/ra.log"]
-        );
-    }
-
-    #[test]
-    fn rejects_invalid_server_overrides() {
-        for (arguments, message) in [
-            (
-                vec![".", "--server", "rust-analyzer"],
-                "--server needs <language>=<program>",
-            ),
-            (
-                vec![".", "--server", "rust="],
-                "--server needs a non-empty program",
-            ),
-            (
-                vec![".", "--server-arg", "rust="],
-                "--server-arg needs a non-empty argument",
-            ),
-            (
-                vec![".", "--server", "=program"],
-                "--server needs a non-empty language",
-            ),
-            (
-                vec![".", "--server", "go=gopls"],
-                "unsupported language: go",
-            ),
-        ] {
-            assert_eq!(parse(&arguments).expect_err("invalid"), message);
-        }
-    }
-
-    #[test]
-    fn preserves_later_equals_characters_in_override_values() {
-        let arguments = parse(&[
-            ".",
-            "--server",
-            "rust=server=debug",
-            "--server-arg",
-            "rust=--setting=value",
-        ])
-        .expect("the arguments should be valid");
-
-        assert_eq!(
-            arguments.servers,
-            [(Language::Rust, "server=debug".to_owned())]
-        );
-        assert_eq!(
-            arguments.server_arguments[&Language::Rust],
-            ["--setting=value"]
-        );
-    }
-
-    #[test]
-    fn preserves_repeated_overrides_in_input_order() {
-        let arguments = parse(&[
-            ".",
-            "--server",
-            "rust=first-server",
-            "--server",
-            "rust=last-server",
-            "--server-arg",
-            "python=--first",
-            "--server-arg",
-            "python=second",
-            "--config",
-            "custom.toml",
-        ])
-        .expect("the arguments should be valid");
-
-        assert_eq!(
-            arguments.servers,
-            [
-                (Language::Rust, "first-server".to_owned()),
-                (Language::Rust, "last-server".to_owned()),
-            ]
-        );
-        assert_eq!(
-            arguments.server_arguments[&Language::Python],
-            ["--first", "second"]
-        );
-        assert_eq!(arguments.config, Some(PathBuf::from("custom.toml")));
-    }
-
-    #[cfg(feature = "rust")]
-    #[test]
-    fn applies_cli_overrides_after_explicit_configuration() {
-        let directory = tempfile::tempdir().expect("the temporary directory should exist");
-        let config_path = directory.path().join("config.toml");
-        fs::write(
-            &config_path,
-            r#"
-                [languages.rust]
-                program = "configured-server"
-                arguments = ["configured-argument"]
-            "#,
-        )
-        .expect("the test configuration should be written");
-        let config_value = config_path
-            .to_str()
-            .expect("the test path should be valid UTF-8");
-        let arguments = parse(&[
-            ".",
-            "--config",
-            config_value,
-            "--server",
-            "rust=first-server",
-            "--server",
-            "rust=last-server",
-            "--server-arg",
-            "rust=--first",
-            "--server-arg",
-            "rust=second",
-        ])
-        .expect("the arguments should be valid");
-
-        let config = pipeline_config(&arguments, &arguments.root)
-            .expect("the pipeline configuration should build");
-        let rust = config
-            .profiles
-            .iter()
-            .find(|profile| profile.language == Language::Rust)
-            .expect("the Rust profile should exist");
-
-        assert_eq!(rust.server.program, "last-server");
-        assert_eq!(rust.server.arguments, ["--first", "second"]);
     }
 
     #[test]
@@ -703,11 +495,18 @@ mod tests {
     #[test]
     fn accepts_inline_option_values() {
         let arguments =
-            parse(&["--name=sample", "--store=demo", "--server=rust=ra"]).expect("args");
+            parse(&["--name=sample", "--store=demo", "--config=custom.toml"]).expect("args");
 
         assert_eq!(arguments.name.as_deref(), Some("sample"));
         assert_eq!(arguments.store, Some(PathBuf::from("demo")));
-        assert_eq!(arguments.servers, [(Language::Rust, "ra".to_owned())]);
+        assert_eq!(arguments.config, Some(PathBuf::from("custom.toml")));
+        for server in ["--server=rust=ra", "--server-arg=rust=--log"] {
+            assert!(
+                parse(&[server])
+                    .expect_err("index starts no server")
+                    .starts_with("unknown option")
+            );
+        }
     }
 
     #[test]
@@ -794,12 +593,12 @@ mod tests {
         // A store that is not named .tekdek is never reindexed.
         let other = root.join("snapshot");
         std::fs::create_dir(&other).expect("other store");
-        assert_eq!(refresh_project_graph(&other), Ok(None));
+        assert_eq!(refresh_project_graph(&other, None), Ok(None));
 
         // A project store without the graph named after the project has nothing to refresh.
         let store = root.join(".tekdek");
         std::fs::create_dir(&store).expect("store");
-        assert_eq!(refresh_project_graph(&store), Ok(None));
+        assert_eq!(refresh_project_graph(&store, None), Ok(None));
 
         // A project graph whose source hash matches the source is current.
         let mut config = tekdek::analysis::PipelineConfig::new(root.clone());
@@ -814,7 +613,7 @@ mod tests {
             .with_source_hash(hash)
             .write(&store.join(&file))
             .expect("graph");
-        assert_eq!(refresh_project_graph(&store), Ok(None));
+        assert_eq!(refresh_project_graph(&store, None), Ok(None));
     }
 
     #[test]
@@ -836,7 +635,7 @@ mod tests {
             .write(&store.join(&file))
             .expect("graph");
 
-        let error = refresh_project_graph(&store).expect_err("unreadable source");
+        let error = refresh_project_graph(&store, None).expect_err("unreadable source");
         assert!(error.contains("lib.rs"), "{error}");
         // The graph stays as it was.
         let (graph, _) = tekdek::store::graph::read_graph(&store, &file).expect("graph");

@@ -1,8 +1,8 @@
 //! Graph construction.
 //!
-//! Builds a graph from syntax and semantic facts. This module builds the syntax
-//! nodes and edges. `semantic` adds the semantic edges, and `lookup` matches
-//! source positions to nodes.
+//! Builds the syntax graph from syntax facts: its nodes and syntax edges. The
+//! resolver adds semantic edges with `semantic`, and `lookup` matches source
+//! positions to nodes.
 //!
 //! # Sections
 //!
@@ -12,7 +12,6 @@
 
 use std::collections::HashMap;
 
-use super::semantic::build_semantic_edges;
 use crate::analysis::{
     fact::{
         AnalysisError, EntityFact, EntityKey, FactSet, ImportSite, RelationEvidence, RelationFact,
@@ -30,30 +29,38 @@ use crate::analysis::{
 /// Builds one graph from language-tagged fact sets, and hashes each entity's
 /// content against the documents.
 ///
-/// The function builds all syntax nodes before it resolves semantic facts.
 /// A node whose path or range matches no document keeps no hash.
 ///
 /// # Errors
 ///
-/// Returns an error if a fact is invalid or a semantic position has no owner.
+/// Returns an error if a fact is invalid.
 pub fn build_graph(
     fact_sets: Vec<FactSet>,
     documents: &[DocumentSnapshot],
 ) -> Result<Graph, AnalysisError> {
+    Ok(build_graph_with_imports(fact_sets, documents)?.0)
+}
+
+/// The import sites of one language with their owner nodes.
+pub(crate) type LanguageImports = (Language, Vec<(NodeId, ImportSite)>);
+
+/// Builds one graph as `build_graph` does, and also returns the import sites of each language.
+///
+/// # Errors
+///
+/// Returns an error if a fact is invalid.
+pub(crate) fn build_graph_with_imports(
+    fact_sets: Vec<FactSet>,
+    documents: &[DocumentSnapshot],
+) -> Result<(Graph, Vec<LanguageImports>), AnalysisError> {
     let mut graph = Graph {
         nodes: Vec::new(),
         edges: Vec::new(),
     };
     let mut node_ids = HashMap::<EntityKey, NodeId>::new();
     let mut syntax_edges = EdgeAccumulator::new(ProvenanceOrigin::Syntax);
-    let mut semantic_batches = Vec::with_capacity(fact_sets.len());
-
-    for FactSet {
-        language,
-        syntax,
-        semantic,
-    } in fact_sets
-    {
+    let mut imports_by_language = Vec::with_capacity(fact_sets.len());
+    for FactSet { language, syntax } in fact_sets {
         let imports = materialize_syntax(
             &mut graph,
             &mut node_ids,
@@ -61,18 +68,13 @@ pub fn build_graph(
             language,
             syntax,
         )?;
-        semantic_batches.push((language, imports, semantic));
+        imports_by_language.push((language, imports));
     }
     graph.edges = syntax_edges.finish()?;
 
-    for (language, imports, semantic) in semantic_batches {
-        let semantic_edges = build_semantic_edges(&graph, language, &semantic, &imports)?;
-        graph.edges.extend(semantic_edges);
-    }
-
     hash_content(&mut graph.nodes, documents);
 
-    Ok(graph)
+    Ok((graph, imports_by_language))
 }
 
 /// Fills the content hash of every node that has a derivable range.
@@ -274,17 +276,14 @@ mod tests {
     use crate::analysis::{
         fact::{
             EntityEvidence, EntityFact, EntityKey, EntityKind, FactSet, RelationFact, RelationKind,
-            ResolutionFallback, SemanticFact, SyntaxFacts,
+            SyntaxFacts,
         },
         graph::{
             NodeId,
-            fixtures::{
-                anchor, class, entity, field, fixture_key, function, locations, node, relation,
-                to_syntax_graph,
-            },
+            fixtures::{class, entity, fixture_key, function, node, relation, to_syntax_graph},
         },
         language::Language,
-        source::{ContentHash, DocumentSnapshot, SourceRange},
+        source::{ContentHash, DocumentSnapshot},
     };
 
     #[test]
@@ -345,7 +344,6 @@ mod tests {
                 relations: Vec::new(),
                 import_sites: Vec::new(),
             },
-            Vec::new(),
         )
     }
 
@@ -377,7 +375,6 @@ mod tests {
                     }],
                     import_sites: Vec::new(),
                 },
-                Vec::new(),
             );
             let fact_sets = if python_first {
                 vec![python, rust]
@@ -390,139 +387,6 @@ mod tests {
                 "a cross-language relation must fail in either fact-set order"
             );
         }
-    }
-
-    #[test]
-    fn resolves_semantic_anchors_only_in_the_fact_language() {
-        let rust = semantic_language_facts(Language::Rust, "rust-root", false);
-        let python = semantic_language_facts(Language::Python, "python-root", true);
-
-        let graph =
-            build_graph(vec![rust, python], &[]).expect("graph construction should succeed");
-        let edge = graph
-            .edges
-            .iter()
-            .find(|edge| edge.kind == RelationKind::UsesValue)
-            .expect("the Python reference edge should exist");
-
-        assert_eq!(graph.nodes[edge.source.index()].language, Language::Python);
-        assert_eq!(graph.nodes[edge.target.index()].language, Language::Python);
-    }
-
-    fn semantic_language_facts(
-        language: Language,
-        root_key: &str,
-        include_semantic: bool,
-    ) -> FactSet {
-        let module_key = EntityKey::module(root_key);
-        let field_kind = field();
-        let field_key = module_key.child(&field_kind, "value", 0);
-        let semantic = include_semantic
-            .then(|| SemanticFact::Reference {
-                target: anchor("shared/source", 10, ResolutionFallback::None, "value"),
-                occurrences: locations(&[("shared/source", 50, 55)]),
-            })
-            .into_iter()
-            .collect();
-
-        FactSet::new(
-            language,
-            SyntaxFacts {
-                entities: vec![
-                    EntityFact {
-                        key: module_key.clone(),
-                        name: root_key.to_owned(),
-                        kind: EntityKind::Module,
-                        evidence: EntityEvidence {
-                            path: "shared/source".to_owned(),
-                            declarations: Vec::new(),
-                            scope: Some(SourceRange { start: 0, end: 100 }),
-                            body: Some(SourceRange { start: 0, end: 100 }),
-                            type_inputs: Vec::new(),
-                            type_outputs: Vec::new(),
-                        },
-                    },
-                    EntityFact {
-                        key: field_key.clone(),
-                        name: "value".to_owned(),
-                        kind: field_kind,
-                        evidence: EntityEvidence {
-                            path: "shared/source".to_owned(),
-                            declarations: vec![SourceRange { start: 10, end: 15 }],
-                            scope: Some(SourceRange { start: 10, end: 15 }),
-                            body: None,
-                            type_inputs: Vec::new(),
-                            type_outputs: Vec::new(),
-                        },
-                    },
-                ],
-                relations: vec![RelationFact {
-                    source: module_key,
-                    target: field_key,
-                    kind: RelationKind::Contains,
-                }],
-                import_sites: Vec::new(),
-            },
-            semantic,
-        )
-    }
-
-    #[test]
-    fn resolves_semantic_anchors_after_all_syntax_is_materialized() {
-        let first = FactSet::new(
-            Language::Python,
-            SyntaxFacts {
-                entities: vec![EntityFact {
-                    key: EntityKey::module("caller"),
-                    name: "caller".to_owned(),
-                    kind: EntityKind::Module,
-                    evidence: EntityEvidence {
-                        path: "caller.py".to_owned(),
-                        declarations: Vec::new(),
-                        scope: Some(SourceRange { start: 0, end: 100 }),
-                        body: Some(SourceRange { start: 0, end: 100 }),
-                        type_inputs: Vec::new(),
-                        type_outputs: Vec::new(),
-                    },
-                }],
-                relations: Vec::new(),
-                import_sites: Vec::new(),
-            },
-            vec![SemanticFact::Reference {
-                target: anchor("target.py", 10, ResolutionFallback::None, "target"),
-                occurrences: locations(&[("caller.py", 50, 55)]),
-            }],
-        );
-        let second = FactSet::new(
-            Language::Python,
-            SyntaxFacts {
-                entities: vec![EntityFact {
-                    key: EntityKey::module("target"),
-                    name: "target".to_owned(),
-                    kind: field(),
-                    evidence: EntityEvidence {
-                        path: "target.py".to_owned(),
-                        declarations: vec![SourceRange { start: 10, end: 16 }],
-                        scope: Some(SourceRange { start: 10, end: 16 }),
-                        body: None,
-                        type_inputs: Vec::new(),
-                        type_outputs: Vec::new(),
-                    },
-                }],
-                relations: Vec::new(),
-                import_sites: Vec::new(),
-            },
-            Vec::new(),
-        );
-
-        let graph =
-            build_graph(vec![first, second], &[]).expect("graph construction should succeed");
-
-        assert!(graph.edges.iter().any(|edge| {
-            edge.source == NodeId(0)
-                && edge.target == NodeId(1)
-                && edge.kind == RelationKind::UsesValue
-        }));
     }
 
     #[test]
