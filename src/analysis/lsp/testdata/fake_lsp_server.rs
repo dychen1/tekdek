@@ -13,6 +13,11 @@
 //! In `module-call` mode, `run` in `lib.py` has a call hierarchy item, a
 //! reference at line 2 of `app.py`, and an incoming call from the `app.py`
 //! module at that reference. Every other call hierarchy request answers `[]`.
+//!
+//! In `batch` mode, the program holds `test/echo` requests until it has three.
+//! Then it sends a `workspace/configuration` request, checks the answer, and
+//! echoes the three parameters in reverse order. `batch-error` answers the
+//! second request with an error.
 
 use std::{
     env, fs,
@@ -32,6 +37,7 @@ fn main() -> io::Result<()> {
     let mut input = stdin.lock();
     let mut output = stdout.lock();
     let mut root_uri = String::new();
+    let mut echoes = Vec::new();
 
     while let Some(message) = read_message(&mut input)? {
         let request_id = request_id(&message);
@@ -130,6 +136,33 @@ fn main() -> io::Result<()> {
                 "[]".to_owned()
             };
             write_result(&mut output, required_id(request_id)?, &result)?;
+        } else if message.contains(r#""method":"test/echo""#) {
+            let parameters = message
+                .split_once(r#""params":"#)
+                .and_then(|(_, rest)| rest.strip_suffix('}'))
+                .unwrap_or("null")
+                .to_owned();
+            echoes.push((required_id(request_id)?.to_owned(), parameters));
+            if echoes.len() < 3 {
+                continue;
+            }
+            write_message(
+                &mut output,
+                r#"{"jsonrpc":"2.0","id":900,"method":"workspace/configuration","params":{"items":[{}]}}"#
+                    .to_owned(),
+            )?;
+            let answer = read_message(&mut input)?.unwrap_or_default();
+            if !answer.contains(r#""id":900"#) || !answer.contains(r#""result":[{}]"#) {
+                eprintln!("the client did not answer the configuration request");
+                process::exit(1);
+            }
+            for (index, (id, parameters)) in echoes.drain(..).enumerate().rev() {
+                if mode == "batch-error" && index == 1 {
+                    write_error(&mut output, &id, "echo failed")?;
+                } else {
+                    write_result(&mut output, &id, &parameters)?;
+                }
+            }
         } else if message.contains(r#""method":"callHierarchy/outgoingCalls""#) {
             write_result(&mut output, required_id(request_id)?, "[]")?;
         } else if message.contains(r#""method":"textDocument/typeDefinition""#) {

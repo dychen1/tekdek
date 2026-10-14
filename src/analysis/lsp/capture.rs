@@ -19,6 +19,7 @@ use std::{
     collections::{HashMap, HashSet},
     path::Path,
     time::Duration,
+    vec,
 };
 
 use lsp_types::{
@@ -34,6 +35,8 @@ use lsp_types::{
         DocumentSymbolRequest, GotoDefinition, GotoTypeDefinition, References, Request,
     },
 };
+
+use serde_json::Value;
 
 use super::{
     CapturedDocument, CapturedSemanticFact, LspClient, LspError, ProtocolSymbolSite,
@@ -81,31 +84,35 @@ pub(crate) fn capture_document_semantics(
         files.push((path.to_owned(), uri));
     }
 
+    let symbol_parameters = |uri: &Uri| DocumentSymbolParams {
+        text_document: TextDocumentIdentifier::new(uri.clone()),
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+    let title = language_title(config.language);
+    let label = format!("{title} symbols");
+    let mut responses = Vec::with_capacity(files.len());
+    // The first answer waits until the server analyzes the workspace.
+    if let Some((path, uri)) = files.first() {
+        let response = client
+            .request::<DocumentSymbolRequest>(symbol_parameters(uri), FIRST_REQUEST_TIMEOUT)
+            .map_err(|error| {
+                LspError::new(format!("cannot read {title} symbols from {path}: {error}"))
+            })?;
+        responses.push(response);
+    }
+    responses.extend(request_all::<DocumentSymbolRequest>(
+        client,
+        files
+            .iter()
+            .skip(1)
+            .map(|(path, uri)| (path.as_str(), label.as_str(), symbol_parameters(uri)))
+            .collect(),
+    )?);
     let files = files
         .into_iter()
-        .enumerate()
-        .map(|(index, (path, uri))| {
-            let timeout = if index == 0 {
-                FIRST_REQUEST_TIMEOUT
-            } else {
-                REQUEST_TIMEOUT
-            };
-            let response = client
-                .request::<DocumentSymbolRequest>(
-                    DocumentSymbolParams {
-                        text_document: TextDocumentIdentifier::new(uri.clone()),
-                        work_done_progress_params: WorkDoneProgressParams::default(),
-                        partial_result_params: PartialResultParams::default(),
-                    },
-                    timeout,
-                )
-                .map_err(|error| {
-                    LspError::new(format!(
-                        "cannot read {} symbols from {path}: {error}",
-                        language_title(config.language)
-                    ))
-                })?;
-
+        .zip(responses)
+        .map(|((path, uri), response)| {
             Ok(CapturedDocument {
                 symbols: nested_symbols(response, &path)?,
                 path,
@@ -125,9 +132,10 @@ pub(crate) fn capture_document_semantics(
 /// Captures all supported semantic facts for every document symbol and every
 /// imported name.
 ///
-/// The capture runs in phases. It prepares the call hierarchy items of all
-/// symbols. Then it requests outgoing calls, references, type definitions, and
-/// import definitions. Last, it requests incoming calls only for the items of a
+/// The capture runs in phases, and each phase sends its requests in one batch.
+/// It prepares the call hierarchy items of all symbols. Then it requests
+/// outgoing calls, references, type definitions, and import definitions
+/// together. Last, it requests incoming calls only for the items of a
 /// symbol that has a reference outside every outgoing call site and every
 /// import statement. Each incoming call site is also a reference, so only such
 /// a symbol can have a caller that is not a document symbol, for example
@@ -167,21 +175,23 @@ fn request_facts(
         .flat_map(|((path, _), items)| items.iter().map(move |item| (*path, item)))
         .collect::<Vec<_>>();
 
-    let outgoing = request_all::<CallHierarchyOutgoingCalls>(
-        client,
-        item_requests(&items, outgoing_parameters),
-    )?;
-    let references =
-        request_all::<References>(client, symbol_requests(&symbols, reference_parameters))?
-            .into_iter()
-            .map(Option::unwrap_or_default)
-            .collect::<Vec<_>>();
-    let type_targets = request_all::<GotoTypeDefinition>(
-        client,
-        symbol_requests(&symbols, type_definition_parameters),
-    )?;
     let (queries, definition_requests) = definition_requests(documents, sources, import_sites)?;
-    let definitions = request_all::<GotoDefinition>(client, definition_requests)?;
+    let mut batch = Batch::default();
+    let outgoing_count =
+        batch.add::<CallHierarchyOutgoingCalls>(item_requests(&items, outgoing_parameters))?;
+    let reference_count =
+        batch.add::<References>(symbol_requests(&symbols, reference_parameters))?;
+    let type_count =
+        batch.add::<GotoTypeDefinition>(symbol_requests(&symbols, type_definition_parameters))?;
+    let definition_count = batch.add::<GotoDefinition>(definition_requests)?;
+    let mut results = batch.send(client)?;
+    let outgoing = decode::<CallHierarchyOutgoingCalls>(&mut results, outgoing_count)?;
+    let references = decode::<References>(&mut results, reference_count)?
+        .into_iter()
+        .map(Option::unwrap_or_default)
+        .collect::<Vec<_>>();
+    let type_targets = decode::<GotoTypeDefinition>(&mut results, type_count)?;
+    let definitions = decode::<GotoDefinition>(&mut results, definition_count)?;
 
     let mut facts = call_facts(&items, outgoing, outgoing_call_fact);
     let explained = ExplainedPositions::new(&facts, documents, sources, import_sites)?;
@@ -268,31 +278,91 @@ const REQUEST_TIMEOUT: Duration = Duration::from_mins(1);
 /// parameters.
 type Labeled<'a, P> = (&'a str, &'a str, P);
 
-/// Sends one request for each entry and returns the results in input order.
+/// The number of requests that one batch keeps in flight.
+const REQUEST_WINDOW: usize = 64;
+
+/// Requests that the client sends together, with the label of each.
+#[derive(Default)]
+struct Batch<'a> {
+    requests: Vec<(&'static str, Value)>,
+    labels: Vec<(&'a str, &'a str)>,
+}
+
+impl<'a> Batch<'a> {
+    /// Adds the requests of one method and returns their count.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if parameters cannot be encoded.
+    fn add<R: Request>(
+        &mut self,
+        requests: Vec<Labeled<'a, R::Params>>,
+    ) -> Result<usize, LspError> {
+        let count = requests.len();
+        for (path, name, parameters) in requests {
+            let parameters = serde_json::to_value(parameters).map_err(|error| {
+                LspError::new(format!(
+                    "cannot encode the {} parameters: {error}",
+                    R::METHOD
+                ))
+            })?;
+            self.requests.push((R::METHOD, parameters));
+            self.labels.push((path, name));
+        }
+        Ok(count)
+    }
+
+    /// Sends every request and returns the raw results in input order.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for the first request that fails.
+    fn send(&self, client: &mut LspClient) -> Result<vec::IntoIter<Value>, LspError> {
+        client
+            .request_batch(&self.requests, REQUEST_WINDOW, REQUEST_TIMEOUT)
+            .map(Vec::into_iter)
+            .map_err(|(index, error)| {
+                let (path, name) = self.labels[index];
+                LspError::new(format!(
+                    "cannot request {} for {name} in {path}: {error}",
+                    self.requests[index].0
+                ))
+            })
+    }
+}
+
+/// Decodes the next `count` raw results as results of one method.
+///
+/// # Errors
+///
+/// Returns an error if a result does not decode.
+fn decode<R: Request>(
+    results: &mut impl Iterator<Item = Value>,
+    count: usize,
+) -> Result<Vec<R::Result>, LspError> {
+    results
+        .take(count)
+        .map(|result| {
+            serde_json::from_value(result).map_err(|error| {
+                LspError::new(format!("cannot decode the {} result: {error}", R::METHOD))
+            })
+        })
+        .collect()
+}
+
+/// Sends one batch of requests of one method and returns the results in
+/// input order.
 ///
 /// # Errors
 ///
 /// Returns an error for the first request that fails.
-fn request_all<R>(
+fn request_all<R: Request>(
     client: &mut LspClient,
     requests: Vec<Labeled<'_, R::Params>>,
-) -> Result<Vec<R::Result>, LspError>
-where
-    R: Request,
-{
-    requests
-        .into_iter()
-        .map(|(path, name, parameters)| {
-            client
-                .request::<R>(parameters, REQUEST_TIMEOUT)
-                .map_err(|error| {
-                    LspError::new(format!(
-                        "cannot request {} for {name} in {path}: {error}",
-                        R::METHOD
-                    ))
-                })
-        })
-        .collect()
+) -> Result<Vec<R::Result>, LspError> {
+    let mut batch = Batch::default();
+    let count = batch.add::<R>(requests)?;
+    decode::<R>(&mut batch.send(client)?, count)
 }
 
 fn symbol_requests<'a, P>(
