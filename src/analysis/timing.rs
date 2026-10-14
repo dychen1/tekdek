@@ -3,7 +3,8 @@
 //! This module records the time of each analysis stage and each LSP request
 //! when the `TEKDEK_TIMINGS` environment variable is set. `report` prints the
 //! records to standard error. Without the variable, each call returns at once
-//! and records nothing.
+//! and records nothing. The records are shared, so language threads add to the
+//! same stage list and the same request statistics.
 
 use std::{
     collections::BTreeMap,
@@ -76,8 +77,8 @@ impl Timings {
         times.slowest = times.slowest.max(elapsed);
     }
 
-    /// Returns the report lines: total, stages in run order, then request
-    /// methods in name order.
+    /// Returns the report lines: total, stages in the order they end, then
+    /// request methods in name order.
     fn lines(&self, total: Duration) -> Vec<String> {
         let mut lines = vec![format!("timings: total {}", seconds(total))];
         lines.extend(

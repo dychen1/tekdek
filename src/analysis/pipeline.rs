@@ -10,8 +10,9 @@
 
 use std::{
     error::Error,
-    fmt, io,
+    fmt, io, panic,
     path::{Path, PathBuf},
+    thread,
 };
 
 #[cfg(feature = "python")]
@@ -41,7 +42,9 @@ pub struct Indexed {
 
 /// Analyzes one codebase and returns its graph.
 ///
-/// The source hash comes from the same document read as the graph. With
+/// Each detected language runs on its own thread, and the fact sets keep
+/// language order. The source hash comes from the same document read as the
+/// graph. With
 /// `TEKDEK_TIMINGS` set, a successful run prints its timings to standard error.
 ///
 /// # Errors
@@ -55,10 +58,20 @@ pub fn run(config: &PipelineConfig) -> Result<Indexed, PipelineError> {
     preflight_server_programs(&profiles)?;
     timing::record_stage(started, || "load".to_owned());
 
-    let mut fact_sets = Vec::with_capacity(profiles.len());
-    for profile in profiles {
-        fact_sets.push(produce_facts(&config.root, profile, &documents)?);
-    }
+    // Each language runs its own server on its own thread. The first error in
+    // language order wins, as in a run of one language after the other.
+    let fact_sets = thread::scope(|scope| {
+        let runs = profiles
+            .iter()
+            .map(|profile| scope.spawn(|| produce_facts(&config.root, profile, &documents)))
+            .collect::<Vec<_>>();
+        runs.into_iter()
+            .map(|run| {
+                run.join()
+                    .unwrap_or_else(|panic| panic::resume_unwind(panic))
+            })
+            .collect::<Result<Vec<_>, _>>()
+    })?;
 
     let graph_started = timing::start();
     let graph = build_graph(fact_sets, &documents).map_err(PipelineError::Graph)?;
@@ -284,6 +297,30 @@ mod tests {
                 }
             ),
             "the error should identify the failed adapter"
+        );
+    }
+
+    #[test]
+    fn names_the_first_language_when_every_server_fails() {
+        let repository = TestRepository::new();
+        repository.write("app.py", "def run():\n    pass\n");
+        repository.write("src/lib.rs", "pub fn run() {}\n");
+        let server = FakeServer::new();
+        let config = pipeline_config(&repository, &server, "protocol-error", "protocol-error");
+
+        let Err(error) = run(&config) else {
+            panic!("both fake servers should return an error");
+        };
+
+        assert!(
+            matches!(
+                error,
+                PipelineError::Language {
+                    language: Language::Python,
+                    ..
+                }
+            ),
+            "the error should identify the first language"
         );
     }
 

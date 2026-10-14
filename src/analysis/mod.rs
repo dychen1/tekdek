@@ -14,7 +14,8 @@
 //!
 //! 1. Load documents for every enabled profile.
 //! 2. Detect languages and preflight their server programs.
-//! 3. Run each detected adapter and collect its fact set.
+//! 3. Run each detected adapter on its own thread and collect the fact sets in
+//!    language order.
 //! 4. Build one graph from those facts, and hash the content of each entity.
 
 pub mod config;
