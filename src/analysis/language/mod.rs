@@ -25,7 +25,7 @@ pub mod rust;
 use std::path::Component;
 
 use crate::analysis::{
-    fact::{AnalysisError, FactSet, ImportSite, SemanticFact, SyntaxFacts},
+    fact::{AnalysisError, FactSet, SemanticFact, SyntaxFacts},
     source::{DocumentSnapshot, Sources},
     timing,
 };
@@ -70,7 +70,8 @@ pub trait LanguageAdapter {
 
     /// Produces normalized semantic facts for selected sources.
     ///
-    /// The import sites name the positions whose definitions to report.
+    /// The syntax facts of the same sources name the entities and the import
+    /// sites to query.
     /// A syntax-only language can use the default empty result.
     ///
     /// # Errors
@@ -79,9 +80,9 @@ pub trait LanguageAdapter {
     fn produce_semantic_facts(
         &mut self,
         sources: &Sources<'_>,
-        import_sites: &[ImportSite],
+        syntax: &SyntaxFacts,
     ) -> Result<Vec<SemanticFact>, AnalysisError> {
-        let _ = (sources, import_sites);
+        let _ = (sources, syntax);
         Ok(Vec::new())
     }
 
@@ -98,7 +99,7 @@ pub trait LanguageAdapter {
         let sources = self.select_sources(documents)?;
         let syntax = self.produce_syntax_facts(&sources)?;
         timing::record_stage(started, || format!("{} syntax facts", self.language()));
-        let semantic = self.produce_semantic_facts(&sources, &syntax.import_sites)?;
+        let semantic = self.produce_semantic_facts(&sources, &syntax)?;
 
         Ok(FactSet::new(self.language(), syntax, semantic))
     }

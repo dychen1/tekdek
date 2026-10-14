@@ -5,7 +5,7 @@ use std::path::Path;
 use lsp_types::SymbolKind;
 
 use crate::analysis::{
-    fact::{ImportSite, ResolutionFallback, SemanticFact},
+    fact::{ResolutionFallback, SemanticFact, SyntaxFacts},
     language::{Language, LanguageProfile},
     lsp::{
         LspError, ProtocolSymbolSite,
@@ -23,9 +23,9 @@ pub(super) fn produce_semantic_facts(
     root: &Path,
     profile: &LanguageProfile,
     sources: &Sources<'_>,
-    import_sites: &[ImportSite],
+    syntax: &SyntaxFacts,
 ) -> Result<Vec<SemanticFact>, LspError> {
-    session::produce_semantic_facts(&session_config(root, profile), sources, import_sites)
+    session::produce_semantic_facts(&session_config(root, profile), sources, syntax)
 }
 
 fn session_config<'a>(root: &'a Path, profile: &'a LanguageProfile) -> SessionConfig<'a> {

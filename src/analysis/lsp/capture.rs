@@ -10,7 +10,8 @@
 //!
 //! `Document Capture` opens the documents and captures their symbols and facts.
 //! `Requests` sends the requests of one phase and builds their parameters.
-//! `Explained References` finds the references that need no incoming calls.
+//! `Explained References` finds the references that need no incoming calls,
+//! and the symbols that are syntax entities.
 //! `Import Definitions` builds the definition request of each imported name.
 //! `Symbol Sites` converts hierarchical symbols into ordered protocol sites.
 //! `Response Conversion` converts protocol responses into captured facts.
@@ -45,8 +46,8 @@ use super::{
     session::{SessionConfig, language_title},
 };
 use crate::analysis::{
-    fact::ImportSite,
-    source::{SourceSpan, Sources},
+    fact::{EntityKind, ImportSite, SyntaxFacts},
+    source::{SourceRange, SourceSpan, Sources},
 };
 
 // -----------------------------------------------------------------------------
@@ -64,7 +65,7 @@ pub(crate) fn capture_document_semantics(
     config: &SessionConfig<'_>,
     root: &Path,
     sources: &Sources<'_>,
-    import_sites: &[ImportSite],
+    syntax: &SyntaxFacts,
 ) -> Result<SemanticCapture, LspError> {
     let mut files = Vec::with_capacity(sources.len());
 
@@ -121,7 +122,7 @@ pub(crate) fn capture_document_semantics(
         })
         .collect::<Result<Vec<_>, LspError>>()?;
 
-    let facts = request_facts(client, &files, sources, import_sites)?;
+    let facts = request_facts(client, &files, sources, syntax)?;
 
     Ok(SemanticCapture {
         documents: files,
@@ -131,6 +132,13 @@ pub(crate) fn capture_document_semantics(
 
 /// Captures all supported semantic facts for every document symbol and every
 /// imported name.
+///
+/// Only an entity symbol, whose selection starts at a declared entity name,
+/// gets a call hierarchy item. Every symbol gets a type-definition request,
+/// because the type of a local or a parameter states a type use of its owner.
+/// An entity symbol and a symbol outside every callable get a reference
+/// request, because a reference to a module-level name, such as a type alias,
+/// can state a signature type. Other queries of other symbols add no edge.
 ///
 /// The capture runs in phases, and each phase sends its requests in one batch.
 /// It prepares the call hierarchy items of all symbols. Then it requests
@@ -153,8 +161,9 @@ fn request_facts(
     client: &mut LspClient,
     documents: &[CapturedDocument],
     sources: &Sources<'_>,
-    import_sites: &[ImportSite],
+    syntax: &SyntaxFacts,
 ) -> Result<Vec<CapturedSemanticFact>, LspError> {
+    let import_sites = &syntax.import_sites;
     let symbols = documents
         .iter()
         .flat_map(|document| {
@@ -164,11 +173,17 @@ fn request_facts(
         })
         .collect::<Vec<_>>();
 
-    let prepared =
-        request_all::<CallHierarchyPrepare>(client, symbol_requests(&symbols, prepare_parameters))?
-            .into_iter()
-            .map(Option::unwrap_or_default)
-            .collect::<Vec<_>>();
+    let (is_entity, wants_references) =
+        EntityPositions::new(&DocumentIndex::new(documents, sources)?, syntax)?.flags(&symbols);
+
+    let prepared = request_all::<CallHierarchyPrepare>(
+        client,
+        symbol_requests(selected(&symbols, &is_entity), prepare_parameters),
+    )?
+    .into_iter()
+    .map(Option::unwrap_or_default)
+    .collect::<Vec<_>>();
+    let prepared = scatter(&is_entity, prepared);
     let items = symbols
         .iter()
         .zip(&prepared)
@@ -179,8 +194,10 @@ fn request_facts(
     let mut batch = Batch::default();
     let outgoing_count =
         batch.add::<CallHierarchyOutgoingCalls>(item_requests(&items, outgoing_parameters))?;
-    let reference_count =
-        batch.add::<References>(symbol_requests(&symbols, reference_parameters))?;
+    let reference_count = batch.add::<References>(symbol_requests(
+        selected(&symbols, &wants_references),
+        reference_parameters,
+    ))?;
     let type_count =
         batch.add::<GotoTypeDefinition>(symbol_requests(&symbols, type_definition_parameters))?;
     let definition_count = batch.add::<GotoDefinition>(definition_requests)?;
@@ -190,6 +207,7 @@ fn request_facts(
         .into_iter()
         .map(Option::unwrap_or_default)
         .collect::<Vec<_>>();
+    let references = scatter(&wants_references, references);
     let type_targets = decode::<GotoTypeDefinition>(&mut results, type_count)?;
     let definitions = decode::<GotoDefinition>(&mut results, definition_count)?;
 
@@ -366,12 +384,36 @@ fn request_all<R: Request>(
 }
 
 fn symbol_requests<'a, P>(
-    symbols: &'a [(&'a str, ProtocolSymbolSite)],
+    symbols: impl IntoIterator<Item = &'a (&'a str, ProtocolSymbolSite)>,
     parameters: fn(&ProtocolSymbolSite) -> P,
 ) -> Vec<Labeled<'a, P>> {
     symbols
-        .iter()
+        .into_iter()
         .map(|(path, symbol)| (*path, symbol.name.as_str(), parameters(symbol)))
+        .collect()
+}
+
+/// Returns the entries whose flag is set.
+fn selected<'a, T>(entries: &'a [T], flags: &'a [bool]) -> impl Iterator<Item = &'a T> {
+    entries
+        .iter()
+        .zip(flags)
+        .filter_map(|(entry, flag)| flag.then_some(entry))
+}
+
+/// Spreads the results of the selected entries over all entries. An entry
+/// whose flag is not set gets the default.
+fn scatter<T: Default>(flags: &[bool], results: Vec<T>) -> Vec<T> {
+    let mut results = results.into_iter();
+    flags
+        .iter()
+        .map(|flag| {
+            if *flag {
+                results.next().unwrap_or_default()
+            } else {
+                T::default()
+            }
+        })
         .collect()
 }
 
@@ -475,16 +517,12 @@ impl ExplainedPositions {
         let documents = DocumentIndex::new(documents, sources)?;
         let mut import_statements = HashMap::<String, Vec<Range>>::new();
         for site in import_sites {
-            let (uri, text) = documents.get(&site.statement.path)?;
             let path = site.statement.path.as_str();
-            let range = Range::new(
-                byte_offset_to_position(text, path, site.statement.range.start)?,
-                byte_offset_to_position(text, path, site.statement.range.end)?,
-            );
+            let (uri, text) = documents.get(path)?;
             import_statements
                 .entry(uri.as_str().to_owned())
                 .or_default()
-                .push(range);
+                .push(protocol_range(text, path, site.statement.range)?);
         }
 
         Ok(Self {
@@ -497,12 +535,90 @@ impl ExplainedPositions {
         let uri = location.uri.as_str();
         let start = location.range.start;
         self.call_sites.contains(&(uri.to_owned(), start))
-            || self.import_statements.get(uri).is_some_and(|ranges| {
-                ranges
-                    .iter()
-                    .any(|range| range.start <= start && start < range.end)
-            })
+            || self
+                .import_statements
+                .get(uri)
+                .is_some_and(|ranges| ranges.iter().any(|range| range_holds(*range, start)))
     }
+}
+
+/// The protocol positions of the syntax entities.
+struct EntityPositions<'a> {
+    names: HashSet<(&'a str, Position)>,
+    callable_scopes: HashMap<&'a str, Vec<Range>>,
+}
+
+impl<'a> EntityPositions<'a> {
+    /// # Errors
+    ///
+    /// Returns an error if an entity is in a document that is not open or
+    /// outside its source.
+    fn new(documents: &DocumentIndex<'_>, syntax: &'a SyntaxFacts) -> Result<Self, LspError> {
+        let mut names = HashSet::new();
+        let mut callable_scopes = HashMap::<&str, Vec<Range>>::new();
+        for entity in &syntax.entities {
+            let path = entity.evidence.path.as_str();
+            let (_, text) = documents.get(path)?;
+            for declaration in &entity.evidence.declarations {
+                names.insert((
+                    path,
+                    byte_offset_to_position(text, path, declaration.start)?,
+                ));
+            }
+            if let (EntityKind::Callable(_), Some(scope)) = (&entity.kind, entity.evidence.scope) {
+                callable_scopes
+                    .entry(path)
+                    .or_default()
+                    .push(protocol_range(text, path, scope)?);
+            }
+        }
+        Ok(Self {
+            names,
+            callable_scopes,
+        })
+    }
+
+    /// Returns, for each symbol, whether it is an entity and whether it gets a
+    /// reference request: an entity or a symbol outside every callable.
+    fn flags(&self, symbols: &[(&str, ProtocolSymbolSite)]) -> (Vec<bool>, Vec<bool>) {
+        symbols
+            .iter()
+            .map(|(path, symbol)| {
+                let entity = self.is_entity(path, symbol);
+                (entity, entity || !self.in_callable(path, symbol))
+            })
+            .unzip()
+    }
+
+    /// Returns `true` when an entity name starts at the selection of the symbol.
+    fn is_entity(&self, path: &str, symbol: &ProtocolSymbolSite) -> bool {
+        self.names.contains(&(path, symbol.selection.start))
+    }
+
+    /// Returns `true` when a callable scope holds the selection of the symbol.
+    fn in_callable(&self, path: &str, symbol: &ProtocolSymbolSite) -> bool {
+        self.callable_scopes.get(path).is_some_and(|scopes| {
+            scopes
+                .iter()
+                .any(|scope| range_holds(*scope, symbol.selection.start))
+        })
+    }
+}
+
+/// Converts one byte range of a source into a protocol range.
+///
+/// # Errors
+///
+/// Returns an error if the range is outside the source.
+fn protocol_range(text: &str, path: &str, range: SourceRange) -> Result<Range, LspError> {
+    Ok(Range::new(
+        byte_offset_to_position(text, path, range.start)?,
+        byte_offset_to_position(text, path, range.end)?,
+    ))
+}
+
+fn range_holds(range: Range, position: Position) -> bool {
+    range.start <= position && position < range.end
 }
 
 /// The URI and text of each open document by source path.
@@ -533,10 +649,11 @@ impl<'a> DocumentIndex<'a> {
     ///
     /// Returns an error if the path names no open document.
     fn get(&self, path: &str) -> Result<(&'a Uri, &'a str), LspError> {
-        self.documents
-            .get(path)
-            .copied()
-            .ok_or_else(|| LspError::new(format!("the import site document is not open: {path}")))
+        self.documents.get(path).copied().ok_or_else(|| {
+            LspError::new(format!(
+                "the syntax facts name a document that is not open: {path}"
+            ))
+        })
     }
 }
 
@@ -712,11 +829,15 @@ mod tests {
     };
 
     use super::{
-        CapturedDocument, CapturedSemanticFact, ExplainedPositions, ProtocolSymbolSite,
-        definition_locations, incoming_call_fact, nested_symbols, outgoing_call_fact, symbol_sites,
+        CapturedDocument, CapturedSemanticFact, DocumentIndex, EntityPositions, ExplainedPositions,
+        ProtocolSymbolSite, definition_locations, incoming_call_fact, nested_symbols,
+        outgoing_call_fact, symbol_sites,
     };
     use crate::analysis::{
-        fact::{EntityKey, ImportSite},
+        fact::{
+            CallableData, CallableKind, EntityEvidence, EntityKey, EntityKind, ImportSite,
+            SyntaxFactBuilder,
+        },
         source::{DocumentSnapshot, SourceRange, SourceSpan, Sources},
     };
 
@@ -853,6 +974,65 @@ mod tests {
         assert!(explained.contains(&at(0, 16)));
         assert!(explained.contains(&at(1, 0)));
         assert!(!explained.contains(&at(2, 10)));
+    }
+
+    #[test]
+    fn finds_entity_symbols_and_symbols_inside_callables() {
+        let content = "Alias = int\ndef run(value: Alias):\n    local = value\n";
+        let source = DocumentSnapshot {
+            path: "app.py".into(),
+            content: content.to_owned(),
+        };
+        let documents = [CapturedDocument {
+            path: "app.py".to_owned(),
+            uri: uri("file:///workspace/app.py"),
+            symbols: Vec::new(),
+        }];
+        let mut syntax = SyntaxFactBuilder::new();
+        let module = syntax
+            .add_module("app.py", content)
+            .expect("the module should be new");
+        syntax.add_entity(
+            &module,
+            "run".to_owned(),
+            EntityKind::Callable(CallableData {
+                kind: CallableKind::Function,
+                signature: None,
+                parameters: Vec::new(),
+                return_type: None,
+                documentation: None,
+            }),
+            EntityEvidence {
+                path: "app.py".to_owned(),
+                declarations: vec![SourceRange { start: 16, end: 19 }],
+                scope: Some(SourceRange { start: 12, end: 53 }),
+                body: None,
+                type_inputs: Vec::new(),
+                type_outputs: Vec::new(),
+            },
+        );
+        let syntax = syntax.finish();
+        let sources = Sources::new(vec![&source]);
+        let index = DocumentIndex::new(&documents, &sources).expect("the document is open");
+
+        let entities = EntityPositions::new(&index, &syntax).expect("the entities should be valid");
+        let at = |line, character| ProtocolSymbolSite {
+            uri: uri("file:///workspace/app.py"),
+            selection: Range::new(
+                Position::new(line, character),
+                Position::new(line, character + 1),
+            ),
+            kind: SymbolKind::VARIABLE,
+            name: "symbol".to_owned(),
+        };
+
+        // `run` is an entity, `Alias` is a module-level name, and the parameter
+        // and the local are inside `run`.
+        assert!(entities.is_entity("app.py", &at(1, 4)));
+        assert!(!entities.is_entity("app.py", &at(0, 0)));
+        assert!(!entities.in_callable("app.py", &at(0, 0)));
+        assert!(entities.in_callable("app.py", &at(1, 8)));
+        assert!(entities.in_callable("app.py", &at(2, 4)));
     }
 
     #[test]

@@ -21,7 +21,7 @@ use lsp_types::{
 use serde_json::{Value, json};
 
 use crate::analysis::{
-    fact::{ImportSite, SemanticFact},
+    fact::{SemanticFact, SyntaxFacts},
     language::{Language, ServerCommand},
     source::Sources,
 };
@@ -70,7 +70,7 @@ pub enum ServerReadiness {
 pub fn produce_semantic_facts(
     config: &SessionConfig<'_>,
     sources: &Sources<'_>,
-    import_sites: &[ImportSite],
+    syntax: &SyntaxFacts,
 ) -> Result<Vec<SemanticFact>, LspError> {
     let root = fs::canonicalize(config.root).map_err(|error| {
         LspError::new(format!(
@@ -101,7 +101,7 @@ pub fn produce_semantic_facts(
         timing::record_stage(started, || format!("{} server start", config.language));
         let started = timing::start();
         let captured =
-            capture::capture_document_semantics(&mut client, config, &root, sources, import_sites);
+            capture::capture_document_semantics(&mut client, config, &root, sources, syntax);
         timing::record_stage(started, || format!("{} capture", config.language));
         captured
     });
@@ -286,7 +286,7 @@ mod tests {
         validate_capabilities,
     };
     use crate::analysis::{
-        fact::{ResolutionFallback, SemanticFact},
+        fact::{ResolutionFallback, SemanticFact, SyntaxFacts},
         language::Language,
         lsp::{LspError, ProtocolSymbolSite, fake_server::FakeServer},
         source::{DocumentSnapshot, Sources},
@@ -642,7 +642,7 @@ mod tests {
             readiness,
         };
 
-        produce_semantic_facts(&config, &sources, &[])
+        produce_semantic_facts(&config, &sources, &SyntaxFacts::default())
     }
 
     fn fallback(_: &ProtocolSymbolSite) -> ResolutionFallback {

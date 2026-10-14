@@ -13,7 +13,7 @@ mod syntax;
 use std::path::PathBuf;
 
 use crate::analysis::{
-    fact::{AnalysisError, ImportSite, SemanticFact, SyntaxFacts},
+    fact::{AnalysisError, SemanticFact, SyntaxFacts},
     lsp::LspError,
     source::{DocumentSnapshot, Sources},
 };
@@ -70,9 +70,9 @@ impl LanguageAdapter for PythonAdapter {
     fn produce_semantic_facts(
         &mut self,
         sources: &Sources<'_>,
-        import_sites: &[ImportSite],
+        syntax: &SyntaxFacts,
     ) -> Result<Vec<SemanticFact>, AnalysisError> {
-        server::produce_semantic_facts(&self.root, &self.profile, sources, import_sites)
+        server::produce_semantic_facts(&self.root, &self.profile, sources, syntax)
             .map_err(language_server_error)
     }
 }
