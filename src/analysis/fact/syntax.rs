@@ -1,6 +1,6 @@
 //! Syntax Fact Builder
 //!
-//! `SyntaxFactBuilder` creates entity and relation facts.
+//! `SyntaxFactBuilder` creates entity, relation, and import-site facts.
 //! It assigns stable entity keys and merges repeated fields.
 //! Each fact list retains insertion order.
 
@@ -8,7 +8,7 @@ use std::collections::HashMap;
 
 use crate::analysis::{
     fact::{
-        AnalysisError, EntityEvidence, EntityFact, EntityKey, EntityKind, FieldData,
+        AnalysisError, EntityEvidence, EntityFact, EntityKey, EntityKind, FieldData, ImportSite,
         RelationEvidence, RelationFact, RelationKind, SyntaxFacts,
     },
     source::{SourceRange, SourceSpan},
@@ -17,6 +17,7 @@ use crate::analysis::{
 pub struct SyntaxFactBuilder {
     entities: Vec<EntityFact>,
     relations: Vec<RelationFact>,
+    import_sites: Vec<ImportSite>,
     entity_positions: HashMap<EntityKey, usize>,
 }
 
@@ -26,6 +27,7 @@ impl SyntaxFactBuilder {
         Self {
             entities: Vec::new(),
             relations: Vec::new(),
+            import_sites: Vec::new(),
             entity_positions: HashMap::new(),
         }
     }
@@ -129,31 +131,37 @@ impl SyntaxFactBuilder {
 
     /// Adds one relation without an observation.
     pub fn add_relation(&mut self, source: &EntityKey, target: &EntityKey, kind: RelationKind) {
-        self.add_observed_relation(source, target, kind, Vec::new());
-    }
-
-    /// Adds one relation with its observations.
-    pub fn add_observed_relation(
-        &mut self,
-        source: &EntityKey,
-        target: &EntityKey,
-        kind: RelationKind,
-        observations: Vec<SourceSpan>,
-    ) {
         self.relations.push(RelationFact {
             source: source.clone(),
             target: target.clone(),
             kind,
-            evidence: RelationEvidence { observations },
+            evidence: RelationEvidence {
+                observations: Vec::new(),
+            },
         });
     }
 
-    /// Returns both fact lists and consumes the builder.
+    /// Adds one import statement with its owner and imported names.
+    pub fn add_import_site(
+        &mut self,
+        owner: &EntityKey,
+        statement: SourceSpan,
+        names: Vec<SourceRange>,
+    ) {
+        self.import_sites.push(ImportSite {
+            owner: owner.clone(),
+            statement,
+            names,
+        });
+    }
+
+    /// Returns all fact lists and consumes the builder.
     #[must_use]
     pub fn finish(self) -> SyntaxFacts {
         SyntaxFacts {
             entities: self.entities,
             relations: self.relations,
+            import_sites: self.import_sites,
         }
     }
 

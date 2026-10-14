@@ -1,8 +1,8 @@
 //! Semantic edge construction.
 //!
-//! Adds call, type, and reference edges from the semantic facts of one
-//! language. The graph with its syntax nodes and the semantic facts are the
-//! input. Semantic edges are the output.
+//! Adds call, type, reference, and import edges from the semantic facts of one
+//! language. The graph with its syntax nodes, the semantic facts, and the
+//! import statements are the input. Semantic edges are the output.
 //!
 //! # Sections
 //!
@@ -14,7 +14,7 @@ use std::collections::{HashMap, HashSet};
 use super::{build::EdgeAccumulator, lookup::SyntaxGraphIndex};
 use crate::analysis::{
     fact::{
-        AnalysisError, EntityKind, RelationKind, ReportedLocation, ResolutionFallback,
+        AnalysisError, EntityKind, ImportSite, RelationKind, ReportedLocation, ResolutionFallback,
         SemanticFact, SymbolAnchor, TypeKind,
     },
     graph::{Edge, Graph, NodeId, ProvenanceOrigin},
@@ -26,7 +26,8 @@ use crate::analysis::{
 // Semantic Edge Construction
 // -----------------------------------------------------------------------------
 
-/// Builds edges from semantic facts.
+/// Builds edges from semantic facts and the import statements with their
+/// owner nodes.
 ///
 /// # Errors
 ///
@@ -35,11 +36,13 @@ pub(super) fn build_semantic_edges(
     graph: &Graph,
     language: Language,
     semantic_facts: &[SemanticFact],
+    imports: &[(NodeId, ImportSite)],
 ) -> Result<Vec<Edge>, AnalysisError> {
-    let lookup = SyntaxGraphIndex::new(graph);
+    let lookup = SyntaxGraphIndex::new(graph, imports);
     let call_positions = collect_call_positions(semantic_facts);
     let mut edges = EdgeAccumulator::new(ProvenanceOrigin::Semantic);
 
+    add_import_edges(&lookup, language, semantic_facts, imports, &mut edges);
     add_call_edges(&lookup, language, semantic_facts, &mut edges)?;
     add_type_use_edges(&lookup, language, semantic_facts, &mut edges)?;
     add_reference_edges(
@@ -83,7 +86,9 @@ fn collect_call_positions(semantic_facts: &[SemanticFact]) -> HashSet<SourcePosi
         .iter()
         .filter_map(|fact| match fact {
             SemanticFact::Call { call_sites, .. } => Some(call_sites),
-            SemanticFact::Reference { .. } | SemanticFact::TypeDefinition { .. } => None,
+            SemanticFact::Reference { .. }
+            | SemanticFact::TypeDefinition { .. }
+            | SemanticFact::Definition { .. } => None,
         })
         .flatten()
         .filter_map(|site| match site {
@@ -91,6 +96,56 @@ fn collect_call_positions(semantic_facts: &[SemanticFact]) -> HashSet<SourcePosi
             ReportedLocation::Unselected => None,
         })
         .collect()
+}
+
+/// Adds import edges from the definitions of imported names.
+///
+/// The target is the node declared at a definition, or else the file module
+/// of the definition. A definition outside the selected sources, a target
+/// without a node, and an import of the owner itself add no edge.
+fn add_import_edges(
+    lookup: &SyntaxGraphIndex<'_>,
+    language: Language,
+    semantic_facts: &[SemanticFact],
+    imports: &[(NodeId, ImportSite)],
+    edges: &mut EdgeAccumulator,
+) {
+    let imports_by_name = imports
+        .iter()
+        .flat_map(|import| {
+            import
+                .1
+                .names
+                .iter()
+                .map(move |name| ((import.1.statement.path.as_str(), name.start), import))
+        })
+        .collect::<HashMap<_, _>>();
+
+    for fact in semantic_facts {
+        let SemanticFact::Definition { query, targets } = fact else {
+            continue;
+        };
+        let Some((owner, site)) = imports_by_name.get(&(query.path.as_str(), query.range.start))
+        else {
+            continue;
+        };
+        for location in targets {
+            let ReportedLocation::Selected(location) = location else {
+                continue;
+            };
+            let target = lookup
+                .declaration_at(language, &location.path, location.range.start)
+                .or_else(|| lookup.file_module(language, &location.path));
+            if let Some(target) = target.filter(|target| target != owner) {
+                edges.observe(
+                    *owner,
+                    target,
+                    RelationKind::Imports,
+                    vec![site.statement.clone()],
+                );
+            }
+        }
+    }
 }
 
 /// Adds call edges from call facts.
@@ -314,7 +369,9 @@ fn declared_types_by_symbol(
                 queried_symbol,
                 targets,
             } => Some((anchor_position(queried_symbol)?, targets.as_slice())),
-            SemanticFact::Call { .. } | SemanticFact::Reference { .. } => None,
+            SemanticFact::Call { .. }
+            | SemanticFact::Reference { .. }
+            | SemanticFact::Definition { .. } => None,
         })
         .collect()
 }
@@ -521,13 +578,14 @@ mod tests {
     use super::{build_semantic_edges, match_symbol};
     use crate::analysis::{
         fact::{
-            EntityFact, EntityKind, RelationKind, ResolutionFallback, SemanticFact, SyntaxFacts,
+            EntityFact, EntityKind, ImportSite, RelationKind, ReportedLocation, ResolutionFallback,
+            SemanticFact, SyntaxFacts,
         },
         graph::{
             Graph, NodeId, ProvenanceOrigin,
             fixtures::{
-                anchor, class, constructor, entity, field, function, locations, relation, span,
-                to_syntax_graph,
+                anchor, class, constructor, entity, field, fixture_key, function, locations,
+                relation, span, to_syntax_graph,
             },
             lookup::SyntaxGraphIndex,
         },
@@ -549,10 +607,11 @@ mod tests {
                     Some((0, 100)),
                 )],
                 relations: Vec::new(),
+                import_sites: Vec::new(),
             },
         )
         .expect("the syntax fixture must materialize");
-        let lookup = SyntaxGraphIndex::new(&graph);
+        let lookup = SyntaxGraphIndex::new(&graph, &[]);
         let generated = anchor("app.py", 50, ResolutionFallback::Ignore, "(generated)");
 
         let matched = match_symbol(&lookup, Language::Python, &generated)
@@ -575,6 +634,7 @@ mod tests {
                     Some((0, 100)),
                 )],
                 relations: Vec::new(),
+                import_sites: Vec::new(),
             },
         )
         .expect("the Rust syntax fixture must materialize");
@@ -583,7 +643,7 @@ mod tests {
             occurrences: locations(&[("src/lib.rs", 50, 59)]),
         }];
 
-        let edges = build_semantic_edges(&graph, Language::Rust, &semantic)
+        let edges = build_semantic_edges(&graph, Language::Rust, &semantic, &[])
             .expect("the ignored Rust anchor should not fail");
 
         assert!(edges.is_empty());
@@ -597,7 +657,7 @@ mod tests {
             occurrences: locations(&[("src/lib.rs", 50, 53)]),
         }];
 
-        let edges = build_semantic_edges(&graph, Language::Rust, &semantic)
+        let edges = build_semantic_edges(&graph, Language::Rust, &semantic, &[])
             .expect("the exact Rust declaration should resolve");
 
         assert_eq!(edges.len(), 1);
@@ -615,7 +675,7 @@ mod tests {
             call_sites: Vec::new(),
         }];
 
-        let error = build_semantic_edges(&graph, Language::Rust, &semantic)
+        let error = build_semantic_edges(&graph, Language::Rust, &semantic, &[])
             .err()
             .expect("the invalid secondary anchor should fail");
 
@@ -635,7 +695,7 @@ mod tests {
             call_sites: locations(&[("missing.rs", 0, 1)]),
         }];
 
-        let error = build_semantic_edges(&graph, Language::Rust, &semantic)
+        let error = build_semantic_edges(&graph, Language::Rust, &semantic, &[])
             .err()
             .expect("the invalid call site should fail");
 
@@ -654,7 +714,7 @@ mod tests {
             occurrences: locations(&[("missing.rs", 0, 1)]),
         }];
 
-        let error = build_semantic_edges(&graph, Language::Rust, &semantic)
+        let error = build_semantic_edges(&graph, Language::Rust, &semantic, &[])
             .err()
             .expect("the invalid reference occurrence should fail");
 
@@ -673,7 +733,7 @@ mod tests {
             targets: locations(&[("missing.rs", 0, 1)]),
         }];
 
-        let error = build_semantic_edges(&graph, Language::Rust, &semantic)
+        let error = build_semantic_edges(&graph, Language::Rust, &semantic, &[])
             .err()
             .expect("the invalid type target should fail");
 
@@ -707,6 +767,7 @@ mod tests {
                     ),
                 ],
                 relations: vec![relation(0, 1, RelationKind::Contains, None)],
+                import_sites: Vec::new(),
             },
         )
         .expect("the Rust syntax fixture must materialize")
@@ -719,6 +780,7 @@ mod tests {
             SyntaxFacts {
                 entities: vec![entity(0, "value", "app.py", field(), Some((10, 15)), None)],
                 relations: Vec::new(),
+                import_sites: Vec::new(),
             },
         )
         .expect("the syntax fixture must materialize");
@@ -727,7 +789,7 @@ mod tests {
             occurrences: locations(&[("missing.py", 20, 25)]),
         }];
 
-        let error = build_semantic_edges(&graph, Language::Python, &semantic)
+        let error = build_semantic_edges(&graph, Language::Python, &semantic, &[])
             .err()
             .expect("the invalid occurrence should fail");
 
@@ -739,8 +801,13 @@ mod tests {
         let syntax_graph = semantic_edge_syntax_graph();
         let semantic_facts = semantic_edge_facts();
 
-        let edges = build_semantic_edges(&syntax_graph, Language::Python, &semantic_facts)
-            .expect("semantic edge construction must succeed");
+        let edges = build_semantic_edges(
+            &syntax_graph,
+            Language::Python,
+            &semantic_facts,
+            &[import_site((0, 9), &[])],
+        )
+        .expect("semantic edge construction must succeed");
 
         assert_eq!(
             edges
@@ -781,6 +848,87 @@ mod tests {
     }
 
     #[test]
+    fn imports_the_declared_node_or_the_file_module() {
+        let syntax_graph = semantic_edge_syntax_graph();
+        let facts = vec![
+            // The definition is the `User` declaration.
+            SemanticFact::Definition {
+                query: span("app.py", 16, 20),
+                targets: locations(&[("lib.py", 10, 14)]),
+            },
+            // The definition is the start of `lib.py`, which declares nothing.
+            SemanticFact::Definition {
+                query: span("app.py", 22, 25),
+                targets: locations(&[("lib.py", 0, 0)]),
+            },
+            // One definition is outside the project and one is the owner itself.
+            SemanticFact::Definition {
+                query: span("app.py", 27, 29),
+                targets: vec![
+                    ReportedLocation::Unselected,
+                    ReportedLocation::Selected(span("app.py", 0, 0)),
+                ],
+            },
+        ];
+
+        let edges = build_semantic_edges(
+            &syntax_graph,
+            Language::Python,
+            &facts,
+            &[import_site((0, 30), &[(16, 20), (22, 25), (27, 29)])],
+        )
+        .expect("semantic edge construction must succeed");
+
+        assert_eq!(
+            edges
+                .iter()
+                .map(|edge| (
+                    edge.source.0,
+                    edge_name(edge.kind),
+                    edge.target.0,
+                    edge.weight,
+                ))
+                .collect::<Vec<_>>(),
+            vec![(0, "imports", 1, 1), (0, "imports", 2, 1)]
+        );
+        assert!(edges.iter().all(|edge| {
+            edge.provenance.origin == ProvenanceOrigin::Semantic
+                && edge.provenance.evidence.observations == [span("app.py", 0, 30)]
+        }));
+    }
+
+    #[test]
+    fn drops_a_reference_inside_an_import_statement() {
+        let syntax_graph = semantic_edge_syntax_graph();
+        let facts = vec![SemanticFact::Reference {
+            target: anchor("lib.py", 10, ResolutionFallback::None, "User"),
+            occurrences: locations(&[("app.py", 5, 9)]),
+        }];
+
+        let edges = build_semantic_edges(
+            &syntax_graph,
+            Language::Python,
+            &facts,
+            &[import_site((0, 9), &[(5, 9)])],
+        )
+        .expect("semantic edge construction must succeed");
+
+        assert!(edges.is_empty());
+    }
+
+    /// Returns one `app.py` import statement that the module node owns.
+    fn import_site(statement: (u32, u32), names: &[(u32, u32)]) -> (NodeId, ImportSite) {
+        (
+            NodeId(0),
+            ImportSite {
+                owner: fixture_key(0),
+                statement: span("app.py", statement.0, statement.1),
+                names: ranges(names),
+            },
+        )
+    }
+
+    #[test]
     fn points_a_signature_type_along_its_direction() {
         let syntax_graph = signature_syntax_graph();
         let facts = vec![SemanticFact::Reference {
@@ -796,7 +944,7 @@ mod tests {
             ]),
         }];
 
-        let edges = build_semantic_edges(&syntax_graph, Language::Python, &facts)
+        let edges = build_semantic_edges(&syntax_graph, Language::Python, &facts, &[])
             .expect("semantic edge construction must succeed");
 
         assert_eq!(
@@ -828,7 +976,7 @@ mod tests {
             },
         ];
 
-        let edges = build_semantic_edges(&syntax_graph, Language::Python, &facts)
+        let edges = build_semantic_edges(&syntax_graph, Language::Python, &facts, &[])
             .expect("semantic edge construction must succeed");
 
         assert_eq!(
@@ -862,7 +1010,7 @@ mod tests {
             },
         ];
 
-        let edges = build_semantic_edges(&syntax_graph, Language::Python, &facts)
+        let edges = build_semantic_edges(&syntax_graph, Language::Python, &facts, &[])
             .expect("semantic edge construction must succeed");
 
         assert_eq!(
@@ -884,7 +1032,7 @@ mod tests {
             targets: locations(&[("lib.py", 10, 14)]),
         }];
 
-        let edges = build_semantic_edges(&syntax_graph, Language::Python, &facts)
+        let edges = build_semantic_edges(&syntax_graph, Language::Python, &facts, &[])
             .expect("semantic edge construction must succeed");
 
         assert_eq!(
@@ -905,7 +1053,7 @@ mod tests {
             targets: locations(&[("app.py", 20, 29)]),
         }];
 
-        let edges = build_semantic_edges(&syntax_graph, Language::Python, &facts)
+        let edges = build_semantic_edges(&syntax_graph, Language::Python, &facts, &[])
             .expect("semantic edge construction must succeed");
 
         assert!(edges.is_empty());
@@ -919,7 +1067,7 @@ mod tests {
             targets: locations(&[("lib.py", 10, 14)]),
         }];
 
-        let edges = build_semantic_edges(&syntax_graph, Language::Python, &facts)
+        let edges = build_semantic_edges(&syntax_graph, Language::Python, &facts, &[])
             .expect("semantic edge construction must succeed");
 
         assert_eq!(
@@ -944,7 +1092,7 @@ mod tests {
             occurrences: locations(&[("app.py", 40, 45), ("app.py", 60, 65)]),
         }];
 
-        let edges = build_semantic_edges(&syntax_graph, Language::Python, &facts)
+        let edges = build_semantic_edges(&syntax_graph, Language::Python, &facts, &[])
             .expect("semantic edge construction must succeed");
 
         assert!(edges.is_empty());
@@ -976,7 +1124,7 @@ mod tests {
             },
         ];
 
-        let edges = build_semantic_edges(&syntax_graph, Language::Python, &facts)
+        let edges = build_semantic_edges(&syntax_graph, Language::Python, &facts, &[])
             .expect("semantic edge construction must succeed");
 
         assert_eq!(
@@ -1030,6 +1178,7 @@ mod tests {
                     relation(0, 2, RelationKind::Contains, None),
                     relation(1, 1, RelationKind::Contains, None),
                 ],
+                import_sites: Vec::new(),
             },
         )
         .expect("the syntax fixture must materialize")
@@ -1091,8 +1240,8 @@ mod tests {
                     relation(2, 4, RelationKind::Contains, None),
                     relation(2, 6, RelationKind::Contains, None),
                     relation(1, 7, RelationKind::Contains, None),
-                    relation(0, 1, RelationKind::Imports, Some(span("app.py", 0, 9))),
                 ],
+                import_sites: Vec::new(),
             },
         )
         .expect("the syntax fixture must materialize")
@@ -1199,7 +1348,8 @@ mod tests {
             RelationKind::OutputType => "output_type",
             RelationKind::UsesType => "uses_type",
             RelationKind::UsesValue => "uses_value",
-            RelationKind::Contains | RelationKind::Imports => "unexpected",
+            RelationKind::Imports => "imports",
+            RelationKind::Contains => "unexpected",
         }
     }
 }

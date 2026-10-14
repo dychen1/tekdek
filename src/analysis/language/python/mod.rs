@@ -3,8 +3,9 @@
 //! This module owns the adapter that reports syntax and semantic facts from Python sources.
 //!
 //! `syntax` selects and parses Python sources. It reports modules, classes,
-//! callables, fields, containment, imports, and declared metadata.
-//! `server` runs Pyright. It reports resolved calls, references, and type targets.
+//! callables, fields, containment, import sites, and declared metadata.
+//! `server` runs Pyright. It reports resolved calls, references, type targets,
+//! and import definitions.
 
 mod server;
 mod syntax;
@@ -12,7 +13,7 @@ mod syntax;
 use std::path::PathBuf;
 
 use crate::analysis::{
-    fact::{AnalysisError, SemanticFact, SyntaxFacts},
+    fact::{AnalysisError, ImportSite, SemanticFact, SyntaxFacts},
     lsp::LspError,
     source::{DocumentSnapshot, Sources},
 };
@@ -69,8 +70,9 @@ impl LanguageAdapter for PythonAdapter {
     fn produce_semantic_facts(
         &mut self,
         sources: &Sources<'_>,
+        import_sites: &[ImportSite],
     ) -> Result<Vec<SemanticFact>, AnalysisError> {
-        server::produce_semantic_facts(&self.root, &self.profile, sources)
+        server::produce_semantic_facts(&self.root, &self.profile, sources, import_sites)
             .map_err(language_server_error)
     }
 }

@@ -23,7 +23,7 @@ use std::{error::Error, fmt, io};
 
 use lsp_types::{DocumentSymbol, Location, Range, SymbolKind, Uri};
 
-use crate::analysis::fact::ResolutionFallback;
+use crate::analysis::{fact::ResolutionFallback, source::SourceSpan};
 
 pub(crate) use client::{LspClient, file_uri, uri_path};
 
@@ -70,6 +70,11 @@ pub(crate) enum CapturedSemanticFact {
     },
     TypeDefinition {
         queried_symbol: ProtocolSymbolSite,
+        targets: Vec<Location>,
+    },
+    /// The query is the source span of one imported name.
+    Definition {
+        query: SourceSpan,
         targets: Vec<Location>,
     },
 }

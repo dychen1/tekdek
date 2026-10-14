@@ -213,6 +213,8 @@ mod tests {
     use super::{PipelineConfig, PipelineError, run};
     use crate::{
         analysis::{
+            fact::RelationKind,
+            graph::ProvenanceOrigin,
             language::{Language, LanguageProfile},
             lsp::fake_server::FakeServer,
         },
@@ -225,7 +227,7 @@ mod tests {
         repository.write("app.py", "def run():\n    pass\n");
         repository.write("src/lib.rs", "pub fn run() {}\n");
         let server = FakeServer::new();
-        let config = pipeline_config(&repository, &server, "serve");
+        let config = pipeline_config(&repository, &server, "serve", "serve");
 
         let graph = run(&config)
             .expect("both fake language servers should complete")
@@ -260,7 +262,7 @@ mod tests {
         repository.write("app.py", "def run():\n    pass\n");
         repository.write("src/lib.rs", "pub fn run() {}\n");
         let server = FakeServer::new();
-        let config = pipeline_config(&repository, &server, "protocol-error");
+        let config = pipeline_config(&repository, &server, "serve", "protocol-error");
 
         let Err(error) = run(&config) else {
             panic!("the Rust fake server should return an error");
@@ -278,6 +280,62 @@ mod tests {
         );
     }
 
+    #[test]
+    fn imports_the_node_that_the_server_reports_as_the_definition() {
+        let repository = TestRepository::new();
+        repository.write("app.py", "from lib import run\n");
+        repository.write("lib.py", "def run():\n    pass\n");
+        let server = FakeServer::new();
+        let config = pipeline_config(&repository, &server, "serve", "serve");
+
+        let graph = run(&config)
+            .expect("the fake language server should complete")
+            .graph;
+        let imports = graph
+            .edges
+            .iter()
+            .filter(|edge| edge.kind == RelationKind::Imports)
+            .map(|edge| {
+                (
+                    graph.nodes[edge.source.index()].key.as_str(),
+                    graph.nodes[edge.target.index()].key.as_str(),
+                    edge.provenance.origin,
+                    edge.provenance.evidence.observations[0].range.end,
+                )
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            imports,
+            [(
+                "app.py",
+                "lib.py::callable:run",
+                ProvenanceOrigin::Semantic,
+                19
+            )]
+        );
+    }
+
+    #[test]
+    fn adds_no_import_edge_for_a_definition_outside_the_project() {
+        let repository = TestRepository::new();
+        repository.write("app.py", "from lib import run\n");
+        repository.write("lib.py", "def run():\n    pass\n");
+        let server = FakeServer::new();
+        let config = pipeline_config(&repository, &server, "definition-outside", "serve");
+
+        let graph = run(&config)
+            .expect("the fake language server should complete")
+            .graph;
+
+        assert!(
+            graph
+                .edges
+                .iter()
+                .all(|edge| edge.kind != RelationKind::Imports)
+        );
+    }
+
     fn profile_mut(profiles: &mut [LanguageProfile], language: Language) -> &mut LanguageProfile {
         profiles
             .iter_mut()
@@ -288,10 +346,11 @@ mod tests {
     fn pipeline_config(
         repository: &TestRepository,
         server: &FakeServer,
+        python_mode: &str,
         rust_mode: &str,
     ) -> PipelineConfig {
         let mut config = PipelineConfig::new(repository.path().to_path_buf());
-        profile_mut(&mut config.profiles, Language::Python).server = server.command("serve");
+        profile_mut(&mut config.profiles, Language::Python).server = server.command(python_mode);
         profile_mut(&mut config.profiles, Language::Rust).server = server.command(rust_mode);
         config
     }

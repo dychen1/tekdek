@@ -1,7 +1,7 @@
 //! Rust module paths.
 //!
 //! This module maps Rust source files to crate roots and module paths, and it
-//! resolves qualified `use` paths against the current module.
+//! resolves qualified paths against the current module.
 
 use std::{
     ffi::OsStr,
@@ -28,10 +28,7 @@ pub(super) fn relative_module_path(
     current_module: &ModulePath,
     path: &[String],
 ) -> Option<ModulePath> {
-    let mut path = path.to_vec();
-    if path.len() > 1 && path.last().is_some_and(|part| part == "self") {
-        path.pop();
-    }
+    let path = path.to_vec();
     let Some(first) = path.first().map(String::as_str) else {
         return Some(current_module.clone());
     };

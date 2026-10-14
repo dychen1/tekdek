@@ -1,18 +1,20 @@
 //! Semantic capture.
 //!
 //! This module owns every document request: document opening, document
-//! symbols, the semantic requests of each symbol, and response conversion. An
-//! initialized client, a session configuration, and selected sources are the
-//! inputs. One protocol capture is the output.
+//! symbols, the semantic requests of each symbol, the definition request of
+//! each imported name, and response conversion. An initialized client, a
+//! session configuration, selected sources, and import sites are the inputs.
+//! One protocol capture is the output.
 //!
 //! # Sections
 //!
 //! `Document Capture` opens the documents and captures their symbols and facts.
 //! `Per-Symbol Requests` requests each supported fact type for one symbol.
+//! `Import Definitions` requests the definition of each imported name.
 //! `Symbol Sites` converts hierarchical symbols into ordered protocol sites.
 //! `Response Conversion` converts protocol responses into captured facts.
 
-use std::{path::Path, time::Duration};
+use std::{collections::HashMap, path::Path, time::Duration};
 
 use lsp_types::{
     CallHierarchyIncomingCall, CallHierarchyIncomingCallsParams, CallHierarchyItem,
@@ -24,23 +26,27 @@ use lsp_types::{
     notification::DidOpenTextDocument,
     request::{
         CallHierarchyIncomingCalls, CallHierarchyOutgoingCalls, CallHierarchyPrepare,
-        DocumentSymbolRequest, GotoTypeDefinition, References, Request,
+        DocumentSymbolRequest, GotoDefinition, GotoTypeDefinition, References, Request,
     },
 };
 
 use super::{
     CapturedDocument, CapturedSemanticFact, LspClient, LspError, ProtocolSymbolSite,
     SemanticCapture, file_uri,
-    normalize::source_path,
+    normalize::{byte_offset_to_position, source_path},
     session::{SessionConfig, language_title},
 };
-use crate::analysis::source::Sources;
+use crate::analysis::{
+    fact::ImportSite,
+    source::{SourceSpan, Sources},
+};
 
 // -----------------------------------------------------------------------------
 // Document Capture
 // -----------------------------------------------------------------------------
 
-/// Opens all documents, then captures facts for every hierarchical symbol.
+/// Opens all documents, then captures facts for every hierarchical symbol and
+/// every imported name.
 ///
 /// # Errors
 ///
@@ -50,6 +56,7 @@ pub(crate) fn capture_document_semantics(
     config: &SessionConfig<'_>,
     root: &Path,
     sources: &Sources<'_>,
+    import_sites: &[ImportSite],
 ) -> Result<SemanticCapture, LspError> {
     let mut files = Vec::with_capacity(sources.len());
 
@@ -102,7 +109,8 @@ pub(crate) fn capture_document_semantics(
         })
         .collect::<Result<Vec<_>, LspError>>()?;
 
-    let facts = request_facts(client, &files)?;
+    let mut facts = request_facts(client, &files)?;
+    facts.extend(request_definitions(client, &files, sources, import_sites)?);
 
     Ok(SemanticCapture {
         documents: files,
@@ -160,7 +168,7 @@ fn capture_symbol(
             work_done_progress_params: WorkDoneProgressParams::default(),
         },
         path,
-        symbol,
+        &symbol.name,
     )?
     .unwrap_or_default();
 
@@ -173,7 +181,7 @@ fn capture_symbol(
                 partial_result_params: PartialResultParams::default(),
             },
             path,
-            symbol,
+            &symbol.name,
         )?
         .unwrap_or_default();
         facts.extend(
@@ -190,7 +198,7 @@ fn capture_symbol(
                 partial_result_params: PartialResultParams::default(),
             },
             path,
-            symbol,
+            &symbol.name,
         )?
         .unwrap_or_default();
         facts.extend(
@@ -211,7 +219,7 @@ fn capture_symbol(
             },
         },
         path,
-        symbol,
+        &symbol.name,
     )?
     .unwrap_or_default();
     if !occurrences.is_empty() {
@@ -229,9 +237,9 @@ fn capture_symbol(
             partial_result_params: PartialResultParams::default(),
         },
         path,
-        symbol,
+        &symbol.name,
     )?
-    .map(type_definition_locations)
+    .map(definition_locations)
     .unwrap_or_default();
     if !targets.is_empty() {
         facts.push(CapturedSemanticFact::TypeDefinition {
@@ -243,12 +251,12 @@ fn capture_symbol(
     Ok(())
 }
 
-/// Sends one request with symbol context in its error.
+/// Sends one request with the queried name in its error.
 fn request<R>(
     client: &mut LspClient,
     parameters: R::Params,
     path: &str,
-    symbol: &ProtocolSymbolSite,
+    name: &str,
 ) -> Result<R::Result, LspError>
 where
     R: Request,
@@ -257,9 +265,8 @@ where
         .request::<R>(parameters, REQUEST_TIMEOUT)
         .map_err(|error| {
             LspError::new(format!(
-                "cannot request {} for {} in {path}: {error}",
-                R::METHOD,
-                symbol.name
+                "cannot request {} for {name} in {path}: {error}",
+                R::METHOD
             ))
         })
 }
@@ -269,6 +276,77 @@ fn symbol_position(symbol: &ProtocolSymbolSite) -> TextDocumentPositionParams {
         TextDocumentIdentifier::new(symbol.uri.clone()),
         symbol.selection.start,
     )
+}
+
+// -----------------------------------------------------------------------------
+// Import Definitions
+// -----------------------------------------------------------------------------
+
+/// Requests the definition at the start of every imported name.
+///
+/// Facts follow import-site order and name order. An empty response adds no
+/// fact.
+///
+/// # Errors
+///
+/// Returns an error if an import site names a document that is not open, a
+/// name is outside its source, or a request fails.
+fn request_definitions(
+    client: &mut LspClient,
+    documents: &[CapturedDocument],
+    sources: &Sources<'_>,
+    import_sites: &[ImportSite],
+) -> Result<Vec<CapturedSemanticFact>, LspError> {
+    let uris = documents
+        .iter()
+        .map(|document| (document.path.as_str(), &document.uri))
+        .collect::<HashMap<_, _>>();
+    let texts = sources
+        .iter()
+        .map(|source| Ok((source_path(source)?, source.content.as_str())))
+        .collect::<Result<HashMap<_, _>, LspError>>()?;
+    let mut facts = Vec::new();
+
+    for site in import_sites {
+        let path = site.statement.path.as_str();
+        let (Some(uri), Some(text)) = (uris.get(path), texts.get(path)) else {
+            return Err(LspError::new(format!(
+                "the import site document is not open: {path}"
+            )));
+        };
+        for name in &site.names {
+            let position = byte_offset_to_position(text, path, name.start)?;
+            let name_text = text
+                .get(name.start as usize..name.end as usize)
+                .unwrap_or("an imported name");
+            let targets = request::<GotoDefinition>(
+                client,
+                GotoDefinitionParams {
+                    text_document_position_params: TextDocumentPositionParams::new(
+                        TextDocumentIdentifier::new((*uri).clone()),
+                        position,
+                    ),
+                    work_done_progress_params: WorkDoneProgressParams::default(),
+                    partial_result_params: PartialResultParams::default(),
+                },
+                path,
+                name_text,
+            )?
+            .map(definition_locations)
+            .unwrap_or_default();
+            if !targets.is_empty() {
+                facts.push(CapturedSemanticFact::Definition {
+                    query: SourceSpan {
+                        path: path.to_owned(),
+                        range: *name,
+                    },
+                    targets,
+                });
+            }
+        }
+    }
+
+    Ok(facts)
 }
 
 // -----------------------------------------------------------------------------
@@ -353,11 +431,11 @@ fn incoming_call_fact(
     }
 }
 
-/// Reshapes every type-definition response form into locations.
+/// Reshapes every definition or type-definition response form into locations.
 ///
 /// The protocol supports a scalar, an array, and a link response.
 /// A link uses its target selection range.
-fn type_definition_locations(response: GotoDefinitionResponse) -> Vec<Location> {
+fn definition_locations(response: GotoDefinitionResponse) -> Vec<Location> {
     match response {
         GotoDefinitionResponse::Scalar(location) => vec![location],
         GotoDefinitionResponse::Array(locations) => locations,
@@ -397,8 +475,8 @@ mod tests {
     };
 
     use super::{
-        CapturedSemanticFact, ProtocolSymbolSite, incoming_call_fact, nested_symbols,
-        outgoing_call_fact, symbol_sites, type_definition_locations,
+        CapturedSemanticFact, ProtocolSymbolSite, definition_locations, incoming_call_fact,
+        nested_symbols, outgoing_call_fact, symbol_sites,
     };
 
     #[test]
@@ -492,7 +570,7 @@ mod tests {
     }
 
     #[test]
-    fn normalizes_all_type_definition_shapes() {
+    fn normalizes_all_definition_shapes() {
         let first = Location::new(uri("file:///workspace/first.py"), range(1));
         let second = Location::new(uri("file:///workspace/second.py"), range(2));
         let link = LocationLink {
@@ -503,15 +581,15 @@ mod tests {
         };
 
         assert_eq!(
-            type_definition_locations(GotoDefinitionResponse::Scalar(first.clone())),
+            definition_locations(GotoDefinitionResponse::Scalar(first.clone())),
             vec![first.clone()]
         );
         assert_eq!(
-            type_definition_locations(GotoDefinitionResponse::Array(vec![first.clone()])),
+            definition_locations(GotoDefinitionResponse::Array(vec![first.clone()])),
             vec![first]
         );
         assert_eq!(
-            type_definition_locations(GotoDefinitionResponse::Link(vec![link])),
+            definition_locations(GotoDefinitionResponse::Link(vec![link])),
             vec![second]
         );
     }

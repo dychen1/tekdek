@@ -2,11 +2,12 @@
 //!
 //! `FactSet` contains codebase facts.
 //!
-//! `SyntaxFacts` come from parsing source. They define entities and
-//! syntax relations with source evidence.
+//! `SyntaxFacts` come from parsing source. They define entities, syntax
+//! relations with source evidence, and import sites.
 //!
 //! `SemanticFact` values come from an LSP server. They report calls,
-//! references, and type definitions with symbol anchors and source locations.
+//! references, type definitions, and import definitions with symbol anchors
+//! and source locations.
 //!
 //! The `graph` module builds the codebase graph from these facts.
 //!
@@ -61,6 +62,7 @@ impl FactSet {
 pub struct SyntaxFacts {
     pub entities: Vec<EntityFact>,
     pub relations: Vec<RelationFact>,
+    pub import_sites: Vec<ImportSite>,
 }
 
 pub struct EntityFact {
@@ -77,6 +79,16 @@ pub struct RelationFact {
     pub evidence: RelationEvidence,
 }
 
+/// One import statement and the imported names that capture queries.
+///
+/// `owner` is the module or callable whose scope holds the statement. Each
+/// name range holds bytes in the statement path.
+pub struct ImportSite {
+    pub owner: EntityKey,
+    pub statement: SourceSpan,
+    pub names: Vec<SourceRange>,
+}
+
 /// One fact from an LSP server.
 #[derive(Debug, Eq, PartialEq)]
 pub enum SemanticFact {
@@ -91,6 +103,11 @@ pub enum SemanticFact {
     },
     TypeDefinition {
         queried_symbol: SymbolAnchor,
+        targets: Vec<ReportedLocation>,
+    },
+    /// The definitions of the imported name at `query`.
+    Definition {
+        query: SourceSpan,
         targets: Vec<ReportedLocation>,
     },
 }

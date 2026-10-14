@@ -8,7 +8,7 @@ mod syntax;
 use std::path::PathBuf;
 
 use crate::analysis::{
-    fact::{AnalysisError, SemanticFact, SyntaxFacts},
+    fact::{AnalysisError, ImportSite, SemanticFact, SyntaxFacts},
     lsp::LspError,
     source::{DocumentSnapshot, Sources},
 };
@@ -65,8 +65,9 @@ impl LanguageAdapter for RustAdapter {
     fn produce_semantic_facts(
         &mut self,
         sources: &Sources<'_>,
+        import_sites: &[ImportSite],
     ) -> Result<Vec<SemanticFact>, AnalysisError> {
-        server::produce_semantic_facts(&self.root, &self.profile, sources)
+        server::produce_semantic_facts(&self.root, &self.profile, sources, import_sites)
             .map_err(language_server_error)
     }
 }
@@ -141,7 +142,7 @@ mod tests {
         let sources = Sources::new(Vec::new());
 
         let error = adapter
-            .produce_semantic_facts(&sources)
+            .produce_semantic_facts(&sources, &[])
             .expect_err("a missing Rust root must fail");
 
         assert!(

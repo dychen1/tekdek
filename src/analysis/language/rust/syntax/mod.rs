@@ -1,7 +1,7 @@
 //! Rust syntax facts.
 //!
 //! This module selects Rust documents and extracts native syntax facts.
-//! It reports modules, types, fields, callables, containment, local imports,
+//! It reports modules, types, fields, callables, containment, import sites,
 //! and declared metadata.
 //!
 //! `paths` maps files to crate roots and module paths. `signature` reads
@@ -209,7 +209,7 @@ impl RustSyntaxWalker {
 ///
 /// Pass one registers modules and types. Pass two registers fields and
 /// callables. Both passes add the containment relation of each new entity.
-/// Pass three adds local import relations.
+/// Pass three adds import sites.
 fn produce_document_facts(documents: &[ParsedDocument<'_>]) -> Result<SyntaxFacts, AnalysisError> {
     let mut walker = RustSyntaxWalker::new();
 
@@ -237,12 +237,7 @@ fn produce_document_facts(documents: &[ParsedDocument<'_>]) -> Result<SyntaxFact
     }
     for document in documents {
         let module = EntityKey::module(&document.path);
-        walker.add_import_relations(
-            document,
-            &document.syntax.items,
-            &document.module_path,
-            &module,
-        )?;
+        walker.add_import_sites(document, &document.syntax.items, &module)?;
     }
 
     Ok(walker.builder.finish())
@@ -674,29 +669,13 @@ impl RustSyntaxWalker {
         current_module: &EntityKey,
         path: &[String],
     ) -> Lookup<EntityKey> {
-        if path.is_empty() {
-            return Lookup::Unique(current_module.clone());
-        }
-        self.resolve_module(current_path, current_module, path)
-    }
-
-    fn resolve_module(
-        &self,
-        current_path: &ModulePath,
-        current_module: &EntityKey,
-        path: &[String],
-    ) -> Lookup<EntityKey> {
-        if path == ["self"] {
+        if path.is_empty() || path == ["self"] {
             return Lookup::Unique(current_module.clone());
         }
         let Some(path) = relative_module_path(current_path, path) else {
             return Lookup::Absent;
         };
-        self.lookup_module(&path)
-    }
-
-    fn lookup_module(&self, path: &ModulePath) -> Lookup<EntityKey> {
-        unique_entity(self.modules.get(path))
+        unique_entity(self.modules.get(&path))
     }
 
     fn lookup_type(&self, owner: &EntityKey, name: &str) -> Lookup<EntityKey> {
@@ -707,11 +686,11 @@ impl RustSyntaxWalker {
         )
     }
 
-    fn add_import_relations(
+    /// Adds one import site for each `use` item in a module and its inline modules.
+    fn add_import_sites(
         &mut self,
         document: &ParsedDocument<'_>,
         items: &[Item],
-        module_path: &ModulePath,
         module: &EntityKey,
     ) -> Result<(), AnalysisError> {
         for item in items {
@@ -719,17 +698,19 @@ impl RustSyntaxWalker {
                 // Enter one inline module.
                 Item::Mod(item) => {
                     if let Some((_, nested_items)) = &item.content {
-                        let mut nested_path = module_path.clone();
-                        nested_path.segments.push(item.ident.to_string());
                         let nested = self.declared_module(document, &item.ident)?;
-                        self.add_import_relations(document, nested_items, &nested_path, &nested)?;
+                        self.add_import_sites(document, nested_items, &nested)?;
                     }
                 }
-                // Resolve direct local use paths.
+                // Record one use statement and its leaf names.
                 Item::Use(item) => {
-                    let mut paths = Vec::new();
-                    flatten_use_tree(&item.tree, &mut Vec::new(), &mut paths);
-                    let observation = SourceSpan {
+                    let mut leaves = Vec::new();
+                    use_tree_leaves(&item.tree, None, &mut leaves);
+                    let names = leaves
+                        .into_iter()
+                        .map(|leaf| source_range(document, leaf))
+                        .collect::<Result<_, _>>()?;
+                    let statement = SourceSpan {
                         path: document.path.clone(),
                         range: source_range_between(
                             document,
@@ -737,35 +718,13 @@ impl RustSyntaxWalker {
                             item.semi_token.span,
                         )?,
                     };
-                    for path in paths {
-                        if let Some(target) = self.resolve_import(module_path, module, &path) {
-                            self.builder.add_observed_relation(
-                                module,
-                                &target,
-                                RelationKind::Imports,
-                                vec![observation.clone()],
-                            );
-                        }
-                    }
+                    self.builder.add_import_site(module, statement, names);
                 }
                 // Ignore syntax without nested module imports.
                 _ => {}
             }
         }
         Ok(())
-    }
-
-    fn resolve_import(
-        &self,
-        current_path: &ModulePath,
-        current_module: &EntityKey,
-        path: &[String],
-    ) -> Option<EntityKey> {
-        match self.resolve_module(current_path, current_module, path) {
-            Lookup::Unique(module) => Some(module),
-            Lookup::Ambiguous => None,
-            Lookup::Absent => self.resolve_type(current_path, current_module, path),
-        }
     }
 }
 
@@ -822,34 +781,25 @@ fn unique_entity(entities: Option<&Vec<EntityKey>>) -> Lookup<EntityKey> {
     }
 }
 
-fn flatten_use_tree(tree: &UseTree, prefix: &mut Vec<String>, paths: &mut Vec<Vec<String>>) {
+/// Collects the spans of the names to query in one use tree.
+///
+/// A glob queries the last path segment before `::*`.
+fn use_tree_leaves(tree: &UseTree, last_segment: Option<Span>, leaves: &mut Vec<Span>) {
     match tree {
-        // Add one path prefix.
-        UseTree::Path(path) => {
-            prefix.push(path.ident.to_string());
-            flatten_use_tree(&path.tree, prefix, paths);
-            prefix.pop();
-        }
-        // Add one imported name.
-        UseTree::Name(name) => {
-            let mut path = prefix.clone();
-            path.push(name.ident.to_string());
-            paths.push(path);
-        }
-        // Add one renamed import by its source name.
-        UseTree::Rename(rename) => {
-            let mut path = prefix.clone();
-            path.push(rename.ident.to_string());
-            paths.push(path);
-        }
-        // Expand every import in one group.
+        // Descend one path segment.
+        UseTree::Path(path) => use_tree_leaves(&path.tree, Some(path.ident.span()), leaves),
+        // Query one imported name, including `self` in a group.
+        UseTree::Name(name) => leaves.push(name.ident.span()),
+        // Query the source name of one renamed import.
+        UseTree::Rename(rename) => leaves.push(rename.ident.span()),
+        // Query every import in one group.
         UseTree::Group(group) => {
             for tree in &group.items {
-                flatten_use_tree(tree, prefix, paths);
+                use_tree_leaves(tree, last_segment, leaves);
             }
         }
-        // Ignore glob imports because they have no unique target.
-        UseTree::Glob(_) => {}
+        // Query the module of one glob import.
+        UseTree::Glob(_) => leaves.extend(last_segment),
     }
 }
 
@@ -1226,31 +1176,24 @@ mod tests {
 
     #[test]
     fn resolves_crate_paths_within_each_package() {
-        let source = "mod shared { pub struct Item; }\nuse crate::shared::Item;\n";
+        let source =
+            "mod shared { pub struct Item; }\nimpl crate::shared::Item { fn run(&self) {} }\n";
         let documents = [
             document("src/lib.rs", source),
             document("crates/api/src/lib.rs", source),
         ];
         let facts = facts_for_documents(&documents).expect("both packages must produce facts");
-        let root = entity_with_key(&facts, "src/lib.rs");
         let root_item = entity_with_key(&facts, "src/lib.rs::module:shared::type:Item");
-        let api = entity_with_key(&facts, "crates/api/src/lib.rs");
+        let root_run =
+            entity_with_key(&facts, "src/lib.rs::module:shared::type:Item::callable:run");
         let api_item = entity_with_key(&facts, "crates/api/src/lib.rs::module:shared::type:Item");
+        let api_run = entity_with_key(
+            &facts,
+            "crates/api/src/lib.rs::module:shared::type:Item::callable:run",
+        );
 
-        assert_imports(&facts, root, root_item);
-        assert_imports(&facts, api, api_item);
-        assert!(!has_relation(
-            &facts,
-            &root.key,
-            &api_item.key,
-            RelationKind::Imports
-        ));
-        assert!(!has_relation(
-            &facts,
-            &api.key,
-            &root_item.key,
-            RelationKind::Imports
-        ));
+        assert_contains(&facts, &root_item.key, &root_run.key);
+        assert_contains(&facts, &api_item.key, &api_run.key);
     }
 
     #[test]
@@ -1326,99 +1269,113 @@ mod tests {
         }
     }
 
+    const SERVICE_IMPL: &str = "impl crate::service::Service { fn run(&self) {} }\n";
+
     #[test]
     fn resolves_directory_form_binary_modules() {
         let documents = [
-            document("src/bin/tool/main.rs", "use crate::service;\n"),
+            document("src/bin/tool/main.rs", SERVICE_IMPL),
             document("src/bin/tool/service.rs", "pub struct Service;\n"),
         ];
         let facts = facts_for_documents(&documents).expect("the binary target must produce facts");
-        let root = entity_with_key(&facts, "src/bin/tool/main.rs");
-        let service = entity_with_key(&facts, "src/bin/tool/service.rs");
+        let service = entity_with_key(&facts, "src/bin/tool/service.rs::type:Service");
+        let run = entity_with_key(
+            &facts,
+            "src/bin/tool/service.rs::type:Service::callable:run",
+        );
 
-        assert_imports(&facts, root, service);
+        assert_contains(&facts, &service.key, &run.key);
     }
 
     #[test]
     fn resolves_directory_form_example_modules() {
         let documents = [
-            document("examples/demo/main.rs", "use crate::service;\n"),
+            document("examples/demo/main.rs", SERVICE_IMPL),
             document("examples/demo/service.rs", "pub struct Service;\n"),
         ];
         let facts = facts_for_documents(&documents).expect("the example target must produce facts");
-        let root = entity_with_key(&facts, "examples/demo/main.rs");
-        let service = entity_with_key(&facts, "examples/demo/service.rs");
+        let service = entity_with_key(&facts, "examples/demo/service.rs::type:Service");
+        let run = entity_with_key(
+            &facts,
+            "examples/demo/service.rs::type:Service::callable:run",
+        );
 
-        assert_imports(&facts, root, service);
+        assert_contains(&facts, &service.key, &run.key);
     }
 
     #[test]
     fn resolves_nested_crate_modules_from_their_source_root() {
         let documents = [
-            document("crates/api/src/lib.rs", "use crate::service;\n"),
+            document("crates/api/src/lib.rs", SERVICE_IMPL),
             document("crates/api/src/service.rs", "pub struct Service;\n"),
         ];
         let facts = facts_for_documents(&documents).expect("the nested crate must produce facts");
-        let root = entity_with_key(&facts, "crates/api/src/lib.rs");
-        let service = entity_with_key(&facts, "crates/api/src/service.rs");
+        let service = entity_with_key(&facts, "crates/api/src/service.rs::type:Service");
+        let run = entity_with_key(
+            &facts,
+            "crates/api/src/service.rs::type:Service::callable:run",
+        );
 
-        assert_imports(&facts, root, service);
+        assert_contains(&facts, &service.key, &run.key);
     }
 
     #[test]
     fn does_not_fall_back_to_root_for_unprefixed_nested_paths() {
-        let source = "mod target { pub struct Record; }\nmod nested {\n    impl target::Record { fn wrong(&self) {} }\n    use target;\n}\n";
+        let source = "mod target { pub struct Record; }\nmod nested {\n    impl target::Record { fn wrong(&self) {} }\n}\n";
         let facts = facts_for("lib.rs", source).expect("the source must produce facts");
         let root = entity(&facts, "lib.rs", |kind| matches!(kind, EntityKind::Module));
         let wrong = callable_entity(&facts, "wrong");
 
         assert_eq!(wrong.key.as_str(), "lib.rs::callable:wrong");
         assert_contains(&facts, &root.key, &wrong.key);
-        assert!(
-            facts
-                .relations
-                .iter()
-                .all(|relation| relation.kind != RelationKind::Imports)
-        );
     }
 
     #[test]
     fn stops_resolution_at_an_ambiguous_relative_namespace() {
-        let source = "struct Record;\nmod target {}\nmod nested {\n    #[cfg(first)] struct Record;\n    #[cfg(second)] struct Record;\n    #[cfg(first)] mod target {}\n    #[cfg(second)] mod target {}\n    impl Record { fn ambiguous(&self) {} }\n    use target;\n}\n";
+        let source = "struct Record;\nmod target {}\nmod nested {\n    #[cfg(first)] struct Record;\n    #[cfg(second)] struct Record;\n    #[cfg(first)] mod target {}\n    #[cfg(second)] mod target {}\n    impl Record { fn ambiguous(&self) {} }\n    impl target::Record { fn hidden(&self) {} }\n}\n";
         let facts = facts_for("lib.rs", source).expect("ambiguous syntax must still produce facts");
         let root = entity(&facts, "lib.rs", |kind| matches!(kind, EntityKind::Module));
         let ambiguous = callable_entity(&facts, "ambiguous");
+        let hidden = callable_entity(&facts, "hidden");
 
         assert_eq!(ambiguous.key.as_str(), "lib.rs::callable:ambiguous");
         assert_contains(&facts, &root.key, &ambiguous.key);
+        assert_eq!(hidden.key.as_str(), "lib.rs::callable:hidden");
+        assert_contains(&facts, &root.key, &hidden.key);
+    }
+
+    #[test]
+    fn records_use_sites_with_the_leaves_to_query() {
+        let source = "use crate::alpha::{self, Beta as B, gamma::*};\nmod nested {\n    pub use super::*;\n}\n";
+        let facts = facts_for("lib.rs", source).expect("the source must produce facts");
+
+        assert_eq!(
+            facts
+                .import_sites
+                .iter()
+                .map(|site| (
+                    site.owner.as_str(),
+                    range_text(source, site.statement.range),
+                    site.names
+                        .iter()
+                        .map(|name| range_text(source, *name))
+                        .collect::<Vec<_>>(),
+                ))
+                .collect::<Vec<_>>(),
+            vec![
+                (
+                    "lib.rs",
+                    "use crate::alpha::{self, Beta as B, gamma::*};",
+                    vec!["self", "Beta", "gamma"],
+                ),
+                ("lib.rs::module:nested", "use super::*;", vec!["super"]),
+            ]
+        );
         assert!(
             facts
                 .relations
                 .iter()
-                .all(|relation| relation.kind != RelationKind::Imports)
-        );
-    }
-
-    #[test]
-    fn records_unambiguous_local_use_relations() {
-        let source = "mod alpha {}\nuse crate::alpha;\n";
-        let facts = facts_for("lib.rs", source).expect("the source must produce facts");
-        let root = entity(&facts, "lib.rs", |kind| matches!(kind, EntityKind::Module));
-        let alpha = entity(&facts, "alpha", |kind| matches!(kind, EntityKind::Module));
-        let import = facts
-            .relations
-            .iter()
-            .find(|relation| {
-                relation.source == root.key
-                    && relation.target == alpha.key
-                    && relation.kind == RelationKind::Imports
-            })
-            .expect("the local use must produce an import relation");
-
-        assert_eq!(import.evidence.observations.len(), 1);
-        assert_eq!(
-            range_text(source, import.evidence.observations[0].range),
-            "use crate::alpha;"
+                .all(|relation| relation.kind == RelationKind::Contains)
         );
     }
 
@@ -1534,15 +1491,6 @@ mod tests {
                 && relation.target == *child
                 && relation.kind == RelationKind::Contains
         }));
-    }
-
-    fn assert_imports(facts: &SyntaxFacts, source: &EntityFact, target: &EntityFact) {
-        assert!(has_relation(
-            facts,
-            &source.key,
-            &target.key,
-            RelationKind::Imports
-        ));
     }
 
     fn has_relation(

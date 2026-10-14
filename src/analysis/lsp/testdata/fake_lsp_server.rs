@@ -4,6 +4,9 @@
 //! a language server. The first argument selects the mode, for example
 //! `serve`, `reject`, or `status-quiescent`. On `shutdown`, the program writes
 //! a `shutdown-requested` marker next to its executable.
+//!
+//! Every definition answer points at `run` in `lib.py` of the workspace root.
+//! The `definition-outside` mode points at a file outside the workspace.
 
 use std::{
     env, fs,
@@ -22,6 +25,7 @@ fn main() -> io::Result<()> {
     let stdout = io::stdout();
     let mut input = stdin.lock();
     let mut output = stdout.lock();
+    let mut root_uri = String::new();
 
     while let Some(message) = read_message(&mut input)? {
         let request_id = request_id(&message);
@@ -42,10 +46,15 @@ fn main() -> io::Result<()> {
                 eprintln!("initialization options were not forwarded");
                 process::exit(1);
             }
+            root_uri = message
+                .split_once(r#""rootUri":""#)
+                .and_then(|(_, rest)| rest.split_once('"'))
+                .map(|(uri, _)| uri.to_owned())
+                .unwrap_or_default();
             write_result(
                 &mut output,
                 request_id,
-                r#"{"capabilities":{"documentSymbolProvider":true,"callHierarchyProvider":true,"referencesProvider":true,"typeDefinitionProvider":true}}"#,
+                r#"{"capabilities":{"documentSymbolProvider":true,"callHierarchyProvider":true,"referencesProvider":true,"typeDefinitionProvider":true,"definitionProvider":true}}"#,
             )?;
         } else if message.contains(r#""method":"initialized""#) {
             // A well-behaved server reports readiness when the client asks.
@@ -96,6 +105,19 @@ fn main() -> io::Result<()> {
             write_result(&mut output, required_id(request_id)?, "[]")?;
         } else if message.contains(r#""method":"textDocument/typeDefinition""#) {
             write_result(&mut output, required_id(request_id)?, "null")?;
+        } else if message.contains(r#""method":"textDocument/definition""#) {
+            let uri = if mode == "definition-outside" {
+                "file:///outside/lib.py".to_owned()
+            } else {
+                format!("{root_uri}/lib.py")
+            };
+            write_result(
+                &mut output,
+                required_id(request_id)?,
+                &format!(
+                    r#"{{"uri":{uri:?},"range":{{"start":{{"line":0,"character":4}},"end":{{"line":0,"character":7}}}}}}"#
+                ),
+            )?;
         } else if message.contains(r#""method":"shutdown""#) {
             let executable = env::current_exe()?;
             let directory = executable

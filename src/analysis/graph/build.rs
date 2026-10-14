@@ -15,7 +15,7 @@ use std::collections::HashMap;
 use super::semantic::build_semantic_edges;
 use crate::analysis::{
     fact::{
-        AnalysisError, EntityFact, EntityKey, FactSet, RelationEvidence, RelationFact,
+        AnalysisError, EntityFact, EntityKey, FactSet, ImportSite, RelationEvidence, RelationFact,
         RelationKind, SyntaxFacts,
     },
     graph::{Edge, Graph, Node, NodeId, Provenance, ProvenanceOrigin},
@@ -54,19 +54,19 @@ pub fn build_graph(
         semantic,
     } in fact_sets
     {
-        materialize_syntax(
+        let imports = materialize_syntax(
             &mut graph,
             &mut node_ids,
             &mut syntax_edges,
             language,
             syntax,
         )?;
-        semantic_batches.push((language, semantic));
+        semantic_batches.push((language, imports, semantic));
     }
     graph.edges = syntax_edges.finish()?;
 
-    for (language, semantic) in semantic_batches {
-        let semantic_edges = build_semantic_edges(&graph, language, &semantic)?;
+    for (language, imports, semantic) in semantic_batches {
+        let semantic_edges = build_semantic_edges(&graph, language, &semantic, &imports)?;
         graph.edges.extend(semantic_edges);
     }
 
@@ -93,16 +93,19 @@ fn hash_content(nodes: &mut [Node], documents: &[DocumentSnapshot]) {
 // Syntax Materialization
 // -----------------------------------------------------------------------------
 
+/// Adds the syntax nodes and edges, and returns each import site with its
+/// owner node.
 fn materialize_syntax(
     graph: &mut Graph,
     node_ids: &mut HashMap<EntityKey, NodeId>,
     edges: &mut EdgeAccumulator,
     language: Language,
     facts: SyntaxFacts,
-) -> Result<(), AnalysisError> {
+) -> Result<Vec<(NodeId, ImportSite)>, AnalysisError> {
     let SyntaxFacts {
         entities,
         relations,
+        import_sites,
     } = facts;
     for EntityFact {
         key,
@@ -155,10 +158,18 @@ fn materialize_syntax(
         edges.observe(source, target, kind, evidence.observations);
     }
 
-    Ok(())
+    import_sites
+        .into_iter()
+        .map(|site| {
+            Ok((
+                resolve_endpoint_key(graph, node_ids, language, &site.owner)?,
+                site,
+            ))
+        })
+        .collect()
 }
 
-/// Resolves a relation endpoint to a node.
+/// Resolves a relation endpoint or an import owner to a node.
 ///
 /// # Errors
 ///
@@ -287,9 +298,10 @@ mod tests {
             ],
             relations: vec![
                 relation(0, 2, RelationKind::Contains, None),
-                relation(2, 1, RelationKind::Imports, None),
-                relation(2, 1, RelationKind::Imports, None),
+                relation(1, 2, RelationKind::Contains, None),
+                relation(1, 2, RelationKind::Contains, None),
             ],
+            import_sites: Vec::new(),
         };
 
         let syntax = to_syntax_graph(Language::Python, facts).expect("the facts must be valid");
@@ -298,7 +310,7 @@ mod tests {
         assert_eq!(syntax.nodes[2].key, fixture_key(2));
         assert_eq!(syntax.edges.len(), 2);
         assert!(matches!(syntax.edges[0].kind, RelationKind::Contains));
-        assert!(matches!(syntax.edges[1].kind, RelationKind::Imports));
+        assert_eq!(syntax.edges[1].source, NodeId(1));
         assert_eq!(syntax.edges[1].weight, 2);
     }
 
@@ -332,6 +344,7 @@ mod tests {
                     },
                 }],
                 relations: Vec::new(),
+                import_sites: Vec::new(),
             },
             Vec::new(),
         )
@@ -361,11 +374,12 @@ mod tests {
                     relations: vec![RelationFact {
                         source: rust_key,
                         target: EntityKey::module("python.py"),
-                        kind: RelationKind::Imports,
+                        kind: RelationKind::Contains,
                         evidence: RelationEvidence {
                             observations: Vec::new(),
                         },
                     }],
+                    import_sites: Vec::new(),
                 },
                 Vec::new(),
             );
@@ -454,6 +468,7 @@ mod tests {
                         observations: Vec::new(),
                     },
                 }],
+                import_sites: Vec::new(),
             },
             semantic,
         )
@@ -478,6 +493,7 @@ mod tests {
                     },
                 }],
                 relations: Vec::new(),
+                import_sites: Vec::new(),
             },
             vec![SemanticFact::Reference {
                 target: anchor("target.py", 10, ResolutionFallback::None, "target"),
@@ -501,6 +517,7 @@ mod tests {
                     },
                 }],
                 relations: Vec::new(),
+                import_sites: Vec::new(),
             },
             Vec::new(),
         );

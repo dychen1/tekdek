@@ -21,7 +21,7 @@ use lsp_types::{
 use serde_json::{Value, json};
 
 use crate::analysis::{
-    fact::SemanticFact,
+    fact::{ImportSite, SemanticFact},
     language::{Language, ServerCommand},
     source::Sources,
 };
@@ -69,6 +69,7 @@ pub enum ServerReadiness {
 pub fn produce_semantic_facts(
     config: &SessionConfig<'_>,
     sources: &Sources<'_>,
+    import_sites: &[ImportSite],
 ) -> Result<Vec<SemanticFact>, LspError> {
     let root = fs::canonicalize(config.root).map_err(|error| {
         LspError::new(format!(
@@ -95,7 +96,7 @@ pub fn produce_semantic_facts(
     )?;
     let captured = validate_capabilities(&result.capabilities).and_then(|()| {
         await_readiness(&mut client, config)?;
-        capture::capture_document_semantics(&mut client, config, &root, sources)
+        capture::capture_document_semantics(&mut client, config, &root, sources, import_sites)
     });
     let shutdown = client.shutdown();
 
@@ -123,6 +124,10 @@ fn initialize_parameters(
             text_document: Some(TextDocumentClientCapabilities {
                 call_hierarchy: Some(DynamicRegistrationClientCapabilities {
                     dynamic_registration: Some(false),
+                }),
+                definition: Some(GotoCapability {
+                    dynamic_registration: Some(false),
+                    link_support: Some(true),
                 }),
                 document_symbol: Some(DocumentSymbolClientCapabilities {
                     symbol_kind: Some(SymbolKindCapability {
@@ -199,7 +204,8 @@ fn await_readiness(client: &mut LspClient, config: &SessionConfig<'_>) -> Result
     }
 }
 
-/// Requires the four capabilities that capture uses for every symbol.
+/// Requires the capabilities that capture uses for every symbol and every
+/// imported name.
 fn validate_capabilities(capabilities: &ServerCapabilities) -> Result<(), LspError> {
     if !matches!(
         capabilities.document_symbol_provider,
@@ -236,6 +242,14 @@ fn validate_capabilities(capabilities: &ServerCapabilities) -> Result<(), LspErr
     ) {
         return Err(LspError::new(
             "the language server does not support type definitions",
+        ));
+    }
+    if !matches!(
+        capabilities.definition_provider,
+        Some(OneOf::Left(true) | OneOf::Right(_))
+    ) {
+        return Err(LspError::new(
+            "the language server does not support definitions",
         ));
     }
 
@@ -294,6 +308,10 @@ mod tests {
                     "experimental": {"serverStatusNotification": true},
                     "textDocument": {
                         "callHierarchy": {"dynamicRegistration": false},
+                        "definition": {
+                            "dynamicRegistration": false,
+                            "linkSupport": true,
+                        },
                         "documentSymbol": {
                             "symbolKind": {"valueSet": (1..=26).collect::<Vec<_>>()},
                             "hierarchicalDocumentSymbolSupport": true,
@@ -346,6 +364,25 @@ mod tests {
         assert_eq!(
             error.to_string(),
             "the language server does not support call hierarchy"
+        );
+    }
+
+    #[test]
+    fn rejects_a_server_without_definitions() {
+        let capabilities = ServerCapabilities {
+            document_symbol_provider: Some(OneOf::Left(true)),
+            call_hierarchy_provider: Some(CallHierarchyServerCapability::Simple(true)),
+            references_provider: Some(OneOf::Left(true)),
+            type_definition_provider: Some(TypeDefinitionProviderCapability::Simple(true)),
+            ..ServerCapabilities::default()
+        };
+
+        let error =
+            validate_capabilities(&capabilities).expect_err("definitions should be required");
+
+        assert_eq!(
+            error.to_string(),
+            "the language server does not support definitions"
         );
     }
 
@@ -598,7 +635,7 @@ mod tests {
             readiness,
         };
 
-        produce_semantic_facts(&config, &sources)
+        produce_semantic_facts(&config, &sources, &[])
     }
 
     fn fallback(_: &ProtocolSymbolSite) -> ResolutionFallback {
