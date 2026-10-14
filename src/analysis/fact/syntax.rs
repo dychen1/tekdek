@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use crate::analysis::{
     fact::{
         AnalysisError, EntityEvidence, EntityFact, EntityKey, EntityKind, FieldData, ImportSite,
-        RelationEvidence, RelationFact, RelationKind, SyntaxFacts,
+        RelationFact, RelationKind, SyntaxFacts,
     },
     source::{SourceRange, SourceSpan},
 };
@@ -129,15 +129,12 @@ impl SyntaxFactBuilder {
         key
     }
 
-    /// Adds one relation without an observation.
+    /// Adds one relation.
     pub fn add_relation(&mut self, source: &EntityKey, target: &EntityKey, kind: RelationKind) {
         self.relations.push(RelationFact {
             source: source.clone(),
             target: target.clone(),
             kind,
-            evidence: RelationEvidence {
-                observations: Vec::new(),
-            },
         });
     }
 

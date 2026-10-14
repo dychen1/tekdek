@@ -290,7 +290,8 @@ mod tests {
     #[test]
     fn imports_the_node_that_the_server_reports_as_the_definition() {
         let repository = TestRepository::new();
-        repository.write("app.py", "from lib import run\n");
+        // The server answers `null` for `lib` on line 2, so that statement adds no edge.
+        repository.write("app.py", "from lib import run\nimport lib\n");
         repository.write("lib.py", "def run():\n    pass\n");
         let server = FakeServer::new();
         let config = pipeline_config(&repository, &server, "serve", "serve");
@@ -307,6 +308,7 @@ mod tests {
                     graph.nodes[edge.source.index()].key.as_str(),
                     graph.nodes[edge.target.index()].key.as_str(),
                     edge.provenance.origin,
+                    edge.weight,
                     edge.provenance.evidence.observations[0].range.end,
                 )
             })
@@ -318,6 +320,7 @@ mod tests {
                 "app.py",
                 "lib.py::callable:run",
                 ProvenanceOrigin::Semantic,
+                1,
                 19
             )]
         );

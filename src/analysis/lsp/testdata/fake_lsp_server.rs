@@ -5,8 +5,10 @@
 //! `serve`, `reject`, or `status-quiescent`. On `shutdown`, the program writes
 //! a `shutdown-requested` marker next to its executable.
 //!
-//! Every definition answer points at `run` in `lib.py` of the workspace root.
-//! The `definition-outside` mode points at a file outside the workspace.
+//! A definition request at line 0, character 16 (`run` in
+//! `from lib import run`) answers `run` in `lib.py` of the workspace root. The
+//! `definition-outside` mode answers a file outside the workspace instead.
+//! Every other definition request answers `null`.
 
 use std::{
     env, fs,
@@ -106,6 +108,10 @@ fn main() -> io::Result<()> {
         } else if message.contains(r#""method":"textDocument/typeDefinition""#) {
             write_result(&mut output, required_id(request_id)?, "null")?;
         } else if message.contains(r#""method":"textDocument/definition""#) {
+            if !message.contains(r#""line":0"#) || !message.contains(r#""character":16"#) {
+                write_result(&mut output, required_id(request_id)?, "null")?;
+                continue;
+            }
             let uri = if mode == "definition-outside" {
                 "file:///outside/lib.py".to_owned()
             } else {

@@ -76,7 +76,6 @@ pub struct RelationFact {
     pub source: EntityKey,
     pub target: EntityKey,
     pub kind: RelationKind,
-    pub evidence: RelationEvidence,
 }
 
 /// One import statement and the imported names that capture queries.

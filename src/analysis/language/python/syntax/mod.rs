@@ -637,7 +637,8 @@ impl SyntaxWalker {
     /// Adds one import statement with the name to query for each alias.
     ///
     /// The name is the last dotted segment before `as`. A star import queries
-    /// the last segment of its module instead.
+    /// the last segment of its module instead. `from . import *` has no module
+    /// name, so it queries nothing.
     ///
     /// # Errors
     ///

@@ -150,12 +150,11 @@ fn materialize_syntax(
         source,
         target,
         kind,
-        evidence,
     } in relations
     {
         let source = resolve_endpoint_key(graph, node_ids, language, &source)?;
         let target = resolve_endpoint_key(graph, node_ids, language, &target)?;
-        edges.observe(source, target, kind, evidence.observations);
+        edges.observe(source, target, kind, Vec::new());
     }
 
     import_sites
@@ -274,8 +273,8 @@ mod tests {
     use super::{build_graph, hash_content};
     use crate::analysis::{
         fact::{
-            EntityEvidence, EntityFact, EntityKey, EntityKind, FactSet, RelationEvidence,
-            RelationFact, RelationKind, ResolutionFallback, SemanticFact, SyntaxFacts,
+            EntityEvidence, EntityFact, EntityKey, EntityKind, FactSet, RelationFact, RelationKind,
+            ResolutionFallback, SemanticFact, SyntaxFacts,
         },
         graph::{
             NodeId,
@@ -297,9 +296,9 @@ mod tests {
                 entity(2, "run", "app.py", function(), None, None),
             ],
             relations: vec![
-                relation(0, 2, RelationKind::Contains, None),
-                relation(1, 2, RelationKind::Contains, None),
-                relation(1, 2, RelationKind::Contains, None),
+                relation(0, 2, RelationKind::Contains),
+                relation(1, 2, RelationKind::Contains),
+                relation(1, 2, RelationKind::Contains),
             ],
             import_sites: Vec::new(),
         };
@@ -375,9 +374,6 @@ mod tests {
                         source: rust_key,
                         target: EntityKey::module("python.py"),
                         kind: RelationKind::Contains,
-                        evidence: RelationEvidence {
-                            observations: Vec::new(),
-                        },
                     }],
                     import_sites: Vec::new(),
                 },
@@ -464,9 +460,6 @@ mod tests {
                     source: module_key,
                     target: field_key,
                     kind: RelationKind::Contains,
-                    evidence: RelationEvidence {
-                        observations: Vec::new(),
-                    },
                 }],
                 import_sites: Vec::new(),
             },

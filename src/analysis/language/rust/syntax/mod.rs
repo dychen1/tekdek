@@ -27,8 +27,9 @@ use signature::{
 
 use proc_macro2::{LineColumn, Span};
 use syn::{
-    Attribute, Block, Fields, FnArg, ImplItem, Item, ItemImpl, ItemMod, ItemTrait, PathArguments,
-    Signature, TraitItem, Type, TypePath, UseTree, Visibility, spanned::Spanned,
+    Attribute, Block, Fields, FnArg, ImplItem, Item, ItemImpl, ItemMod, ItemTrait, ItemUse,
+    PathArguments, Signature, Stmt, TraitItem, Type, TypePath, UseTree, Visibility,
+    spanned::Spanned,
 };
 
 use crate::analysis::{
@@ -208,8 +209,9 @@ impl RustSyntaxWalker {
 /// Produces facts with three ordered syntax passes.
 ///
 /// Pass one registers modules and types. Pass two registers fields and
-/// callables. Both passes add the containment relation of each new entity.
-/// Pass three adds import sites.
+/// callables, and the import sites in callable bodies. Both passes add the
+/// containment relation of each new entity. Pass three adds module import
+/// sites.
 fn produce_document_facts(documents: &[ParsedDocument<'_>]) -> Result<SyntaxFacts, AnalysisError> {
     let mut walker = RustSyntaxWalker::new();
 
@@ -643,6 +645,11 @@ impl RustSyntaxWalker {
         );
         self.builder
             .add_relation(owner, &entity, RelationKind::Contains);
+        for statement in body.map_or(&[][..], |block| &block.stmts) {
+            if let Stmt::Item(Item::Use(item)) = statement {
+                self.add_use_site(document, &entity, item)?;
+            }
+        }
         Ok(())
     }
 
@@ -702,28 +709,33 @@ impl RustSyntaxWalker {
                         self.add_import_sites(document, nested_items, &nested)?;
                     }
                 }
-                // Record one use statement and its leaf names.
-                Item::Use(item) => {
-                    let mut leaves = Vec::new();
-                    use_tree_leaves(&item.tree, None, &mut leaves);
-                    let names = leaves
-                        .into_iter()
-                        .map(|leaf| source_range(document, leaf))
-                        .collect::<Result<_, _>>()?;
-                    let statement = SourceSpan {
-                        path: document.path.clone(),
-                        range: source_range_between(
-                            document,
-                            item.use_token.span,
-                            item.semi_token.span,
-                        )?,
-                    };
-                    self.builder.add_import_site(module, statement, names);
-                }
+                // Record one use statement.
+                Item::Use(item) => self.add_use_site(document, module, item)?,
                 // Ignore syntax without nested module imports.
                 _ => {}
             }
         }
+        Ok(())
+    }
+
+    /// Adds one import site for one `use` item and its leaf names.
+    fn add_use_site(
+        &mut self,
+        document: &ParsedDocument<'_>,
+        owner: &EntityKey,
+        item: &ItemUse,
+    ) -> Result<(), AnalysisError> {
+        let mut leaves = Vec::new();
+        use_tree_leaves(&item.tree, None, &mut leaves);
+        let names = leaves
+            .into_iter()
+            .map(|leaf| source_range(document, leaf))
+            .collect::<Result<_, _>>()?;
+        let statement = SourceSpan {
+            path: document.path.clone(),
+            range: source_range_between(document, item.use_token.span, item.semi_token.span)?,
+        };
+        self.builder.add_import_site(owner, statement, names);
         Ok(())
     }
 }
@@ -1376,6 +1388,35 @@ mod tests {
                 .relations
                 .iter()
                 .all(|relation| relation.kind == RelationKind::Contains)
+        );
+    }
+
+    #[test]
+    fn records_use_sites_in_callable_bodies() {
+        let source = "fn main() {\n    use crate::cli::run;\n    run();\n}\nstruct App;\nimpl App {\n    fn start(&self) {\n        use super::Config as C;\n    }\n}\n";
+        let facts = facts_for("lib.rs", source).expect("the source must produce facts");
+
+        assert_eq!(
+            facts
+                .import_sites
+                .iter()
+                .map(|site| (
+                    site.owner.as_str(),
+                    range_text(source, site.statement.range),
+                    site.names
+                        .iter()
+                        .map(|name| range_text(source, *name))
+                        .collect::<Vec<_>>(),
+                ))
+                .collect::<Vec<_>>(),
+            vec![
+                ("lib.rs::callable:main", "use crate::cli::run;", vec!["run"]),
+                (
+                    "lib.rs::type:App::callable:start",
+                    "use super::Config as C;",
+                    vec!["Config"],
+                ),
+            ]
         );
     }
 

@@ -100,9 +100,11 @@ fn collect_call_positions(semantic_facts: &[SemanticFact]) -> HashSet<SourcePosi
 
 /// Adds import edges from the definitions of imported names.
 ///
-/// The target is the node declared at a definition, or else the file module
-/// of the definition. A definition outside the selected sources, a target
-/// without a node, and an import of the owner itself add no edge.
+/// The target is the node declared at a definition, else the smallest scope
+/// that holds it, else its file module. A definition at offset 0 names its
+/// file module: servers report a module there, and a node that starts there
+/// is not the module. A definition outside the selected sources and an import
+/// of the owner itself add no edge.
 fn add_import_edges(
     lookup: &SyntaxGraphIndex<'_>,
     language: Language,
@@ -133,8 +135,14 @@ fn add_import_edges(
             let ReportedLocation::Selected(location) = location else {
                 continue;
             };
-            let target = lookup
-                .declaration_at(language, &location.path, location.range.start)
+            let offset = location.range.start;
+            let target = (offset > 0)
+                .then(|| {
+                    lookup
+                        .declaration_at(language, &location.path, offset)
+                        .or_else(|| lookup.scope_owner_at(language, &location.path, offset))
+                })
+                .flatten()
                 .or_else(|| lookup.file_module(language, &location.path));
             if let Some(target) = target.filter(|target| target != owner) {
                 edges.observe(
@@ -766,7 +774,7 @@ mod tests {
                         Some((14, 30)),
                     ),
                 ],
-                relations: vec![relation(0, 1, RelationKind::Contains, None)],
+                relations: vec![relation(0, 1, RelationKind::Contains)],
                 import_sites: Vec::new(),
             },
         )
@@ -805,7 +813,7 @@ mod tests {
             &syntax_graph,
             Language::Python,
             &semantic_facts,
-            &[import_site((0, 9), &[])],
+            &[import_site(0, "app.py", (0, 9), &[])],
         )
         .expect("semantic edge construction must succeed");
 
@@ -875,7 +883,12 @@ mod tests {
             &syntax_graph,
             Language::Python,
             &facts,
-            &[import_site((0, 30), &[(16, 20), (22, 25), (27, 29)])],
+            &[import_site(
+                0,
+                "app.py",
+                (0, 30),
+                &[(16, 20), (22, 25), (27, 29)],
+            )],
         )
         .expect("semantic edge construction must succeed");
 
@@ -909,23 +922,217 @@ mod tests {
             &syntax_graph,
             Language::Python,
             &facts,
-            &[import_site((0, 9), &[(5, 9)])],
+            &[import_site(0, "app.py", (0, 9), &[(5, 9)])],
         )
         .expect("semantic edge construction must succeed");
 
         assert!(edges.is_empty());
     }
 
-    /// Returns one `app.py` import statement that the module node owns.
-    fn import_site(statement: (u32, u32), names: &[(u32, u32)]) -> (NodeId, ImportSite) {
+    #[test]
+    fn counts_each_distinct_import_statement_once() {
+        let syntax_graph = semantic_edge_syntax_graph();
+        let facts = vec![
+            // Two `import lib` statements name the same module.
+            SemanticFact::Definition {
+                query: span("app.py", 7, 10),
+                targets: locations(&[("lib.py", 0, 0)]),
+            },
+            SemanticFact::Definition {
+                query: span("app.py", 18, 21),
+                targets: locations(&[("lib.py", 0, 0)]),
+            },
+            // Two names of one statement fall back to the same class.
+            SemanticFact::Definition {
+                query: span("app.py", 36, 37),
+                targets: locations(&[("lib.py", 50, 51)]),
+            },
+            SemanticFact::Definition {
+                query: span("app.py", 39, 40),
+                targets: locations(&[("lib.py", 70, 71)]),
+            },
+        ];
+
+        let edges = build_semantic_edges(
+            &syntax_graph,
+            Language::Python,
+            &facts,
+            &[
+                import_site(0, "app.py", (0, 10), &[(7, 10)]),
+                import_site(0, "app.py", (11, 21), &[(18, 21)]),
+                import_site(0, "app.py", (22, 40), &[(36, 37), (39, 40)]),
+            ],
+        )
+        .expect("semantic edge construction must succeed");
+
+        assert_eq!(
+            edges
+                .iter()
+                .map(|edge| (
+                    edge.source.0,
+                    edge_name(edge.kind),
+                    edge.target.0,
+                    edge.weight,
+                ))
+                .collect::<Vec<_>>(),
+            vec![(0, "imports", 1, 2), (0, "imports", 2, 1)]
+        );
+    }
+
+    #[test]
+    fn imports_the_enclosing_node_of_a_definition_without_a_node() {
+        let syntax_graph = rust_import_syntax_graph();
+        let facts = vec![
+            // `LIMIT` is a constant in `mod config`, which has no node.
+            SemanticFact::Definition {
+                query: span("src/lib.rs", 60, 65),
+                targets: locations(&[("src/lib.rs", 25, 30)]),
+            },
+            // `Circle` is a variant of `Shape`, which has no node.
+            SemanticFact::Definition {
+                query: span("src/lib.rs", 70, 76),
+                targets: locations(&[("src/lib.rs", 115, 121)]),
+            },
+            // Offset 0 names the file module, not `mod config` that starts there.
+            SemanticFact::Definition {
+                query: span("src/lib.rs", 80, 84),
+                targets: locations(&[("src/lib.rs", 0, 0)]),
+            },
+        ];
+
+        let edges = build_semantic_edges(
+            &syntax_graph,
+            Language::Rust,
+            &facts,
+            &[import_site(
+                2,
+                "src/lib.rs",
+                (50, 90),
+                &[(60, 65), (70, 76), (80, 84)],
+            )],
+        )
+        .expect("semantic edge construction must succeed");
+
+        assert_eq!(
+            edges
+                .iter()
+                .map(|edge| (edge.source.0, edge_name(edge.kind), edge.target.0))
+                .collect::<Vec<_>>(),
+            vec![(2, "imports", 0), (2, "imports", 1), (2, "imports", 3)]
+        );
+    }
+
+    #[test]
+    fn imports_from_a_callable_and_drops_the_reference_in_its_use() {
+        let syntax_graph = rust_import_syntax_graph();
+        let run = anchor("src/lib.rs", 255, ResolutionFallback::Ignore, "run");
+        let facts = vec![
+            SemanticFact::Definition {
+                query: span("src/lib.rs", 180, 183),
+                targets: locations(&[("src/lib.rs", 255, 258)]),
+            },
+            // The first occurrence is inside the use statement of `main`.
+            SemanticFact::Reference {
+                target: run,
+                occurrences: locations(&[("src/lib.rs", 180, 183), ("src/lib.rs", 190, 193)]),
+            },
+        ];
+
+        let edges = build_semantic_edges(
+            &syntax_graph,
+            Language::Rust,
+            &facts,
+            &[import_site(4, "src/lib.rs", (165, 184), &[(180, 183)])],
+        )
+        .expect("semantic edge construction must succeed");
+
+        assert_eq!(
+            edges
+                .iter()
+                .map(|edge| (
+                    edge.source.0,
+                    edge_name(edge.kind),
+                    edge.target.0,
+                    edge.weight,
+                ))
+                .collect::<Vec<_>>(),
+            vec![(4, "uses_value", 5, 1), (4, "imports", 5, 1)]
+        );
+    }
+
+    /// Returns one import statement that the `owner` fixture node holds.
+    fn import_site(
+        owner: u32,
+        path: &str,
+        statement: (u32, u32),
+        names: &[(u32, u32)],
+    ) -> (NodeId, ImportSite) {
         (
-            NodeId(0),
+            NodeId(owner),
             ImportSite {
-                owner: fixture_key(0),
-                statement: span("app.py", statement.0, statement.1),
+                owner: fixture_key(owner),
+                statement: span(path, statement.0, statement.1),
                 names: ranges(names),
             },
         )
+    }
+
+    /// Builds one Rust file with inline modules, an enum, and two functions.
+    fn rust_import_syntax_graph() -> Graph {
+        let path = "src/lib.rs";
+        to_syntax_graph(
+            Language::Rust,
+            SyntaxFacts {
+                entities: vec![
+                    entity(0, "lib", path, EntityKind::Module, None, Some((0, 300))),
+                    entity(
+                        1,
+                        "config",
+                        path,
+                        EntityKind::Module,
+                        Some((4, 10)),
+                        Some((0, 40)),
+                    ),
+                    entity(
+                        2,
+                        "app",
+                        path,
+                        EntityKind::Module,
+                        Some((45, 48)),
+                        Some((49, 100)),
+                    ),
+                    entity(
+                        3,
+                        "Shape",
+                        path,
+                        class(),
+                        Some((105, 110)),
+                        Some((111, 150)),
+                    ),
+                    entity(
+                        4,
+                        "main",
+                        path,
+                        function(),
+                        Some((155, 159)),
+                        Some((160, 250)),
+                    ),
+                    entity(
+                        5,
+                        "run",
+                        path,
+                        function(),
+                        Some((255, 258)),
+                        Some((259, 280)),
+                    ),
+                ],
+                relations: (1..=5)
+                    .map(|child| relation(0, child, RelationKind::Contains))
+                    .collect(),
+                import_sites: Vec::new(),
+            },
+        )
+        .expect("the Rust syntax fixture must materialize")
     }
 
     #[test]
@@ -1175,8 +1382,8 @@ mod tests {
                     ),
                 ],
                 relations: vec![
-                    relation(0, 2, RelationKind::Contains, None),
-                    relation(1, 1, RelationKind::Contains, None),
+                    relation(0, 2, RelationKind::Contains),
+                    relation(1, 1, RelationKind::Contains),
                 ],
                 import_sites: Vec::new(),
             },
@@ -1234,12 +1441,12 @@ mod tests {
                     ),
                 ],
                 relations: vec![
-                    relation(0, 5, RelationKind::Contains, None),
-                    relation(1, 2, RelationKind::Contains, None),
-                    relation(2, 3, RelationKind::Contains, None),
-                    relation(2, 4, RelationKind::Contains, None),
-                    relation(2, 6, RelationKind::Contains, None),
-                    relation(1, 7, RelationKind::Contains, None),
+                    relation(0, 5, RelationKind::Contains),
+                    relation(1, 2, RelationKind::Contains),
+                    relation(2, 3, RelationKind::Contains),
+                    relation(2, 4, RelationKind::Contains),
+                    relation(2, 6, RelationKind::Contains),
+                    relation(1, 7, RelationKind::Contains),
                 ],
                 import_sites: Vec::new(),
             },
