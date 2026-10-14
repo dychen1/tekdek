@@ -346,6 +346,37 @@ mod tests {
         );
     }
 
+    #[test]
+    fn adds_a_call_edge_from_the_module_for_a_module_level_call() {
+        let repository = TestRepository::new();
+        repository.write("app.py", "from lib import run\n\nrun()\n");
+        repository.write("lib.py", "def run():\n    pass\n");
+        let server = FakeServer::new();
+        let config = pipeline_config(&repository, &server, "module-call", "serve");
+
+        let graph = run(&config)
+            .expect("the fake language server should complete")
+            .graph;
+        let edges = graph
+            .edges
+            .iter()
+            .filter(|edge| matches!(edge.kind, RelationKind::Calls | RelationKind::UsesValue))
+            .map(|edge| {
+                (
+                    graph.nodes[edge.source.index()].key.as_str(),
+                    graph.nodes[edge.target.index()].key.as_str(),
+                    edge.kind,
+                    edge.provenance.evidence.observations[0].range.start,
+                )
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            edges,
+            [("app.py", "lib.py::callable:run", RelationKind::Calls, 21)]
+        );
+    }
+
     fn profile_mut(profiles: &mut [LanguageProfile], language: Language) -> &mut LanguageProfile {
         profiles
             .iter_mut()

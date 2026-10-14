@@ -9,6 +9,10 @@
 //! `from lib import run`) answers `run` in `lib.py` of the workspace root. The
 //! `definition-outside` mode answers a file outside the workspace instead.
 //! Every other definition request answers `null`.
+//!
+//! In `module-call` mode, `run` in `lib.py` has a call hierarchy item, a
+//! reference at line 2 of `app.py`, and an incoming call from the `app.py`
+//! module at that reference. Every other call hierarchy request answers `[]`.
 
 use std::{
     env, fs,
@@ -101,9 +105,32 @@ fn main() -> io::Result<()> {
                 request_id,
                 r#"[{"name":"run","kind":12,"range":{"start":{"line":0,"character":0},"end":{"line":1,"character":8}},"selectionRange":{"start":{"line":0,"character":4},"end":{"line":0,"character":7}}}]"#,
             )?;
-        } else if message.contains(r#""method":"textDocument/prepareCallHierarchy""#)
-            || message.contains(r#""method":"textDocument/references""#)
-        {
+        } else if message.contains(r#""method":"textDocument/prepareCallHierarchy""#) {
+            let result = if mode == "module-call" && message.contains("/lib.py\"") {
+                format!(
+                    r#"[{{"name":"run","kind":12,"uri":"{root_uri}/lib.py","range":{RUN},"selectionRange":{RUN}}}]"#
+                )
+            } else {
+                "[]".to_owned()
+            };
+            write_result(&mut output, required_id(request_id)?, &result)?;
+        } else if message.contains(r#""method":"textDocument/references""#) {
+            let result = if mode == "module-call" && message.contains("/lib.py\"") {
+                format!(r#"[{{"uri":"{root_uri}/app.py","range":{CALL}}}]"#)
+            } else {
+                "[]".to_owned()
+            };
+            write_result(&mut output, required_id(request_id)?, &result)?;
+        } else if message.contains(r#""method":"callHierarchy/incomingCalls""#) {
+            let result = if mode == "module-call" {
+                format!(
+                    r#"[{{"from":{{"name":"(module) app.py","kind":2,"uri":"{root_uri}/app.py","range":{START},"selectionRange":{START}}},"fromRanges":[{CALL}]}}]"#
+                )
+            } else {
+                "[]".to_owned()
+            };
+            write_result(&mut output, required_id(request_id)?, &result)?;
+        } else if message.contains(r#""method":"callHierarchy/outgoingCalls""#) {
             write_result(&mut output, required_id(request_id)?, "[]")?;
         } else if message.contains(r#""method":"textDocument/typeDefinition""#) {
             write_result(&mut output, required_id(request_id)?, "null")?;
@@ -142,6 +169,13 @@ fn main() -> io::Result<()> {
 
     Ok(())
 }
+
+/// The `run` name in `def run():`.
+const RUN: &str = r#"{"start":{"line":0,"character":4},"end":{"line":0,"character":7}}"#;
+/// The `run` name in a module-level `run()` call on line 2.
+const CALL: &str = r#"{"start":{"line":2,"character":0},"end":{"line":2,"character":3}}"#;
+/// The start of a file.
+const START: &str = r#"{"start":{"line":0,"character":0},"end":{"line":0,"character":0}}"#;
 
 fn read_message(reader: &mut impl BufRead) -> io::Result<Option<String>> {
     let mut content_length = None;
