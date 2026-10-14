@@ -41,7 +41,7 @@ export function createClusterDeck(ctx: DeckContext): ClusterDeck {
     const cam = document.createElement("div");
     cam.className = "deckcam"; cam.style.setProperty("--c", cluster.cv); cam.style.setProperty("--deck-z", `${DECK_Z}px`);
     cam.innerHTML = `<div class="slab" style="width:${model.deckSize.width}px;height:${deckHeight(keys.length)}px"><div class="shadow"></div><div class="deck"><div class="dfront"></div>` +
-      `<div class="dtop"><div class="dlabel"><span class="dname">flow functions in this cluster</span></div></div></div></div>`;
+      `<div class="dtop"><div class="dlabel"><span class="dname">${esc(cluster.label)}</span></div></div></div></div>`;
     const boxes = keys.map((key, i) => {
       const box = makeBox(key, cluster);
       cam.appendChild(box.el);
