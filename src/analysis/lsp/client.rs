@@ -12,7 +12,7 @@
 //! `File URIs` converts file paths to file URIs and back.
 
 use std::{
-    collections::HashMap,
+    collections::BTreeMap,
     io::{BufRead, BufReader, Read, Write},
     path::{Path, PathBuf},
     process::{Child, ChildStdin, Command, Stdio},
@@ -175,14 +175,16 @@ impl LspClient {
     /// Sends many requests with at most `window` in flight, and returns the
     /// results in input order.
     ///
-    /// Each request has its own timeout from its send to its answer. Server
-    /// requests that arrive in between are answered, and other messages are
-    /// skipped. After the first error, the batch sends nothing more.
+    /// The batch times out when no request gets an answer for `timeout`, so a
+    /// server that answers one request after the other never times out a
+    /// queued request. Server requests that arrive in between are answered,
+    /// and other messages are skipped. After the first error, the batch sends
+    /// nothing more.
     ///
     /// # Errors
     ///
-    /// Returns the input index and the error of the first request that fails,
-    /// times out, or cannot be sent.
+    /// Returns the input index and the error of the first request that fails
+    /// or cannot be sent. A timeout names the oldest unanswered request.
     pub fn request_batch(
         &mut self,
         requests: &[(&'static str, Value)],
@@ -299,7 +301,8 @@ impl LspClient {
     ) -> Result<Vec<Value>, (usize, LspError)> {
         let mut results = vec![Value::Null; requests.len()];
         let mut unsent = requests.iter().enumerate();
-        let mut in_flight = HashMap::<u64, InFlight>::new();
+        let mut in_flight = BTreeMap::<u64, InFlight>::new();
+        let mut deadline = Instant::now() + timeout;
 
         loop {
             while in_flight.len() < window {
@@ -319,21 +322,21 @@ impl LspClient {
                     InFlight {
                         index,
                         method,
-                        deadline: Instant::now() + timeout,
                         started: timing::start(),
                     },
                 );
             }
-            let Some(next) = in_flight.values().min_by_key(|request| request.deadline) else {
+            let Some((_, oldest)) = in_flight.first_key_value() else {
                 return Ok(results);
             };
+            let (oldest_index, oldest_method) = (oldest.index, oldest.method);
 
             let message = self
-                .receive(next.method, next.deadline)
-                .map_err(|error| (next.index, error))?;
+                .receive(oldest_method, deadline)
+                .map_err(|error| (oldest_index, error))?;
             if is_server_request(&message) {
                 self.answer_server_request(&message)
-                    .map_err(|error| (next.index, error))?;
+                    .map_err(|error| (oldest_index, error))?;
                 continue;
             }
             let Some(request) = message
@@ -343,6 +346,7 @@ impl LspClient {
             else {
                 continue;
             };
+            deadline = Instant::now() + timeout;
             timing::record_request(request.started, request.method);
             results[request.index] =
                 response_result(&message).map_err(|error| (request.index, error))?;
@@ -402,9 +406,10 @@ impl LspClient {
 
     /// Adds the retained server standard error to one failure.
     ///
-    /// Only the public methods call this, so each error gets the text once.
-    /// The wait lets a server that stops at the failure write its last lines.
-    fn with_standard_error(&mut self, error: LspError) -> LspError {
+    /// The public methods and the batch decoder of `capture` call this once
+    /// for each error. The wait lets a server that stops at the failure write
+    /// its last lines.
+    pub(crate) fn with_standard_error(&mut self, error: LspError) -> LspError {
         let deadline = Instant::now() + STDERR_EXIT_WAIT;
 
         loop {
@@ -430,7 +435,6 @@ impl LspClient {
 struct InFlight {
     index: usize,
     method: &'static str,
-    deadline: Instant,
     started: Option<Instant>,
 }
 
@@ -727,6 +731,34 @@ mod tests {
             error.to_string().contains("echo failed"),
             "the error should name the server error: {error}"
         );
+    }
+
+    #[test]
+    fn times_out_only_when_no_answer_arrives_for_the_timeout() {
+        let server = FakeServer::new();
+        let mut client = echo_client(&server, "batch-slow");
+        // A first batch waits out the start of the new server program.
+        client
+            .request_batch(&echo_requests(), 64, Duration::from_secs(10))
+            .expect("the first batch should complete");
+
+        let results = client
+            .request_batch(&echo_requests(), 64, Duration::from_millis(500))
+            .expect("each answer arrives within the timeout of the previous one");
+
+        assert_eq!(results, [json!(1), json!(2), json!(3)]);
+    }
+
+    #[test]
+    fn keeps_no_more_requests_in_flight_than_the_window() {
+        let server = FakeServer::new();
+        let mut client = echo_client(&server, "window-2");
+
+        let results = client
+            .request_batch(&echo_requests(), 2, Duration::from_secs(10))
+            .expect("the fake server should see at most two unanswered requests");
+
+        assert_eq!(results, [json!(1), json!(2), json!(3)]);
     }
 
     fn echo_client(server: &FakeServer, mode: &str) -> LspClient {

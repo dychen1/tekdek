@@ -17,6 +17,7 @@
 //! `Response Conversion` converts protocol responses into captured facts.
 
 use std::{
+    cmp::Reverse,
     collections::{HashMap, HashSet},
     path::Path,
     time::Duration,
@@ -90,26 +91,33 @@ pub(crate) fn capture_document_semantics(
         work_done_progress_params: WorkDoneProgressParams::default(),
         partial_result_params: PartialResultParams::default(),
     };
-    let title = language_title(config.language);
-    let label = format!("{title} symbols");
+    let label = format!("{} symbols", language_title(config.language));
     let mut responses = Vec::with_capacity(files.len());
     // The first answer waits until the server analyzes the workspace.
     if let Some((path, uri)) = files.first() {
         let response = client
             .request::<DocumentSymbolRequest>(symbol_parameters(uri), FIRST_REQUEST_TIMEOUT)
             .map_err(|error| {
-                LspError::new(format!("cannot read {title} symbols from {path}: {error}"))
+                LspError::new(format!(
+                    "{}: {error}",
+                    describe_symbols(DocumentSymbolRequest::METHOD, path, &label)
+                ))
             })?;
         responses.push(response);
     }
-    responses.extend(request_all::<DocumentSymbolRequest>(
-        client,
+    let mut batch = Batch::new(describe_symbols);
+    let count = batch.add::<DocumentSymbolRequest>(
         files
             .iter()
             .skip(1)
             .map(|(path, uri)| (path.as_str(), label.as_str(), symbol_parameters(uri)))
             .collect(),
-    )?);
+    )?;
+    responses.extend(
+        batch
+            .send(client)?
+            .decode::<DocumentSymbolRequest>(client, count)?,
+    );
     let files = files
         .into_iter()
         .zip(responses)
@@ -130,29 +138,20 @@ pub(crate) fn capture_document_semantics(
     })
 }
 
-/// Captures all supported semantic facts for every document symbol and every
-/// imported name.
+/// Captures the semantic facts of all document symbols and imported names.
 ///
-/// Only an entity symbol, whose selection starts at a declared entity name,
-/// gets a call hierarchy item. Every symbol gets a type-definition request,
-/// because the type of a local or a parameter states a type use of its owner.
-/// An entity symbol and a symbol outside every callable get a reference
-/// request, because a reference to a module-level name, such as a type alias,
-/// can state a signature type. Other queries of other symbols add no edge.
-///
-/// The capture runs in phases, and each phase sends its requests in one batch.
-/// It prepares the call hierarchy items of all symbols. Then it requests
-/// outgoing calls, references, type definitions, and import definitions
-/// together. Last, it requests incoming calls only for the items of a
-/// symbol that has a reference outside every outgoing call site and every
-/// import statement. Each incoming call site is also a reference, so only such
-/// a symbol can have a caller that is not a document symbol, for example
-/// module-level code.
-///
-/// Facts are outgoing calls, incoming calls, references, type definitions,
-/// and import definitions, in this order. Each group follows symbol order (or
-/// import-site order), then item order, then response order. An empty
-/// response adds no fact.
+/// - Only an entity symbol, whose selection starts at an entity name, gets
+///   call hierarchy requests.
+/// - Every symbol gets a type definition: the type of a local states a type
+///   use of its owner.
+/// - An entity symbol gets references, and so does a symbol whose innermost
+///   callable holds a nested callable, or that is in no callable: such a
+///   name, for example a type alias, can state a signature type.
+/// - Incoming calls go only to a symbol with a reference that no outgoing
+///   call site and no import statement explains.
+/// - Facts are outgoing calls, incoming calls, references, type definitions,
+///   then import definitions, each in input order. An empty answer adds no
+///   fact.
 ///
 /// # Errors
 ///
@@ -173,8 +172,8 @@ fn request_facts(
         })
         .collect::<Vec<_>>();
 
-    let (is_entity, wants_references) =
-        EntityPositions::new(&DocumentIndex::new(documents, sources)?, syntax)?.flags(&symbols);
+    let index = DocumentIndex::new(documents, sources)?;
+    let (is_entity, wants_references) = EntityPositions::new(&index, syntax)?.flags(&symbols);
 
     let prepared = request_all::<CallHierarchyPrepare>(
         client,
@@ -190,8 +189,8 @@ fn request_facts(
         .flat_map(|((path, _), items)| items.iter().map(move |item| (*path, item)))
         .collect::<Vec<_>>();
 
-    let (queries, definition_requests) = definition_requests(documents, sources, import_sites)?;
-    let mut batch = Batch::default();
+    let (queries, definition_requests) = definition_requests(&index, import_sites)?;
+    let mut batch = Batch::new(describe_request);
     let outgoing_count =
         batch.add::<CallHierarchyOutgoingCalls>(item_requests(&items, outgoing_parameters))?;
     let reference_count = batch.add::<References>(symbol_requests(
@@ -202,17 +201,18 @@ fn request_facts(
         batch.add::<GotoTypeDefinition>(symbol_requests(&symbols, type_definition_parameters))?;
     let definition_count = batch.add::<GotoDefinition>(definition_requests)?;
     let mut results = batch.send(client)?;
-    let outgoing = decode::<CallHierarchyOutgoingCalls>(&mut results, outgoing_count)?;
-    let references = decode::<References>(&mut results, reference_count)?
+    let outgoing = results.decode::<CallHierarchyOutgoingCalls>(client, outgoing_count)?;
+    let references = results
+        .decode::<References>(client, reference_count)?
         .into_iter()
         .map(Option::unwrap_or_default)
         .collect::<Vec<_>>();
     let references = scatter(&wants_references, references);
-    let type_targets = decode::<GotoTypeDefinition>(&mut results, type_count)?;
-    let definitions = decode::<GotoDefinition>(&mut results, definition_count)?;
+    let type_targets = results.decode::<GotoTypeDefinition>(client, type_count)?;
+    let definitions = results.decode::<GotoDefinition>(client, definition_count)?;
 
     let mut facts = call_facts(&items, outgoing, outgoing_call_fact);
-    let explained = ExplainedPositions::new(&facts, documents, sources, import_sites)?;
+    let explained = ExplainedPositions::new(&facts, &index, import_sites)?;
     let callees = symbols
         .iter()
         .zip(&prepared)
@@ -300,13 +300,32 @@ type Labeled<'a, P> = (&'a str, &'a str, P);
 const REQUEST_WINDOW: usize = 64;
 
 /// Requests that the client sends together, with the label of each.
-#[derive(Default)]
 struct Batch<'a> {
     requests: Vec<(&'static str, Value)>,
     labels: Vec<(&'a str, &'a str)>,
+    describe: Describe,
+}
+
+/// Describes one request from its method, source path, and queried name.
+type Describe = fn(&str, &str, &str) -> String;
+
+fn describe_request(method: &str, path: &str, name: &str) -> String {
+    format!("cannot request {method} for {name} in {path}")
+}
+
+fn describe_symbols(_: &str, path: &str, name: &str) -> String {
+    format!("cannot read {name} from {path}")
 }
 
 impl<'a> Batch<'a> {
+    fn new(describe: Describe) -> Self {
+        Self {
+            requests: Vec::new(),
+            labels: Vec::new(),
+            describe,
+        }
+    }
+
     /// Adds the requests of one method and returns their count.
     ///
     /// # Errors
@@ -335,37 +354,59 @@ impl<'a> Batch<'a> {
     /// # Errors
     ///
     /// Returns an error for the first request that fails.
-    fn send(&self, client: &mut LspClient) -> Result<vec::IntoIter<Value>, LspError> {
-        client
-            .request_batch(&self.requests, REQUEST_WINDOW, REQUEST_TIMEOUT)
-            .map(Vec::into_iter)
-            .map_err(|(index, error)| {
-                let (path, name) = self.labels[index];
-                LspError::new(format!(
-                    "cannot request {} for {name} in {path}: {error}",
-                    self.requests[index].0
-                ))
-            })
+    fn send(self, client: &mut LspClient) -> Result<BatchResults<'a>, LspError> {
+        match client.request_batch(&self.requests, REQUEST_WINDOW, REQUEST_TIMEOUT) {
+            Ok(values) => Ok(BatchResults {
+                batch: self,
+                values: values.into_iter(),
+                next: 0,
+            }),
+            Err((index, error)) => Err(self.error(index, &error)),
+        }
+    }
+
+    /// Adds the method, source path, and queried name of one request to its error.
+    fn error(&self, index: usize, error: &LspError) -> LspError {
+        let (path, name) = self.labels[index];
+        LspError::new(format!(
+            "{}: {error}",
+            (self.describe)(self.requests[index].0, path, name)
+        ))
     }
 }
 
-/// Decodes the next `count` raw results as results of one method.
-///
-/// # Errors
-///
-/// Returns an error if a result does not decode.
-fn decode<R: Request>(
-    results: &mut impl Iterator<Item = Value>,
-    count: usize,
-) -> Result<Vec<R::Result>, LspError> {
-    results
-        .take(count)
-        .map(|result| {
-            serde_json::from_value(result).map_err(|error| {
-                LspError::new(format!("cannot decode the {} result: {error}", R::METHOD))
-            })
-        })
-        .collect()
+/// The raw results of one batch, decoded group by group in input order.
+struct BatchResults<'a> {
+    batch: Batch<'a>,
+    values: vec::IntoIter<Value>,
+    next: usize,
+}
+
+impl BatchResults<'_> {
+    /// Decodes the next `count` raw results as results of one method.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a result does not decode.
+    fn decode<R: Request>(
+        &mut self,
+        client: &mut LspClient,
+        count: usize,
+    ) -> Result<Vec<R::Result>, LspError> {
+        let mut decoded = Vec::with_capacity(count);
+        for value in self.values.by_ref().take(count) {
+            let index = self.next;
+            self.next += 1;
+            decoded.push(serde_json::from_value(value).map_err(|error| {
+                let error = client.with_standard_error(LspError::new(format!(
+                    "cannot decode the {} result: {error}",
+                    R::METHOD
+                )));
+                self.batch.error(index, &error)
+            })?);
+        }
+        Ok(decoded)
+    }
 }
 
 /// Sends one batch of requests of one method and returns the results in
@@ -378,9 +419,9 @@ fn request_all<R: Request>(
     client: &mut LspClient,
     requests: Vec<Labeled<'_, R::Params>>,
 ) -> Result<Vec<R::Result>, LspError> {
-    let mut batch = Batch::default();
+    let mut batch = Batch::new(describe_request);
     let count = batch.add::<R>(requests)?;
-    decode::<R>(&mut batch.send(client)?, count)
+    batch.send(client)?.decode::<R>(client, count)
 }
 
 fn symbol_requests<'a, P>(
@@ -488,19 +529,18 @@ fn incoming_parameters(item: &CallHierarchyItem) -> CallHierarchyIncomingCallsPa
 /// explains.
 ///
 /// A reference at such a position needs no incoming-call request.
-struct ExplainedPositions {
-    call_sites: HashSet<(String, Position)>,
-    import_statements: HashMap<String, Vec<Range>>,
+struct ExplainedPositions<'a> {
+    call_sites: HashSet<(&'a str, Position)>,
+    import_statements: HashMap<&'a str, Vec<Range>>,
 }
 
-impl ExplainedPositions {
+impl<'a> ExplainedPositions<'a> {
     /// # Errors
     ///
     /// Returns an error if an import site is invalid.
     fn new(
-        call_facts: &[CapturedSemanticFact],
-        documents: &[CapturedDocument],
-        sources: &Sources<'_>,
+        call_facts: &'a [CapturedSemanticFact],
+        documents: &DocumentIndex<'a>,
         import_sites: &[ImportSite],
     ) -> Result<Self, LspError> {
         let call_sites = call_facts
@@ -512,15 +552,14 @@ impl ExplainedPositions {
                 | CapturedSemanticFact::Definition { .. } => None,
             })
             .flatten()
-            .map(|site| (site.uri.as_str().to_owned(), site.range.start))
+            .map(|site| (site.uri.as_str(), site.range.start))
             .collect();
-        let documents = DocumentIndex::new(documents, sources)?;
-        let mut import_statements = HashMap::<String, Vec<Range>>::new();
+        let mut import_statements = HashMap::<&str, Vec<Range>>::new();
         for site in import_sites {
             let path = site.statement.path.as_str();
             let (uri, text) = documents.get(path)?;
             import_statements
-                .entry(uri.as_str().to_owned())
+                .entry(uri.as_str())
                 .or_default()
                 .push(protocol_range(text, path, site.statement.range)?);
         }
@@ -534,7 +573,7 @@ impl ExplainedPositions {
     fn contains(&self, location: &Location) -> bool {
         let uri = location.uri.as_str();
         let start = location.range.start;
-        self.call_sites.contains(&(uri.to_owned(), start))
+        self.call_sites.contains(&(uri, start))
             || self
                 .import_statements
                 .get(uri)
@@ -545,7 +584,8 @@ impl ExplainedPositions {
 /// The protocol positions of the syntax entities.
 struct EntityPositions<'a> {
     names: HashSet<(&'a str, Position)>,
-    callable_scopes: HashMap<&'a str, Vec<Range>>,
+    /// Each callable scope, and whether it holds a nested callable.
+    callable_scopes: HashMap<&'a str, Vec<(Range, bool)>>,
 }
 
 impl<'a> EntityPositions<'a> {
@@ -555,7 +595,7 @@ impl<'a> EntityPositions<'a> {
     /// outside its source.
     fn new(documents: &DocumentIndex<'_>, syntax: &'a SyntaxFacts) -> Result<Self, LspError> {
         let mut names = HashSet::new();
-        let mut callable_scopes = HashMap::<&str, Vec<Range>>::new();
+        let mut callable_scopes = HashMap::<&str, Vec<(Range, bool)>>::new();
         for entity in &syntax.entities {
             let path = entity.evidence.path.as_str();
             let (_, text) = documents.get(path)?;
@@ -569,7 +609,15 @@ impl<'a> EntityPositions<'a> {
                 callable_scopes
                     .entry(path)
                     .or_default()
-                    .push(protocol_range(text, path, scope)?);
+                    .push((protocol_range(text, path, scope)?, false));
+            }
+        }
+        for scopes in callable_scopes.values_mut() {
+            let ranges = scopes.iter().map(|(range, _)| *range).collect::<Vec<_>>();
+            for (range, nested) in scopes {
+                *nested = ranges.iter().any(|inner| {
+                    inner != range && range.start <= inner.start && inner.end <= range.end
+                });
             }
         }
         Ok(Self {
@@ -579,13 +627,16 @@ impl<'a> EntityPositions<'a> {
     }
 
     /// Returns, for each symbol, whether it is an entity and whether it gets a
-    /// reference request: an entity or a symbol outside every callable.
+    /// reference request.
     fn flags(&self, symbols: &[(&str, ProtocolSymbolSite)]) -> (Vec<bool>, Vec<bool>) {
         symbols
             .iter()
             .map(|(path, symbol)| {
                 let entity = self.is_entity(path, symbol);
-                (entity, entity || !self.in_callable(path, symbol))
+                (
+                    entity,
+                    entity || self.can_state_signature_types(path, symbol),
+                )
             })
             .unzip()
     }
@@ -595,13 +646,19 @@ impl<'a> EntityPositions<'a> {
         self.names.contains(&(path, symbol.selection.start))
     }
 
-    /// Returns `true` when a callable scope holds the selection of the symbol.
-    fn in_callable(&self, path: &str, symbol: &ProtocolSymbolSite) -> bool {
-        self.callable_scopes.get(path).is_some_and(|scopes| {
-            scopes
-                .iter()
-                .any(|scope| range_holds(*scope, symbol.selection.start))
-        })
+    /// Returns `true` when a signature can name the symbol: no callable holds
+    /// it, or its innermost callable holds a nested callable.
+    fn can_state_signature_types(&self, path: &str, symbol: &ProtocolSymbolSite) -> bool {
+        let start = symbol.selection.start;
+        self.callable_scopes
+            .get(path)
+            .and_then(|scopes| {
+                scopes
+                    .iter()
+                    .filter(|(scope, _)| range_holds(*scope, start))
+                    .max_by_key(|(scope, _)| (scope.start, Reverse(scope.end)))
+            })
+            .is_none_or(|(_, nested)| *nested)
     }
 }
 
@@ -669,11 +726,9 @@ impl<'a> DocumentIndex<'a> {
 /// Returns an error if an import site names a document that is not open or a
 /// name is outside its source.
 fn definition_requests<'a>(
-    documents: &'a [CapturedDocument],
-    sources: &Sources<'a>,
+    documents: &DocumentIndex<'a>,
     import_sites: &'a [ImportSite],
 ) -> Result<(Vec<SourceSpan>, Vec<Labeled<'a, GotoDefinitionParams>>), LspError> {
-    let documents = DocumentIndex::new(documents, sources)?;
     let mut queries = Vec::new();
     let mut requests = Vec::new();
 
@@ -958,9 +1013,11 @@ mod tests {
             names: vec![SourceRange { start: 16, end: 19 }],
         };
 
-        let explained =
-            ExplainedPositions::new(&[call], &documents, &Sources::new(vec![&source]), &[import])
-                .expect("the import site should be valid");
+        let sources = Sources::new(vec![&source]);
+        let index = DocumentIndex::new(&documents, &sources).expect("the document is open");
+        let calls = [call];
+        let explained = ExplainedPositions::new(&calls, &index, &[import])
+            .expect("the import site should be valid");
         let at = |line, character| {
             Location::new(
                 uri.clone(),
@@ -977,8 +1034,16 @@ mod tests {
     }
 
     #[test]
-    fn finds_entity_symbols_and_symbols_inside_callables() {
-        let content = "Alias = int\ndef run(value: Alias):\n    local = value\n";
+    fn selects_entities_and_names_that_a_signature_can_state() {
+        let content = concat!(
+            "Alias = int\n",
+            "def run(value: Alias):\n",
+            "    local = value\n",
+            "def outer():\n",
+            "    Inner = int\n",
+            "    def inner(item: Inner):\n",
+            "        return item\n",
+        );
         let source = DocumentSnapshot {
             path: "app.py".into(),
             content: content.to_owned(),
@@ -992,47 +1057,77 @@ mod tests {
         let module = syntax
             .add_module("app.py", content)
             .expect("the module should be new");
-        syntax.add_entity(
-            &module,
-            "run".to_owned(),
-            EntityKind::Callable(CallableData {
-                kind: CallableKind::Function,
-                signature: None,
-                parameters: Vec::new(),
-                return_type: None,
-                documentation: None,
-            }),
-            EntityEvidence {
-                path: "app.py".to_owned(),
-                declarations: vec![SourceRange { start: 16, end: 19 }],
-                scope: Some(SourceRange { start: 12, end: 53 }),
-                body: None,
-                type_inputs: Vec::new(),
-                type_outputs: Vec::new(),
-            },
-        );
+        for (name, declaration, scope) in [
+            ("run", (16, 19), (12, 53)),
+            ("outer", (57, 62), (53, 130)),
+            ("inner", (90, 95), (86, 130)),
+        ] {
+            syntax.add_entity(
+                &module,
+                name.to_owned(),
+                function(),
+                evidence(declaration, scope),
+            );
+        }
         let syntax = syntax.finish();
         let sources = Sources::new(vec![&source]);
         let index = DocumentIndex::new(&documents, &sources).expect("the document is open");
-
-        let entities = EntityPositions::new(&index, &syntax).expect("the entities should be valid");
-        let at = |line, character| ProtocolSymbolSite {
-            uri: uri("file:///workspace/app.py"),
-            selection: Range::new(
-                Position::new(line, character),
-                Position::new(line, character + 1),
-            ),
-            kind: SymbolKind::VARIABLE,
-            name: "symbol".to_owned(),
+        let at = |line, character| {
+            (
+                "app.py",
+                ProtocolSymbolSite {
+                    uri: uri("file:///workspace/app.py"),
+                    selection: Range::new(
+                        Position::new(line, character),
+                        Position::new(line, character + 1),
+                    ),
+                    kind: SymbolKind::VARIABLE,
+                    name: "symbol".to_owned(),
+                },
+            )
         };
+        let symbols = [
+            at(1, 4),  // `run`
+            at(0, 0),  // `Alias`, outside every callable
+            at(1, 8),  // `value`, a parameter of `run`
+            at(2, 4),  // `local`, in `run`
+            at(4, 4),  // `Inner`, in `outer`, which holds `inner`
+            at(5, 14), // `item`, a parameter of `inner`
+        ];
 
-        // `run` is an entity, `Alias` is a module-level name, and the parameter
-        // and the local are inside `run`.
-        assert!(entities.is_entity("app.py", &at(1, 4)));
-        assert!(!entities.is_entity("app.py", &at(0, 0)));
-        assert!(!entities.in_callable("app.py", &at(0, 0)));
-        assert!(entities.in_callable("app.py", &at(1, 8)));
-        assert!(entities.in_callable("app.py", &at(2, 4)));
+        let (entities, references) = EntityPositions::new(&index, &syntax)
+            .expect("the entities should be valid")
+            .flags(&symbols);
+
+        assert_eq!(entities, [true, false, false, false, false, false]);
+        assert_eq!(references, [true, true, false, false, true, false]);
+    }
+
+    fn function() -> EntityKind {
+        EntityKind::Callable(CallableData {
+            kind: CallableKind::Function,
+            signature: None,
+            parameters: Vec::new(),
+            return_type: None,
+            documentation: None,
+        })
+    }
+
+    fn evidence(declaration: (u32, u32), scope: (u32, u32)) -> EntityEvidence {
+        EntityEvidence {
+            path: "app.py".to_owned(),
+            declarations: vec![SourceRange {
+                start: declaration.0,
+                end: declaration.1,
+            }],
+            scope: Some(SourceRange {
+                start: scope.0,
+                end: scope.1,
+            }),
+            body: None,
+            type_inputs: Vec::new(),
+            type_outputs: Vec::new(),
+        }
     }
 
     #[test]

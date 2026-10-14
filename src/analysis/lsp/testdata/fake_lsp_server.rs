@@ -17,12 +17,19 @@
 //! In `batch` mode, the program holds `test/echo` requests until it has three.
 //! Then it sends a `workspace/configuration` request, checks the answer, and
 //! echoes the three parameters in reverse order. `batch-error` answers the
-//! second request with an error.
+//! second request with an error. `batch-slow` sends the echoes 300 ms apart.
+//!
+//! In `window-2` mode, the program echoes `test/echo` requests when no new
+//! request arrives for 100 ms, and exits with an error when more than two
+//! requests are unanswered.
 
 use std::{
     env, fs,
     io::{self, BufRead, Write},
     process,
+    sync::mpsc::{self, Receiver},
+    thread,
+    time::Duration,
 };
 
 fn main() -> io::Result<()> {
@@ -32,14 +39,13 @@ fn main() -> io::Result<()> {
         process::exit(1);
     }
 
-    let stdin = io::stdin();
     let stdout = io::stdout();
-    let mut input = stdin.lock();
     let mut output = stdout.lock();
     let mut root_uri = String::new();
     let mut echoes = Vec::new();
+    let messages = read_messages();
 
-    while let Some(message) = read_message(&mut input)? {
+    while let Ok(message) = messages.recv() {
         let request_id = request_id(&message);
 
         if message.contains(r#""method":"initialize""#) {
@@ -136,13 +142,20 @@ fn main() -> io::Result<()> {
                 "[]".to_owned()
             };
             write_result(&mut output, required_id(request_id)?, &result)?;
+        } else if mode == "window-2" && message.contains(r#""method":"test/echo""#) {
+            echoes.push(echo(&message)?);
+            while let Ok(next) = messages.recv_timeout(Duration::from_millis(100)) {
+                echoes.push(echo(&next)?);
+                if echoes.len() > 2 {
+                    eprintln!("more than two requests are unanswered");
+                    process::exit(1);
+                }
+            }
+            for (id, parameters) in echoes.drain(..) {
+                write_result(&mut output, &id, &parameters)?;
+            }
         } else if message.contains(r#""method":"test/echo""#) {
-            let parameters = message
-                .split_once(r#""params":"#)
-                .and_then(|(_, rest)| rest.strip_suffix('}'))
-                .unwrap_or("null")
-                .to_owned();
-            echoes.push((required_id(request_id)?.to_owned(), parameters));
+            echoes.push(echo(&message)?);
             if echoes.len() < 3 {
                 continue;
             }
@@ -151,12 +164,16 @@ fn main() -> io::Result<()> {
                 r#"{"jsonrpc":"2.0","id":900,"method":"workspace/configuration","params":{"items":[{}]}}"#
                     .to_owned(),
             )?;
-            let answer = read_message(&mut input)?.unwrap_or_default();
+            let answer = messages.recv().unwrap_or_default();
             if !answer.contains(r#""id":900"#) || !answer.contains(r#""result":[{}]"#) {
                 eprintln!("the client did not answer the configuration request");
                 process::exit(1);
             }
             for (index, (id, parameters)) in echoes.drain(..).enumerate().rev() {
+                // The first echo is the third request, so later echoes come 300 ms apart.
+                if mode == "batch-slow" && index < 2 {
+                    thread::sleep(Duration::from_millis(300));
+                }
                 if mode == "batch-error" && index == 1 {
                     write_error(&mut output, &id, "echo failed")?;
                 } else {
@@ -209,6 +226,32 @@ const RUN: &str = r#"{"start":{"line":0,"character":4},"end":{"line":0,"characte
 const CALL: &str = r#"{"start":{"line":2,"character":0},"end":{"line":2,"character":3}}"#;
 /// The start of a file.
 const START: &str = r#"{"start":{"line":0,"character":0},"end":{"line":0,"character":0}}"#;
+
+/// Reads standard input on its own thread, so the program can wait for the
+/// next message with a timeout.
+fn read_messages() -> Receiver<String> {
+    let (sender, messages) = mpsc::channel();
+    thread::spawn(move || {
+        let stdin = io::stdin();
+        let mut input = stdin.lock();
+        while let Ok(Some(message)) = read_message(&mut input) {
+            if sender.send(message).is_err() {
+                break;
+            }
+        }
+    });
+    messages
+}
+
+/// Returns the request ID and the raw parameters of one `test/echo` request.
+fn echo(message: &str) -> io::Result<(String, String)> {
+    let parameters = message
+        .split_once(r#""params":"#)
+        .and_then(|(_, rest)| rest.strip_suffix('}'))
+        .unwrap_or("null")
+        .to_owned();
+    Ok((required_id(request_id(message))?.to_owned(), parameters))
+}
 
 fn read_message(reader: &mut impl BufRead) -> io::Result<Option<String>> {
     let mut content_length = None;

@@ -43,9 +43,10 @@ pub struct Indexed {
 /// Analyzes one codebase and returns its graph.
 ///
 /// Each detected language runs on its own thread, and the fact sets keep
-/// language order. The source hash comes from the same document read as the
-/// graph. With
-/// `TEKDEK_TIMINGS` set, a successful run prints its timings to standard error.
+/// language order. A failing language returns its error only after every
+/// other language thread ends. The source hash comes from the same document
+/// read as the graph. With `TEKDEK_TIMINGS` set, a successful run prints its
+/// timings to standard error.
 ///
 /// # Errors
 ///
