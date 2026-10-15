@@ -10,7 +10,7 @@ export function createLinks(ctx: DeckContext): Links {
   const guideG = $("#guideG"), guideEl = $("#guidePath");
   const tetherG = $("#tetherG"), tetherEl = $("#tetherPath"), tetherDot = $("#tetherDot");
   const arrowG = $("#arrowG"), arrEl = $("#arrPath"), arrHead = $("#arrHead"), arrDot = $("#arrDot");
-  const sbTree = $("#sbTree"), codeHead = $("#codeHead"), frameEl = $("#frame");
+  const sbTree = $("#sbTree"), codeHead = $("#codeHead"), frameEl = $("#frame"), svg = $("#links");
   /** Hides every connector. */
   const hideAll = () => { for (const g of [guideG, tetherG, arrowG]) g.classList.add("away"); };
 
@@ -54,6 +54,9 @@ export function createLinks(ctx: DeckContext): Links {
 
   function draw() {
     if (state.full) { hideAll(); return; }
+    // the layer scrolls with the page: its view box starts at its own screen position, so screen points draw in place
+    const o = svg.getBoundingClientRect();
+    svg.setAttribute("viewBox", `${f1(o.left)} ${f1(o.top)} ${f1(o.width)} ${f1(o.height)}`);
     const lid = ctx.parts.clusterDeck.currentLid();
     guideG.classList.toggle("away", !drawGuide());
     tetherG.classList.toggle("away", !drawTether(lid));

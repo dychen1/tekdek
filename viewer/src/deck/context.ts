@@ -10,6 +10,12 @@ import type { DeckModel, DeckState } from "../layout/model.ts";
 
 export const $ = <T extends Element = HTMLElement>(selector: string) => document.querySelector(selector) as T;
 
+/** The screen position of the page origin. The fixed panels are placed from it, because the page scrolls in a small window. */
+export function pageOrigin(): { x: number; y: number } {
+  const r = document.body.getBoundingClientRect();
+  return { x: r.left, y: r.top };
+}
+
 // ============ parts ============
 
 /** Created by `explorer.ts`. */

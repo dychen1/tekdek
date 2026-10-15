@@ -83,7 +83,9 @@
 
 /* ============ base ============ */
 *{box-sizing:border-box}
-html,body{margin:0;height:100%;overflow:hidden;overscroll-behavior:none}
+/* The page keeps a minimum size and scrolls in a smaller window. The body contains the fixed panels, so they scroll with it. */
+html{height:100%;overflow:auto;overscroll-behavior:none}
+body{margin:0;height:100%;min-width:1280px;min-height:720px;overflow:hidden;contain:layout}
 body{background:var(--bg);color:var(--ink);font:var(--fs-ui) var(--font-code);-webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums;
   caret-color:var(--accent);accent-color:var(--accent);scrollbar-color:var(--line-soft) transparent}
 button{font:inherit;color:inherit}
@@ -182,7 +184,7 @@ code{font:inherit;color:var(--keyword)}
 .mbox.focus .lid{border-color:var(--light);box-shadow:var(--face-light-hot);outline:1px solid var(--c);outline-offset:2px}
 
 /* ============ connectors: three at most, in screen space, from the rects they join ============ */
-.links{position:fixed;inset:0;width:100vw;height:100vh;z-index:7;pointer-events:none;overflow:visible}
+.links{position:fixed;inset:0;width:100%;height:100%;z-index:7;pointer-events:none;overflow:visible}
 /* a connector that cannot be drawn carries .away */
 .links .away{display:none}
 /* (a) guide: the explorer row's tree guide, continued straight into the file box */

@@ -6,6 +6,7 @@
 import type { ArtifactEntry, ArtifactIndex, DeckFlow, DeckGraph, FlowEntry, SourceView } from "./data/models.ts";
 import { bindingDigest, deckFlow, deckGraph, pickArtifact, pickFlow, frozenFlows } from "./data/adapt.ts";
 import { loadFlow, loadGraph, loadIndex, loadSource, LoadError, type LoadReason } from "./data/load.ts";
+import { pageOrigin } from "./deck/context.ts";
 import { createDeck, type DeckInstance } from "./deck/deck.ts";
 import { codebasePicker, flowPicker, icon } from "./deck/markup.ts";
 import { esc } from "./layout/util.ts";
@@ -149,7 +150,8 @@ function openPicker(anchor: HTMLElement, kind: "flow" | "codebase") {
   const w = pickPop.offsetWidth, h = pickPop.offsetHeight;
   const x = Math.max(8, Math.min(a.left, innerWidth - w - 8));
   const y = a.bottom + 6 + h > innerHeight - 8 ? Math.max(8, a.top - 6 - h) : a.bottom + 6;
-  pickPop.style.transform = `translate(${Math.round(x)}px,${Math.round(y)}px)`;
+  const o = pageOrigin();
+  pickPop.style.transform = `translate(${Math.round(x - o.x)}px,${Math.round(y - o.y)}px)`;
   (pickPop.querySelector<HTMLElement>('[aria-current="true"]') ?? pickPop.querySelector<HTMLElement>(".pk-item"))?.focus();
 }
 

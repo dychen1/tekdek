@@ -14,7 +14,7 @@ import { createExplorer } from "./explorer.ts";
 import { createFileBox } from "./file-box.ts";
 import { createInput } from "./input.ts";
 import { createLinks } from "./links.ts";
-import { $, type DeckContext, type DeckOptions, type DeckParts } from "./context.ts";
+import { $, pageOrigin, type DeckContext, type DeckOptions, type DeckParts } from "./context.ts";
 import { createTools } from "./tools.ts";
 
 
@@ -117,14 +117,15 @@ export function createDeck(options: DeckOptions): DeckInstance {
    *  Returns the frame and the deck spot that it measured. */
   function place(): { frame: Frame; spot: { x: number; y: number } } {
     if (state.browseFile && deckCluster !== null) { clusterDeck.show(null); deckCluster = null; }
-    const r = frameEl.getBoundingClientRect();
-    const frame: Frame = { left: r.left, top: r.top, width: r.width, height: r.height };
-    const spot = deckSpot(frame, card.getBoundingClientRect().left, model.deckSize.width, model.deckSize.maxHeight);
+    // page coordinates: the canvas layer sits at the page origin, which moves when the page scrolls
+    const o = pageOrigin(), r = frameEl.getBoundingClientRect();
+    const frame: Frame = { left: r.left - o.x, top: r.top - o.y, width: r.width, height: r.height };
+    const spot = deckSpot(frame, card.getBoundingClientRect().left - o.x, model.deckSize.width, model.deckSize.maxHeight);
     const k = state.zoom, x = frame.left + FILE_X;
     let y = frame.top + 18;
     if (fileBox.nodeEl()) {
       const rr = explorer.anchorEl()?.getBoundingClientRect();
-      y = fileBoxCenter(rr ? rr.top + rr.height / 2 : y, frame, fileBox.height(), k);
+      y = fileBoxCenter(rr ? rr.top - o.y + rr.height / 2 : y, frame, fileBox.height(), k);
       fileblk.style.transform = `translate(${f1(x)}px,${f1(y - 10)}px)`;
     }
     state.anchor = { x, y };

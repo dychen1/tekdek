@@ -6,7 +6,7 @@
 import { rangesOf } from "../layout/plan.ts";
 import { clamp, esc, f1, plural } from "../layout/util.ts";
 import { md } from "./markup.ts";
-import { $, type Bar, type DeckContext } from "./context.ts";
+import { $, pageOrigin, type Bar, type DeckContext } from "./context.ts";
 
 export function createBar(ctx: DeckContext): Bar {
   const { model, state, signal } = ctx;
@@ -29,8 +29,8 @@ export function createBar(ctx: DeckContext): Bar {
     tip.innerHTML = `<i class="sw" style="--c:${esc(tickColor(s.index))}"></i><b>${s.index}</b><span>${esc(s.title)}</span>`;
     const r = t.getBoundingClientRect(), cr = controls.getBoundingClientRect();
     tip.classList.add("show");
-    const w = tip.offsetWidth, h = tip.offsetHeight;
-    tip.style.transform = `translate(${f1(clamp(r.left + r.width / 2 - w / 2, 8, innerWidth - w - 8))}px,${f1(cr.top - h - 6)}px)`;
+    const w = tip.offsetWidth, h = tip.offsetHeight, o = pageOrigin();
+    tip.style.transform = `translate(${f1(clamp(r.left + r.width / 2 - w / 2, 8, innerWidth - w - 8) - o.x)}px,${f1(cr.top - h - 6 - o.y)}px)`;
   }
   const hideTip = () => tip.classList.remove("show");
   ticks.addEventListener("pointerover", e => { const t = (e.target as Element).closest<HTMLElement>(".tick"); if (t) showTip(t); }, { signal });

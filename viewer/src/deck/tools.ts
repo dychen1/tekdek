@@ -5,7 +5,7 @@
 import { rangesOf } from "../layout/plan.ts";
 import { clamp, esc } from "../layout/util.ts";
 import { icon } from "./markup.ts";
-import { $, type DeckContext, type Tools } from "./context.ts";
+import { $, pageOrigin, type DeckContext, type Tools } from "./context.ts";
 
 const VARIANTS = ["night", "storm", "moon"];
 const KEY_VARIANT = "tekdek.deck.variant";
@@ -135,10 +135,10 @@ export function createTools(ctx: DeckContext): Tools {
 
   /** Puts the flow band right of the map tools, and the canvas frame below both. */
   function layoutTop() {
-    const mt = $("#maptools").getBoundingClientRect();
-    document.documentElement.style.setProperty("--fh-l", `${Math.round(mt.right + 18)}px`);
+    const o = pageOrigin(), mt = $("#maptools").getBoundingClientRect();
+    document.documentElement.style.setProperty("--fh-l", `${Math.round(mt.right - o.x + 18)}px`);
     const fh = $("#fhTop").getBoundingClientRect();
-    document.documentElement.style.setProperty("--top-band", `${Math.round(Math.max(mt.bottom, fh.bottom) + 12)}px`);
+    document.documentElement.style.setProperty("--top-band", `${Math.round(Math.max(mt.bottom, fh.bottom) - o.y + 12)}px`);
   }
 
   return {
