@@ -3,7 +3,7 @@
    elements; an instance fills them, and `destroy` empties them.
    # Sections
    instance, stepping, placement, boot and teardown */
-import { deckSpot, fileBoxCenter, FILE_X, startZoom, type Frame } from "../layout/deck-geometry.ts";
+import { deckSpot, fileBoxCenter, FILE_X, fileRoom, zoomFit } from "../layout/deck-geometry.ts";
 import { openTo } from "../layout/explorer.ts";
 import { buildModel, initialState } from "../layout/model.ts";
 import { clamp, f1 } from "../layout/util.ts";
@@ -112,16 +112,24 @@ export function createDeck(options: DeckOptions): DeckInstance {
   // ============ placement ============
   // The file box stays level with its explorer row, so the guide runs straight. Only a box too tall for the frame at
   // that height moves up. The deck is pinned: one spot for every step. Zoom scales the canvas around the file node.
+  // The deck keeps its right edge and top edge at every zoom. Zoom stops where the deck and the file box no longer fit
+  // the frame side by side.
 
   /** Places the file box and the deck, then draws the connectors. A browsed file shows without a deck.
-   *  Returns the frame and the deck spot that it measured. */
-  function place(): { frame: Frame; spot: { x: number; y: number } } {
+   *  Returns the start zoom of the frame that it measured. */
+  function place(): number {
     if (state.browseFile && deckCluster !== null) { clusterDeck.show(null); deckCluster = null; }
     // page coordinates: the canvas layer sits at the page origin, which moves when the page scrolls
     const o = pageOrigin(), r = frameEl.getBoundingClientRect();
-    const frame: Frame = { left: r.left - o.x, top: r.top - o.y, width: r.width, height: r.height };
-    const spot = deckSpot(frame, card.getBoundingClientRect().left - o.x, model.deckSize.width, model.deckSize.maxHeight);
-    const k = state.zoom, x = frame.left + FILE_X;
+    const frame = { left: r.left - o.x, top: r.top - o.y, width: r.width, height: r.height };
+    const codeLeft = card.getBoundingClientRect().left - o.x;
+    const fit = zoomFit(frame, codeLeft, model.deckSize, model.fileRight, model.fileMin);
+    state.zoomMax = fit.max;
+    const k = state.zoom = Math.min(state.zoom, fit.max), x = frame.left + FILE_X;
+    const spot = deckSpot(frame, codeLeft, model.deckSize.width, model.deckSize.maxHeight, k);
+    // with a deck up, a row that would reach it ends in an ellipsis, so the tether never crosses a row
+    if (deckCluster !== null) fileblk.style.setProperty("--fb-room", `${f1(fileRoom(frame.left, spot.x, k))}px`);
+    else fileblk.style.removeProperty("--fb-room");
     let y = frame.top + 18;
     if (fileBox.nodeEl()) {
       const rr = explorer.anchorEl()?.getBoundingClientRect();
@@ -131,26 +139,26 @@ export function createDeck(options: DeckOptions): DeckInstance {
     state.anchor = { x, y };
     cv.style.transformOrigin = `${f1(x)}px ${f1(y)}px`;
     cv.style.transform = `scale(${k})`;
+    cv.style.setProperty("--k", String(k));
     clusterDeck.pin(spot, state.anchor, k);
     links.draw();
-    return { frame, spot };
+    return fit.start;
   }
 
   function placeSoon() {
     if (placeRaf) return;
-    placeRaf = requestAnimationFrame(() => { placeRaf = 0; tools.layoutTop(); place(); });
+    // a smaller window can lower the zoom, so the tools show the new level
+    placeRaf = requestAnimationFrame(() => { placeRaf = 0; tools.layoutTop(); place(); tools.sync(); });
   }
 
   // ============ boot and teardown ============
   // The first place() measures the frame. When the widest flow file box and the deck do not fit at 100%, the canvas
-  // starts at the largest zoom that fits.
+  // starts at the largest zoom that fits, but not under the floor.
 
   tools.layoutTop();
   explorer.sync();
   fileBox.render();
-  const first = place();
-  const zoom = startZoom(first.frame.left, first.spot.x, model.fileRight);
-  if (zoom < 1) state.zoom = zoom;
+  state.zoom = place();
   render(0);
   requestAnimationFrame(() => requestAnimationFrame(() => {
     if (!alive) return;

@@ -37,14 +37,15 @@ test("the guide elbow at 60% zoom places its gutter 8.4 px left of the box", () 
   );
 });
 
-test("a tether whose lid is close to the rows bends at the lid margin", () => {
-  assert.deepEqual(tetherPath({ x: 400, y: 300 }, 450, { x: 480, y: 240 }), { d: "M400.0,300.0 L440.0,300.0 C462.0,300.0 458.0,240.0 480.0,240.0", ok: true });
+test("a tether whose lid leaves under 40 px past the rows hides, so its curve never crosses a row", () => {
+  assert.equal(tetherPath({ x: 400, y: 300 }, 450, { x: 480, y: 240 }).ok, false);
+  assert.equal(tetherPath({ x: 400, y: 300 }, 450, { x: 499, y: 240 }).ok, false);
+  assert.equal(tetherPath({ x: 400, y: 300 }, 450, { x: 500, y: 240 }).ok, true);
 });
 
 test("a tether whose lid is not right of the slot hides", () => {
   assert.equal(tetherPath({ x: 400, y: 300 }, 450, { x: 350, y: 240 }).ok, false);
-  assert.equal(tetherPath({ x: 400, y: 300 }, 450, { x: 400, y: 240 }).ok, false);
-  assert.equal(tetherPath({ x: 400, y: 300 }, 450, { x: 401, y: 240 }).ok, true);
+  assert.equal(tetherPath({ x: 400, y: 300 }, 400, { x: 400, y: 240 }).ok, false);
 });
 
 test("an arrow whose header is close to the deck turns 60 px before the header", () => {

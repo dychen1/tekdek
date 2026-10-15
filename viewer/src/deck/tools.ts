@@ -2,6 +2,7 @@
    theme switch, full screen code, and the top band layout. `main.ts` owns the flow badge in the top band.
    # Sections
    key popover, theme variant, map tools, full screen, top band */
+import { ZOOM_MIN } from "../layout/deck-geometry.ts";
 import { rangesOf } from "../layout/plan.ts";
 import { clamp, esc } from "../layout/util.ts";
 import { icon } from "./markup.ts";
@@ -60,19 +61,22 @@ export function createTools(ctx: DeckContext): Tools {
   // ============ map tools ============
 
   const compactBtn = $<HTMLButtonElement>("#compactBtn"), zoomLbl = $("#zoomLbl");
+  const zoomOut = $<HTMLButtonElement>("#zoomOut"), zoomIn = $<HTMLButtonElement>("#zoomIn");
 
-  /** Shows the compact state, the zoom level, and the current cluster in the key. Compact is off at rest. */
+  /** Shows the compact state, the zoom level and its limits, and the current cluster in the key. Compact is off at rest. */
   function sync() {
     compactBtn.disabled = !state.cur;
     compactBtn.setAttribute("aria-pressed", String(state.compact));
     zoomLbl.textContent = `${Math.round(state.zoom * 100)}%`;
+    zoomOut.disabled = state.zoom <= ZOOM_MIN + 1e-3;
+    zoomIn.disabled = state.zoom >= state.zoomMax - 1e-3;
     const id = model.stepCluster(state.cur);
     kpClusters.querySelectorAll<HTMLElement>(".kp-c").forEach(b => b.classList.toggle("on", !!id && b.dataset.c === id));
   }
 
-  /** Scales the canvas around the file node, from 50% to 150%. */
+  /** Scales the canvas around the file node, from 50% to the largest zoom at which the deck fits the frame. */
   function setZoom(k: number) {
-    state.zoom = clamp(k, 0.5, 1.5);
+    state.zoom = clamp(k, ZOOM_MIN, state.zoomMax);
     ctx.place();
     sync();
   }
@@ -88,8 +92,8 @@ export function createTools(ctx: DeckContext): Tools {
 
   compactBtn.addEventListener("click", toggleCompact, { signal });
   // The buttons step to the next tenth, also after a wheel zoom left the level between tenths.
-  $("#zoomOut").addEventListener("click", () => setZoom(Math.round(state.zoom * 10 - 1) / 10), { signal });
-  $("#zoomIn").addEventListener("click", () => setZoom(Math.round(state.zoom * 10 + 1) / 10), { signal });
+  zoomOut.addEventListener("click", () => setZoom(Math.round(state.zoom * 10 - 1) / 10), { signal });
+  zoomIn.addEventListener("click", () => setZoom(Math.round(state.zoom * 10 + 1) / 10), { signal });
 
   // Cmd + scroll over the canvas frame zooms continuously; a trackpad pinch sends the wheel with Ctrl.
   // The scroll of one frame applies once, so a fast trackpad places the map at most once a frame.

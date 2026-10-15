@@ -31,6 +31,19 @@ test("the current slot has no step pill, and other flow rows make room for their
   assert.ok(b.right > 26 + b.w);
 });
 
+test("a row makes room for one pill for each step, and its narrowest node keeps a few characters", () => {
+  const b = fileBox(input()).rows[1];
+  assert.deepEqual(b.steps, [5, 9]);
+  assert.equal(b.right, 26 + b.w + 2 * (6 + 22));
+  assert.equal(b.min, Math.min(b.w, 48));
+});
+
+test("the narrowest box keeps the file node and every pill", () => {
+  const box = fileBox(input({ compact: false }));
+  assert.ok(box.min < box.right);
+  assert.equal(box.min, Math.max(31 + "4 functions".length * 0.6 * 11, ...box.rows.map(r => 26 + r.min + (r.right - 26 - r.w))));
+});
+
 test("compact off names every row, cutting long names to 30 characters", () => {
   const rows = fileBox(input({ compact: false })).rows;
   assert.deepEqual(rows.map(r => r.mode), ["slot", "named", "named", "named"]);
