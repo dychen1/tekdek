@@ -72,7 +72,7 @@ export function createTools(ctx: DeckContext): Tools {
 
   /** Scales the canvas around the file node, from 50% to 150%. */
   function setZoom(k: number) {
-    state.zoom = clamp(Math.round(k * 100) / 100, 0.5, 1.5);
+    state.zoom = clamp(k, 0.5, 1.5);
     ctx.place();
     sync();
   }
@@ -87,21 +87,27 @@ export function createTools(ctx: DeckContext): Tools {
   }
 
   compactBtn.addEventListener("click", toggleCompact, { signal });
-  $("#zoomOut").addEventListener("click", () => setZoom(state.zoom - 0.1), { signal });
-  $("#zoomIn").addEventListener("click", () => setZoom(state.zoom + 0.1), { signal });
+  // The buttons step to the next tenth, also after a wheel zoom left the level between tenths.
+  $("#zoomOut").addEventListener("click", () => setZoom(Math.round(state.zoom * 10 - 1) / 10), { signal });
+  $("#zoomIn").addEventListener("click", () => setZoom(Math.round(state.zoom * 10 + 1) / 10), { signal });
 
-  // Cmd + scroll over the canvas frame zooms; a trackpad pinch sends the wheel with Ctrl. 100 px of scroll is one 10% step.
+  // Cmd + scroll over the canvas frame zooms continuously; a trackpad pinch sends the wheel with Ctrl.
+  // The scroll of one frame applies once, so a fast trackpad places the map at most once a frame.
   const frame = $("#frame");
-  let wheel = 0;
+  let wheel = 0, pending = 0;
   document.addEventListener("wheel", e => {
     if (!e.metaKey && !e.ctrlKey) return;
     const r = frame.getBoundingClientRect();
     if (state.full || e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) return;
     e.preventDefault();
     wheel += e.deltaMode === WheelEvent.DOM_DELTA_LINE ? e.deltaY * 33 : e.deltaY;
-    const steps = Math.trunc(wheel / 100);
-    if (steps) { wheel -= steps * 100; setZoom(state.zoom - steps * 0.1); }
+    pending ||= requestAnimationFrame(() => {
+      pending = 0;
+      setZoom(state.zoom * Math.exp(-wheel * 0.002));
+      wheel = 0;
+    });
   }, { passive: false, signal });
+  signal.addEventListener("abort", () => cancelAnimationFrame(pending));
 
   // ============ full screen ============
 
