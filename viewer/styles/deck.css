@@ -17,12 +17,13 @@
 :root{
   --tn-bg:#1a1b26; --tn-pane:#16161e; --tn-raised:#1f2335;
   --tn-sel:#283457; --tn-sel-2:#2e3c64; --tn-border:#29354f; --tn-border-2:#3b4261;
-  --tn-fg:#c0caf5; --tn-fg-dark:#a9b1d6; --tn-dim:#8d95bc; --tn-comment:#565f89; --tn-black:#0c0e14;
+  --tn-fg:#c0caf5; --tn-fg-dark:#a9b1d6; --tn-dim:#8d95bc; --tn-comment:#565f89; --tn-comment-text:#8088af; --tn-black:#0c0e14;
   --tn-blue:#7aa2f7; --tn-cyan:#7dcfff; --tn-green:#9ece6a; --tn-yellow:#e0af68;
   --tn-orange:#ff9e64; --tn-red:#f7768e; --tn-magenta:#bb9af7; --tn-purple:#9d7cd8;
 
   --bg:var(--tn-bg);
   --ink:var(--tn-fg); --ink-2:var(--tn-fg-dark); --dim:var(--tn-dim);
+  --quiet:var(--tn-comment-text);  /* comments, line numbers, and notes in the code viewer: 4.5:1 or more on the code ground only */
   --dir:var(--tn-blue); --pick:var(--tn-blue);
   --line:color-mix(in srgb,var(--tn-comment) 72%,transparent);
   --line-strong:color-mix(in srgb,var(--tn-comment) 55%,var(--tn-border-2));
@@ -40,6 +41,8 @@
   --surface-panel:var(--tn-pane); --surface-pop:var(--tn-pane);
   --surface-hover:color-mix(in srgb,var(--tn-sel) 72%,transparent);
   --surface-press:var(--tn-sel-2);
+  --surface-raised:var(--tn-raised);
+  --surface-where:color-mix(in srgb,var(--tn-sel) 65%,var(--tn-bg));
   --deck-ground:color-mix(in srgb,var(--tn-pane) 90%,transparent);
   --card-face:linear-gradient(180deg,color-mix(in srgb,var(--tn-raised) 90%,var(--tn-fg-dark)) 0%,var(--tn-raised) 100%);
   --light:var(--tn-fg);
@@ -49,12 +52,13 @@
   --cl-cyan:var(--tn-cyan); --cl-red:var(--tn-red); --cl-yellow:var(--tn-yellow); --cl-magenta:var(--tn-magenta); --cl-lime:var(--tn-green);
   --cl-orange:var(--tn-orange); --cl-blue:var(--tn-blue); --cl-violet:var(--tn-purple);
   --cl-accent:var(--accent);  /* a cluster whose frozen color is unknown */
+  --ok:var(--tn-green);      /* a fresh flow */
   --warn:var(--tn-yellow);    /* a stale flow */
   --danger:var(--tn-red);     /* a load error */
   --cc:var(--pick);
   --font-code:"JetBrains Mono",ui-monospace,"SF Mono",SFMono-Regular,Menlo,monospace;
-  --fs-code-s:10.5px; --fs-code:11px; --fs-code-l:11.5px;
-  --fs-ui-s:10.5px; --fs-ui:12px; --fs-title:14px;
+  --fs-code:11px; --fs-code-l:11.5px; --fs-source:13px;
+  --fs-ui-s:11px; --fs-ui:12px; --fs-title:14px;
   --fw-bold:700;
   --r-xs:2px; --r-s:3px; --r-m:6px; --r-l:9px; --r-pill:999px;
   --face-light:inset 1px 1px 0 color-mix(in srgb,var(--tn-fg) 10%,transparent),inset -1px -1px 0 color-mix(in srgb,var(--tn-black) 40%,transparent);
@@ -76,9 +80,10 @@
   --frame-l:calc(var(--sb) + 16px);
   --frame-r:calc(var(--rc) + var(--gap) + 16px);
 }
-:root[data-variant="storm"]{--tn-bg:#24283b; --tn-pane:#1f2335; --tn-raised:#292e42; --tn-dim:#979ec6}
-:root[data-variant="moon"]{--tn-bg:#222436; --tn-pane:#1e2030; --tn-raised:#2f334d; --tn-dim:#959ed0;
-  --tn-fg:#c8d3f5; --tn-blue:#82aaff; --tn-cyan:#86e1fc; --tn-red:#ff757f; --tn-yellow:#ffc777; --tn-magenta:#c099ff; --tn-green:#c3e88d; --tn-purple:#fca7ea}
+:root[data-variant="storm"]{--tn-bg:#24283b; --tn-pane:#1f2335; --tn-raised:#292e42; --tn-dim:#979ec6; --tn-comment-text:#8d95b8}
+/* Moon keeps the Night selection: its own #2d3f76 puts dim text on a hover row under 4.5:1. */
+:root[data-variant="moon"]{--tn-bg:#222436; --tn-pane:#1e2030; --tn-raised:#2f334d; --tn-dim:#959ed0; --tn-comment:#636da6; --tn-comment-text:#8890bb;
+  --tn-fg:#c8d3f5; --tn-blue:#82aaff; --tn-cyan:#86e1fc; --tn-red:#ff757f; --tn-yellow:#ffc777; --tn-orange:#ff966c; --tn-magenta:#c099ff; --tn-green:#c3e88d; --tn-purple:#fca7ea}
 @media (max-width:1300px){:root{--sb:228px}}
 
 /* ============ base ============ */
@@ -294,11 +299,11 @@ button.pbadge:hover{filter:brightness(1.12)}
 .kp-g .g1{stroke:var(--line);stroke-width:1;fill:none}
 .kp-g .g3{stroke:var(--accent);stroke-width:1.5;fill:none}
 .kp-g .h3{fill:var(--accent)}
-.kp-keys{margin:10px 0 0;padding:10px 0 0;border-top:1px solid var(--line-faint);display:grid;grid-template-columns:48px 1fr;gap:3px 10px;font:var(--fs-ui-s)/18px var(--font-code);color:var(--ink-2)}
+.kp-keys{margin:10px 0 0;padding:10px 0 0;border-top:1px solid var(--line-faint);display:grid;grid-template-columns:56px 1fr;gap:3px 10px;font:var(--fs-ui-s)/18px var(--font-code);color:var(--ink-2)}
 .kp-keys dt{display:flex;align-items:center;gap:1px}
 .kp-keys dd{margin:0}
 kbd{display:inline-flex;align-items:center;gap:1px;height:16px;padding:0 4px;border-radius:var(--r-xs);background:var(--key-bg);font:var(--fw-bold) var(--fs-ui-s) var(--font-code);color:var(--accent)}
-.kp-theme{margin:10px 0 0;padding:10px 0 0;border-top:1px solid var(--line-faint);display:grid;grid-template-columns:48px 1fr;gap:0 10px;align-items:center;
+.kp-theme{margin:10px 0 0;padding:10px 0 0;border-top:1px solid var(--line-faint);display:grid;grid-template-columns:56px 1fr;gap:0 10px;align-items:center;
   font:var(--fs-ui-s)/18px var(--font-code);color:var(--ink-2)}
 .seg{display:flex;gap:2px;width:max-content;padding:3px;border:1px solid var(--line-soft);border-radius:var(--r-m)}
 .seg-b{height:20px;padding:0 9px;border:0;border-radius:var(--r-s);background:transparent;font:var(--fs-ui-s) var(--font-code);color:var(--ink-2);cursor:pointer;
@@ -330,7 +335,7 @@ kbd{display:inline-flex;align-items:center;gap:1px;height:16px;padding:0 4px;bor
 .fh-top #flowPick{flex:0 1 auto;min-width:0;display:flex}
 .fh-meta{flex:0 0 auto;font:var(--fs-ui-s) var(--font-code);color:var(--dim);white-space:nowrap}
 .fh-meta b{font-weight:400;color:var(--ink-2)}
-.fh-meta .fresh::before{content:"";display:inline-block;width:6px;height:6px;margin-right:6px;border-radius:var(--r-pill);background:var(--tn-green);vertical-align:1px}
+.fh-meta .fresh::before{content:"";display:inline-block;width:6px;height:6px;margin-right:6px;border-radius:var(--r-pill);background:var(--ok);vertical-align:1px}
 
 /* ============ code column: the step header over the code viewer ============ */
 .card{position:fixed;z-index:6;top:var(--gap);right:var(--gap);bottom:var(--gap);width:var(--rc);display:flex;flex-direction:column;overflow:hidden}
@@ -373,26 +378,28 @@ button.ref:hover{text-decoration:underline;text-underline-offset:3px}
 .status .st-line{display:flex;align-items:center;max-width:100%}
 .status .st-line span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 /* The code viewer: the header names path:line. The gutter stays put while long lines scroll sideways. */
-.reader-head{flex:0 0 auto;height:36px;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:0 6px 0 14px;background:var(--tn-raised);border-top:1px solid var(--line-faint);border-bottom:1px solid var(--line-faint)}
-.cw-path{min-width:0;font:13px var(--font-code);color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-variant-ligatures:none}
+.reader-head{flex:0 0 auto;height:36px;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:0 6px 0 14px;background:var(--surface-raised);border-top:1px solid var(--line-faint);border-bottom:1px solid var(--line-faint)}
+.cw-path{min-width:0;font:var(--fs-source) var(--font-code);color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-variant-ligatures:none}
 .cw-path .dir{color:var(--dim)}
-.cw-path .at{color:var(--tn-orange)}
-.code{--where:color-mix(in srgb,var(--tn-sel) 65%,var(--bg));flex:1 0 50%;min-height:0;position:relative;overflow:auto;padding:10px 0 28px;background:var(--bg);
-  font:13px/1.6 var(--font-code);font-variant-ligatures:none;scrollbar-width:thin;scrollbar-color:var(--line-soft) transparent}
+.cw-path .at{color:var(--step)}
+.code{flex:1 0 50%;min-height:0;position:relative;overflow:auto;padding:10px 0 28px;background:var(--bg);
+  font:var(--fs-source)/1.6 var(--font-code);font-variant-ligatures:none;scrollbar-width:thin;scrollbar-color:var(--line-soft) transparent}
 .code-in{position:relative;min-width:max-content}
 .gut{position:sticky;left:0;width:0;height:0;z-index:2}
 .cl{display:grid;grid-template-columns:40px 18px auto;white-space:pre}
 .cl .no,.cl .mk{position:sticky;z-index:1;background:var(--bg)}
-.cl .no{left:0;color:var(--tn-comment);text-align:right;user-select:none}
+.cl .no{left:0;color:var(--quiet);text-align:right;user-select:none}
 .cl .mk{left:40px}
 .cl .tx{padding:0 12px 0 10px;color:var(--ink)}
-.cl.where,.cl.where .no,.cl.where .mk{background:var(--where)}
+.cl.where,.cl.where .no,.cl.where .mk{background:var(--surface-where)}
+/* the current line lifts its quiet text: --quiet is under 4.5:1 on the line highlight */
 .cl.where .no{color:var(--ink)}
-.cl.end .tx{color:var(--tn-comment);font-style:italic;font-size:12px}
-.mark{position:absolute;left:45px;width:4px;border:1px solid var(--tn-border-2);border-right:0;border-radius:3px 0 0 3px}
-.mark span{position:absolute;left:5px;top:50%;writing-mode:vertical-rl;transform:translateY(-50%) rotate(180deg);font-size:9.5px;line-height:1;color:var(--tn-comment);white-space:nowrap}
+.cl.where .t-com{color:var(--dim)}
+.cl.end .tx{color:var(--quiet);font-style:italic;font-size:var(--fs-ui)}
+.mark{position:absolute;left:45px;width:4px;border:1px solid var(--line-soft);border-right:0;border-radius:3px 0 0 3px}
+.mark span{position:absolute;left:5px;top:50%;writing-mode:vertical-rl;transform:translateY(-50%) rotate(180deg);font-size:var(--fs-ui-s);line-height:1;color:var(--quiet);white-space:nowrap}
 .t-kw{color:var(--tn-magenta)}.t-type{color:var(--tn-cyan)}.t-fn{color:var(--tn-blue)}
-.t-com{color:var(--tn-comment);font-style:italic}.t-str{color:var(--tn-green)}
+.t-com{color:var(--quiet);font-style:italic}.t-str{color:var(--tn-green)}
 .t-num,.t-const{color:var(--tn-orange)}.t-p,.t-attr{color:var(--dim)}
 
 /* ============ bottom bar: nav, the cluster explainer, and the strip (fixed size) ============ */
