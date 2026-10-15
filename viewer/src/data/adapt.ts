@@ -120,7 +120,8 @@ export function pickArtifact(index: ArtifactIndex, requested: string | null): Ar
 }
 
 /** Resolves the codebase, flow, and step of a page link. A missing name opens the fallback at step 0 with a notice.
- *  A missing codebase also drops the flow of the link, because that flow belongs to the missing codebase. */
+ *  A missing codebase also drops the flow of the link, because that flow belongs to the missing codebase.
+ *  A step past the end of the flow opens its last step with a notice. */
 export function resolveLink(index: ArtifactIndex, want: { artifact: string | null; flow: string | null; step: number }):
   { file: string; flow: string | null; step: number; notice: string | null } | null {
   const entry = pickArtifact(index, want.artifact);
@@ -132,6 +133,9 @@ export function resolveLink(index: ArtifactIndex, want: { artifact: string | nul
   const flow = pickFlow(frozenFlows(entry.flows), want.flow);
   if (want.flow && flow?.name !== want.flow) {
     return { file: entry.file, flow: null, step: 0, notice: `No flow named ${want.flow} in ${name}.${flow ? ` This page shows ${flow.name}.` : ""}` };
+  }
+  if (flow?.stepCount && want.step > flow.stepCount) {
+    return { file: entry.file, flow: want.flow, step: flow.stepCount, notice: `No step ${want.step} in ${flow.name}. This page shows its last step, ${flow.stepCount}.` };
   }
   return { file: entry.file, flow: want.flow, step: want.step, notice: null };
 }

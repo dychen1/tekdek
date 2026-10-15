@@ -1,6 +1,7 @@
 /* Deck explorer. This module owns the transparent code explorer: directories and files in tree order,
    their tree guides, the current-file pointer, and the cluster markers. A directory click folds or opens it.
-   A file click goes to the file's next flow step, or shows the file box of the file.
+   A file click goes to the file's next flow step, or shows the file box of the file. A row is built the first
+   time it shows, so a large codebase starts with only the rows of its open directories.
    # Sections
    rows, marks, scroll, clicks and keys */
 import { anchorRow, dirNote, guideKinds, isShown, type ExplorerRow } from "../layout/explorer.ts";
@@ -10,8 +11,11 @@ import { PTR } from "./markup.ts";
 import { shownFile } from "../layout/model.ts";
 import { $, type DeckContext, type Explorer } from "./context.ts";
 
-/** A row and the elements that show it. */
-interface RowView { row: ExplorerRow; el: HTMLButtonElement; note: HTMLElement | null }
+/** A row and the elements that show it, or null elements until the row first shows. */
+interface RowView { row: ExplorerRow; el: HTMLElement | null; note: HTMLElement | null }
+
+/** The characters at the end of a name that never cut, so siblings with one long prefix stay apart. */
+const TAIL = 6;
 
 /** Returns the tree guide cells of a row, or "" for a row at the top level. */
 function guides(row: ExplorerRow): string {
@@ -19,17 +23,25 @@ function guides(row: ExplorerRow): string {
   return kinds.length ? `<span class="gds" aria-hidden="true">${kinds.map(kind => `<i class="gd ${kind}"></i>`).join("")}</span>` : "";
 }
 
+/** The name of a row: the head cuts with an ellipsis, and the last characters stay whole. */
+const nameHtml = (name: string) =>
+  `<span class="snm"><span class="sh">${esc(name.slice(0, -TAIL))}</span><span class="st">${esc(name.slice(-TAIL))}</span></span>`;
+
 export function createExplorer(ctx: DeckContext): Explorer {
   const { model, state, signal } = ctx;
   const sbTree = $("#sbTree");
 
   // ============ rows ============
 
-  const views: RowView[] = [];
-  const viewByPath = new Map<string, RowView>();
-  for (const row of model.explorer) {
-    const el = document.createElement("button");
-    el.type = "button"; el.className = "sl " + row.kind; el.tabIndex = -1; el.dataset.path = row.path;
+  const views: RowView[] = model.explorer.map(row => ({ row, el: null, note: null }));
+  const viewByPath = new Map(views.map(view => [view.row.path, view]));
+
+  /** Builds the element of one row. The first row holds the tree's tab stop. */
+  function build(view: RowView): HTMLElement {
+    const { row } = view;
+    const el = document.createElement("div");
+    el.className = "sl " + row.kind; el.tabIndex = view === views[0] ? 0 : -1; el.dataset.path = row.path;
+    el.setAttribute("role", "treeitem"); el.setAttribute("aria-level", String(row.depth + 1));
     let meta = "";
     if (row.kind === "file") {
       const held = model.clustersByFile.get(row.path) ?? [];
@@ -37,14 +49,11 @@ export function createExplorer(ctx: DeckContext): Explorer {
       const steps = model.plan.flowFiles.get(row.path);
       el.setAttribute("aria-label", `${row.path}${steps ? `, flow steps ${steps.join(", ")}` : ""}`);
     } else meta = '<span class="dnote"></span>';
-    el.innerHTML = `${PTR}${guides(row)}<span class="snm">${esc(row.name)}</span>${meta}`;
-    const view: RowView = { row, el, note: el.querySelector<HTMLElement>(".dnote") };
+    el.innerHTML = `${PTR}${guides(row)}${nameHtml(row.name)}${meta}`;
+    view.note = el.querySelector<HTMLElement>(".dnote");
     el.addEventListener("click", () => (row.kind === "dir" ? toggleDir(row) : openFile(row)), { signal });
-    views.push(view);
-    viewByPath.set(row.path, view);
-    sbTree.appendChild(el);
+    return el;
   }
-  if (views[0]) views[0].el.tabIndex = 0;
 
   // ============ marks ============
 
@@ -53,12 +62,24 @@ export function createExplorer(ctx: DeckContext): Explorer {
   function sync() {
     const cid = model.stepCluster(state.cur);
     const file = currentFile();
-    for (const { row, el, note } of views) {
-      el.hidden = !isShown(row, state.open);
+    let prev: HTMLElement | null = null;
+    for (const view of views) {
+      const { row } = view;
+      const shown = isShown(row, state.open);
+      if (!view.el) {
+        if (!shown) continue;
+        view.el = build(view);
+        if (prev) prev.after(view.el); else sbTree.prepend(view.el);
+      }
+      const el = prev = view.el;
+      el.hidden = !shown;
       if (row.kind === "dir") {
         const open = state.open.has(row.path);
         el.setAttribute("aria-expanded", String(open));
-        if (note) note.textContent = dirNote(row, state.open);
+        const text = dirNote(row, state.open);
+        view.note!.textContent = text;
+        // the name parts are flex items, which a screen reader would read apart: the row names itself
+        el.setAttribute("aria-label", text ? `${row.path} ${text}` : row.path);
         el.classList.toggle("inact", !!cid && !row.files.some(f => (model.clustersByFile.get(f) ?? []).includes(cid)));
       } else {
         const inC = !!cid && (model.clustersByFile.get(row.path) ?? []).includes(cid);
@@ -109,12 +130,15 @@ export function createExplorer(ctx: DeckContext): Explorer {
     ctx.place();
   }
 
+  // A row is a tree item, not a button: Enter and Space click it.
   sbTree.addEventListener("keydown", e => {
-    const list = views.filter(view => !view.el.hidden), i = list.findIndex(view => view.el === document.activeElement);
-    if (i < 0 || !["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) return;
+    const list = views.flatMap(view => (view.el && !view.el.hidden ? [view.el] : [])), i = list.indexOf(document.activeElement as HTMLElement);
+    if (i < 0) return;
+    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.stopPropagation(); list[i].click(); return; }
+    if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) return;
     e.preventDefault(); e.stopPropagation();
     const j = clamp(e.key === "ArrowDown" ? i + 1 : e.key === "ArrowUp" ? i - 1 : e.key === "Home" ? 0 : list.length - 1, 0, list.length - 1);
-    list[i].el.tabIndex = -1; list[j].el.tabIndex = 0; list[j].el.focus();
+    list[i].tabIndex = -1; list[j].tabIndex = 0; list[j].focus();
   }, { signal });
 
   return {

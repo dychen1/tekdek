@@ -84,6 +84,8 @@ export function createDeck(options: DeckOptions): DeckInstance {
     const prev = state.cur;
     if (!n) state.resume = prev;
     state.cur = n;
+    // full screen shows code, and the rest state has none
+    if (!n && state.full) tools.setFull(false);
     render(prev);
   }
 

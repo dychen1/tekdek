@@ -1,7 +1,7 @@
 /* Deck tools. This module owns the map tools (compact, zoom, key), the key popover with its cluster legend, the
-   theme switch, and the shortcut switch, full screen code, and the top band layout. `main.ts` owns the flow badge in the top band.
+   theme switch, full screen code, the shortcut switch, and the top band layout. `main.ts` owns the flow badge in the top band.
    # Sections
-   key popover, theme variant, shortcuts, map tools, full screen, top band */
+   key popover, theme variant, map tools, full screen, shortcuts, top band */
 import { ZOOM_MIN } from "../layout/deck-geometry.ts";
 import { rangesOf } from "../layout/plan.ts";
 import { clamp, esc } from "../layout/util.ts";
@@ -61,31 +61,19 @@ export function createTools(ctx: DeckContext): Tools {
   varBtns.forEach(b => b.addEventListener("click", () => setVariant(b.dataset.variant!, true), { signal }));
   setVariant(store.get(KEY_VARIANT), false);
 
-  // ============ shortcuts ============
-  // The switch turns the one-character keys (j, k, f, c, ?) on or off. `input.ts` reads the root flag, and the
-  // help line and the key list hide those keys while it is off. The choice is kept for each viewer.
-
-  const keyBtns = [...document.querySelectorAll<HTMLElement>(".seg-b[data-shortcuts]")];
-  function setShortcuts(on: boolean, save: boolean) {
-    if (on) delete document.documentElement.dataset.shortcuts; else document.documentElement.dataset.shortcuts = "off";
-    keyBtns.forEach(b => b.setAttribute("aria-pressed", String((b.dataset.shortcuts === "on") === on)));
-    if (save) store.set(KEY_SHORTCUTS, on ? "on" : "off");
-  }
-  keyBtns.forEach(b => b.addEventListener("click", () => setShortcuts(b.dataset.shortcuts === "on", true), { signal }));
-  setShortcuts(store.get(KEY_SHORTCUTS) !== "off", false);
-
   // ============ map tools ============
 
   const compactBtn = $<HTMLButtonElement>("#compactBtn"), zoomLbl = $("#zoomLbl");
   const zoomOut = $<HTMLButtonElement>("#zoomOut"), zoomIn = $<HTMLButtonElement>("#zoomIn");
 
-  /** Shows the compact state, the zoom level and its limits, and the current cluster in the key. Compact is off at rest. */
+  /** Shows the compact state, the zoom level and its limits, and the current cluster in the key.
+   *  Compact is off at rest. Compact and zoom are off in full screen, where the map does not show. */
   function sync() {
-    compactBtn.disabled = !state.cur;
+    compactBtn.disabled = !state.cur || state.full;
     compactBtn.setAttribute("aria-pressed", String(state.compact));
     zoomLbl.textContent = `${Math.round(state.zoom * 100)}%`;
-    zoomOut.disabled = state.zoom <= ZOOM_MIN + 1e-3;
-    zoomIn.disabled = state.zoom >= state.zoomMax - 1e-3;
+    zoomOut.disabled = state.full || state.zoom <= ZOOM_MIN + 1e-3;
+    zoomIn.disabled = state.full || state.zoom >= state.zoomMax - 1e-3;
     const id = model.stepCluster(state.cur);
     kpClusters.querySelectorAll<HTMLElement>(".kp-c").forEach(b => b.classList.toggle("on", !!id && b.dataset.c === id));
   }
@@ -99,7 +87,7 @@ export function createTools(ctx: DeckContext): Tools {
 
   /** Stubs or names the functions off the flow. Compact starts on at every load; nothing stores it. */
   function toggleCompact() {
-    if (!state.cur) return;
+    if (!state.cur || state.full) return;
     state.compact = !state.compact;
     ctx.parts.fileBox.render();
     ctx.place();
@@ -132,24 +120,44 @@ export function createTools(ctx: DeckContext): Tools {
   // ============ full screen ============
 
   const fullBtn = $("#fullBtn");
-  /** Sets the page class and the full screen button for one mode. */
+  /** Sets the page class and the full screen button for one mode. The button names its key while the shortcuts are on. */
   function showFull(on: boolean) {
     document.body.classList.toggle("full", on);
-    const label = on ? "Exit full screen (f)" : "Full screen (f)";
+    const label = `${on ? "Exit full screen" : "Full screen"}${document.documentElement.dataset.shortcuts === "off" ? "" : " (f)"}`;
     fullBtn.setAttribute("aria-pressed", String(on)); fullBtn.title = label; fullBtn.setAttribute("aria-label", label);
     fullBtn.innerHTML = icon(on ? "exit" : "full");
   }
-  /** Shows the code full screen over the canvas with no connectors, or returns to the canvas with its connectors drawn at once. */
+  /** Shows the code full screen over the canvas with no connectors, or returns to the canvas with its connectors drawn at once.
+   *  At rest there is no code, so full screen does not open. */
   function setFull(on: boolean) {
+    if (on && !state.cur) return;
     state.full = on;
     showFull(on);
-    if (on) { ctx.parts.links.draw(); return; }
-    layoutTop();
-    // the explorer does not scroll to the current row in full screen: the canvas frame has no size there
-    ctx.parts.explorer.reveal();
-    ctx.place();
+    if (on) ctx.parts.links.draw();
+    else {
+      layoutTop();
+      // the explorer does not scroll to the current row in full screen: the canvas frame has no size there
+      ctx.parts.explorer.reveal();
+      ctx.place();
+    }
+    sync();
   }
   fullBtn.addEventListener("click", () => setFull(!state.full), { signal });
+
+  // ============ shortcuts ============
+  // The switch turns the one-character keys (j, k, f, c, ?) on or off. `input.ts` reads the root flag, and the
+  // help line, the key list, the rest text, and the button names hide those keys while it is off. The choice is kept for each viewer.
+
+  const keyBtns = [...document.querySelectorAll<HTMLElement>(".seg-b[data-shortcuts]")];
+  function setShortcuts(on: boolean, save: boolean) {
+    if (on) delete document.documentElement.dataset.shortcuts; else document.documentElement.dataset.shortcuts = "off";
+    keyBtns.forEach(b => b.setAttribute("aria-pressed", String((b.dataset.shortcuts === "on") === on)));
+    compactBtn.title = `Fold the functions off the flow path${on ? " (c)" : ""}`;
+    showFull(state.full);
+    if (save) store.set(KEY_SHORTCUTS, on ? "on" : "off");
+  }
+  keyBtns.forEach(b => b.addEventListener("click", () => setShortcuts(b.dataset.shortcuts === "on", true), { signal }));
+  setShortcuts(store.get(KEY_SHORTCUTS) !== "off", false);
 
   // ============ top band ============
 

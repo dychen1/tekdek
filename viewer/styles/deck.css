@@ -237,7 +237,10 @@ button.sb-title:hover{filter:brightness(1.12)}
 .gd.pipe::before,.gd.tee::before{top:0;bottom:0;border-left-width:1px}
 .gd.tee::after{top:50%;width:7px;border-top-width:1px}
 .gd.end::before{top:0;height:50%;width:7px;border-left-width:1px;border-bottom-width:1px;border-bottom-left-radius:4px}
-.snm{overflow:hidden;text-overflow:ellipsis;flex:0 1 auto;min-width:0;max-width:100%;margin-left:3px}
+.snm{display:flex;flex:0 1 auto;min-width:0;max-width:100%;margin-left:3px}
+/* a cut name ends in an ellipsis inside its head, and its last characters stay: siblings with one long prefix stay apart */
+.sh{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.st{flex:none}
 .sl:hover .snm{text-decoration:underline;text-decoration-color:var(--line-strong);text-underline-offset:3px}
 .meta{display:inline-flex;align-items:center;gap:6px;flex:0 0 auto;margin-left:6px}
 .dots{display:inline-flex;gap:3px}
@@ -307,7 +310,8 @@ button.pbadge:hover{filter:brightness(1.12)}
 .kp-g .g3{stroke:var(--accent);stroke-width:1.5;fill:none}
 .kp-g .h3{fill:var(--accent)}
 .kp-keys{margin:10px 0 0;padding:10px 0 0;border-top:1px solid var(--line-faint);display:grid;grid-template-columns:64px 1fr;gap:3px 10px;font:var(--fs-ui-s)/18px var(--font-code);color:var(--ink-2)}
-.kp-keys dt{display:flex;align-items:center;gap:1px}
+/* a key sits on the first line of its description */
+.kp-keys dt{display:flex;align-items:center;gap:.6ch;height:18px}
 .kp-keys dd{margin:0}
 kbd{display:inline-flex;align-items:center;gap:1px;height:16px;padding:0 4px;border-radius:var(--r-xs);background:var(--key-bg);font:var(--fw-bold) var(--fs-ui-s) var(--font-code);color:var(--accent)}
 .kp-theme{margin:10px 0 0;padding:10px 0 0;border-top:1px solid var(--line-faint);display:grid;grid-template-columns:64px 1fr;gap:0 10px;align-items:center;
@@ -390,6 +394,7 @@ button.ref:hover{text-decoration:underline;text-underline-offset:3px}
 .status .st-note{margin:0;color:var(--warn)}
 /* The code viewer: the header names path:line. The gutter stays put while long lines scroll sideways. */
 .reader-head{flex:0 0 auto;height:36px;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:0 6px 0 14px;background:var(--surface-raised);border-top:1px solid var(--line-faint);border-bottom:1px solid var(--line-faint)}
+.reader-head[hidden]{display:none}
 .cw-path{min-width:0;font:var(--fs-source) var(--font-code);color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-variant-ligatures:none}
 .cw-path .dir{color:var(--dim)}
 .cw-path .at{color:var(--step)}

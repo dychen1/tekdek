@@ -117,7 +117,7 @@ test("the page opens the requested codebase, else the index default, else the fi
 });
 
 test("a link to a missing codebase or flow opens the fallback at step 0, with a notice that names the missing name", () => {
-  const flows = [{ name: "a", file: "a/generations/1-000000000000.json", schemaVersion: 3 }, { name: "b", file: "b/generations/1-000000000000.json", schemaVersion: 3 }];
+  const flows = [{ name: "a", file: "a/generations/1-000000000000.json", schemaVersion: 3 }, { name: "b", file: "b/generations/1-000000000000.json", schemaVersion: 3, stepCount: 9 }];
   const index = { defaultArtifact: "x.json", artifacts: [{ label: "x", file: "x.json", digest: "sha256:x", flows }, { file: "y.json", digest: "sha256:y" }] };
   assert.deepEqual(resolveLink(index, { artifact: "x.json", flow: "b", step: 5 }), { file: "x.json", flow: "b", step: 5, notice: null });
   assert.deepEqual(resolveLink(index, { artifact: null, flow: null, step: 3 }), { file: "x.json", flow: null, step: 3, notice: null });
@@ -126,6 +126,9 @@ test("a link to a missing codebase or flow opens the fallback at step 0, with a 
   assert.deepEqual(resolveLink(index, { artifact: "gone.json", flow: "b", step: 5 }),
     { file: "x.json", flow: null, step: 0, notice: "No codebase named gone.json. This page shows x." });
   assert.equal(must(resolveLink(index, { artifact: "y.json", flow: "a", step: 2 })).notice, "No flow named a in y.json.");
+  assert.deepEqual(resolveLink(index, { artifact: "x.json", flow: "b", step: 999 }),
+    { file: "x.json", flow: "b", step: 9, notice: "No step 999 in b. This page shows its last step, 9." });
+  assert.equal(must(resolveLink(index, { artifact: "x.json", flow: "b", step: 9 })).notice, null);
   assert.equal(resolveLink({ artifacts: [] }, { artifact: null, flow: null, step: 0 }), null);
 });
 

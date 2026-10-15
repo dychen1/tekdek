@@ -39,6 +39,7 @@ function showReader(visible: boolean) {
 /** Fills the code column and empties the flow band while no deck is loaded. The chrome stays visible and inert.
  *  An alert text goes to screen readers at once. A deck part returns its own elements to the shell state when the deck is destroyed. */
 function showShell(badge: string, color: string, desc: string, meta: string, alert = false) {
+  document.title = "Code map";
   document.documentElement.style.setProperty("--cc", color);
   $("cdHead").innerHTML = `<span class="pbadge" style="--c:${esc(color)}"><span>${esc(badge)}</span></span>`;
   const text = `<p class="cd-ann">${desc}</p>` + (meta ? `<p class="cd-empty">${meta}</p>` : "");
@@ -130,12 +131,13 @@ async function openFlow(next: FlowEntry | null, step: number, notice: string | n
     showLoading(null);
     setChrome(true);
     showReader(true);
-    deck = createDeck({ graph: graph!, flow, sources, onStep: n => { showNotice(null); writeUrl(n); } });
-    showNotice(notice);
+    deck = createDeck({ graph: graph!, flow, sources, onStep: n => { showNotice(null); writeUrl(n); nameTab(n); } });
     renderFlowBand(flow);
     (window as unknown as { __deck: unknown }).__deck = deck.inspect;
     writeUrl(0);
     if (step > 0) deck.go(step);
+    // after the first step: a step clears the notice
+    showNotice(notice);
   } catch (error) {
     fail(error, mine);
   }
@@ -218,9 +220,16 @@ function renderRepoBadge() {
   if (pick) { const button = $("repoPick"); button.addEventListener("click", () => openPicker(button, "codebase")); }
 }
 
-/** The flow badge and its freshness in the top band, or an empty band without a flow.
+/** Names the browser tab after the step, the flow, and the codebase. */
+function nameTab(step: number) {
+  document.title = [step ? `Step ${step}` : "", flowEntry?.name, entry?.label ?? entry?.file].filter(Boolean).join(" · ");
+}
+
+/** The flow badge and its freshness in the top band, or an empty band without a flow, and the page heading.
  *  The badge is a picker when the codebase has more than one flow. */
 function renderFlowBand(flow: DeckFlow | null) {
+  const codebase = entry?.label ?? entry?.file;
+  $("pageTitle").textContent = codebase ? `Code map of ${codebase}${flow ? `, flow ${flow.name}` : ""}` : "Code map";
   const name = esc(flow?.name ?? "");
   const pick = !!flow && frozenFlows(entry?.flows).length > 1;
   $("flowPick").outerHTML = flow ? badgeHtml("flowPick", "pbadge", `<span>${name}</span>`, pick ? `Flow ${name}. Choose another flow` : null) : '<span id="flowPick"></span>';
@@ -237,7 +246,9 @@ function renderFlowBand(flow: DeckFlow | null) {
 const CUT = "#chipText,#cDesc,.dname,.snm";
 document.addEventListener("pointerover", e => {
   const el = (e.target as Element).closest<HTMLElement>(CUT);
-  if (el) el.title = el.scrollWidth > el.clientWidth || el.scrollHeight > el.clientHeight ? el.textContent ?? "" : "";
+  // an explorer name cuts only its head
+  const box = el?.querySelector<HTMLElement>(".sh") ?? el;
+  if (el && box) el.title = box.scrollWidth > box.clientWidth || box.scrollHeight > box.clientHeight ? el.textContent ?? "" : "";
 });
 
 // ============ URL state ============
