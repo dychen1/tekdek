@@ -90,6 +90,19 @@ export function createTools(ctx: DeckContext): Tools {
   $("#zoomOut").addEventListener("click", () => setZoom(state.zoom - 0.1), { signal });
   $("#zoomIn").addEventListener("click", () => setZoom(state.zoom + 0.1), { signal });
 
+  // Cmd + scroll over the canvas frame zooms; a trackpad pinch sends the wheel with Ctrl. 100 px of scroll is one 10% step.
+  const frame = $("#frame");
+  let wheel = 0;
+  document.addEventListener("wheel", e => {
+    if (!e.metaKey && !e.ctrlKey) return;
+    const r = frame.getBoundingClientRect();
+    if (state.full || e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) return;
+    e.preventDefault();
+    wheel += e.deltaMode === WheelEvent.DOM_DELTA_LINE ? e.deltaY * 33 : e.deltaY;
+    const steps = Math.trunc(wheel / 100);
+    if (steps) { wheel -= steps * 100; setZoom(state.zoom - steps * 0.1); }
+  }, { passive: false, signal });
+
   // ============ full screen ============
 
   const fullBtn = $("#fullBtn");
