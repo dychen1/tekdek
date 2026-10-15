@@ -2,7 +2,7 @@
    header (`path:line`), and the code viewer with its line numbers, colors, and margin marks. The facts come from
    `layout/step-facts.ts` and the lines from the `/source` answer. Every data string goes through `esc`.
    # Sections
-   markup, empty states, facts, code viewer, step */
+   markup, fold, empty states, facts, code viewer, step */
 import type { DeckStep, SourceView } from "../data/models.ts";
 import { displayName } from "../data/adapt.ts";
 import { highlight } from "../layout/highlight.ts";
@@ -41,8 +41,27 @@ function refList(refs: readonly CallRef[]): string {
 }
 
 export function createCode(ctx: DeckContext): CodeColumn {
-  const { model, state } = ctx;
+  const { model, state, signal } = ctx;
   const head = $("#cdHead"), stepEl = $("#cdStep"), whereEl = $("#where"), codeEl = $("#code");
+  const card = $("#card"), foldBtn = $<HTMLButtonElement>("#foldBtn");
+
+  // ============ fold ============
+  // The step details take at most the top half of the column and scroll there. The fold stays across steps.
+
+  /** Shows the fold button when the step details overflow the top half, or are folded. */
+  function fitFold() {
+    foldBtn.hidden = !card.classList.contains("folded") && stepEl.scrollHeight <= stepEl.clientHeight + 1;
+  }
+  /** Hides or shows the step details under the step title. */
+  function setFold(folded: boolean) {
+    card.classList.toggle("folded", folded);
+    const label = folded ? "Show the step details" : "Hide the step details";
+    foldBtn.setAttribute("aria-expanded", String(!folded)); foldBtn.title = label; foldBtn.setAttribute("aria-label", label);
+    fitFold();
+  }
+  // the code header moves with the fold, so the arrow to it is drawn again
+  foldBtn.addEventListener("click", () => { setFold(!card.classList.contains("folded")); ctx.place(); }, { signal });
+  addEventListener("resize", fitFold, { signal });
 
   // ============ empty states ============
 
@@ -52,6 +71,7 @@ export function createCode(ctx: DeckContext): CodeColumn {
     stepEl.innerHTML = `<p class="cd-empty">${md(model.flow ? REST : NO_FLOW)}</p>`;
     whereEl.innerHTML = "";
     codeEl.innerHTML = "";
+    fitFold();
   }
 
   // ============ facts ============
@@ -156,6 +176,8 @@ export function createCode(ctx: DeckContext): CodeColumn {
       if (step.signature && !marks.sig) facts.push(["signature", `<code>${esc(oneLineSignature(step.signature))}</code>`]);
     }
     stepEl.innerHTML = `<p class="cd-ann">${md(step.annotation)}</p><dl class="cd-facts">${facts.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("")}</dl>`;
+    stepEl.scrollTop = 0;
+    fitFold();
     swap(prev);
   }
 
@@ -164,6 +186,7 @@ export function createCode(ctx: DeckContext): CodeColumn {
     destroy() {
       for (const el of [head, stepEl, whereEl, codeEl]) el.replaceChildren();
       stepEl.classList.remove("swap"); codeEl.classList.remove("swap");
+      setFold(false);
     },
   };
 }

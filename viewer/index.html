@@ -74,7 +74,8 @@ try { const v = localStorage.getItem('tekdek.deck.variant'); if (v === 'storm' |
 
 <section class="pane card" id="card" aria-label="Step and source">
   <div class="status" id="status" role="status" aria-live="polite" hidden></div>
-  <div class="cd-head" id="cdHead"></div>
+  <div class="cd-bar"><div class="cd-head" id="cdHead"></div>
+    <button class="cbtn quiet foldbtn" id="foldBtn" type="button" aria-controls="cdStep" aria-expanded="true" title="Hide the step details" aria-label="Hide the step details" hidden><svg class="ic" aria-hidden="true"><use href="#i-chev"/></svg></button></div>
   <div class="cd-step" id="cdStep"></div>
   <header class="reader-head" id="codeHead"><div class="cw-path" id="where" title="Where the current step lives"></div>
     <button class="cbtn quiet fsbtn" id="fullBtn" type="button" aria-pressed="false" title="Full screen (f)" aria-label="Full screen (f)"><svg class="ic" aria-hidden="true"><use href="#i-full"/></svg></button></header>

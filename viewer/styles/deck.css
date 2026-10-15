@@ -329,14 +329,21 @@ kbd{display:inline-flex;align-items:center;gap:1px;height:16px;padding:0 4px;bor
 
 /* ============ code column: the step header over the code viewer ============ */
 .card{position:fixed;z-index:6;top:var(--gap);right:var(--gap);bottom:var(--gap);width:var(--rc);display:flex;flex-direction:column;overflow:hidden}
-.cd-head{flex:0 0 auto;display:flex;align-items:flex-start;gap:9px;padding:13px 16px 0}
+.cd-bar{flex:0 0 auto;display:flex;align-items:flex-start;padding-right:8px}
+.cd-head{flex:1 1 auto;min-width:0;display:flex;align-items:flex-start;gap:9px;padding:13px 16px 0}
+/* Long step details scroll inside the top half; the fold button hides them, so the code keeps at least half the column. */
+.foldbtn{margin-top:9px}
+.foldbtn[hidden]{display:none}
+.foldbtn .ic{transition:transform var(--dur-state) var(--ease-out)}
+.card.folded .foldbtn .ic{transform:rotate(-90deg)}
+.card.folded .cd-step{display:none}
 .cd-no{flex:0 0 auto;min-width:22px;height:20px;padding:0 6px;border-radius:var(--r-s);background:var(--step);color:var(--on-accent);box-shadow:var(--badge-shadow);
   font:var(--fw-bold) var(--fs-code)/20px var(--font-code);text-align:center}
 .cd-title{flex:1 1 auto;min-width:0;margin:0;display:flex;align-items:center;font:var(--fw-bold) var(--fs-title)/20px var(--font-code);color:var(--ink)}
 .cd-title .ctt{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .cursor{flex:0 0 auto;width:8px;height:15px;margin-left:3px;border-radius:1px;background:var(--accent);animation:blink var(--blink) steps(1,end) infinite}
 @keyframes blink{50%{opacity:0}}
-.cd-step{flex:0 0 auto;padding:8px 16px 12px}
+.cd-step{flex:0 1 auto;min-height:0;overflow:auto;padding:8px 16px 12px;scrollbar-width:thin;scrollbar-color:var(--line-soft) transparent}
 .cd-step.swap,.code.swap{animation:swap var(--dur-state) var(--ease-out)}
 .cd-ann{margin:0;font:var(--fs-ui)/1.6 var(--font-code);color:var(--ink)}
 .cd-facts{margin:10px 0 0;display:grid;grid-template-columns:var(--lab) minmax(0,1fr);gap:2px 0;font:var(--fs-ui-s)/1.6 var(--font-code);font-variant-ligatures:none}
@@ -365,7 +372,7 @@ button.ref:hover{text-decoration:underline;text-underline-offset:3px}
 .cw-path{min-width:0;font:13px var(--font-code);color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-variant-ligatures:none}
 .cw-path .dir{color:var(--dim)}
 .cw-path .at{color:var(--tn-orange)}
-.code{--where:color-mix(in srgb,var(--tn-sel) 65%,var(--bg));flex:1 1 auto;min-height:0;position:relative;overflow:auto;padding:10px 0 28px;background:var(--bg);
+.code{--where:color-mix(in srgb,var(--tn-sel) 65%,var(--bg));flex:1 0 50%;min-height:0;position:relative;overflow:auto;padding:10px 0 28px;background:var(--bg);
   font:13px/1.6 var(--font-code);font-variant-ligatures:none;scrollbar-width:thin;scrollbar-color:var(--line-soft) transparent}
 .code-in{position:relative;min-width:max-content}
 .gut{position:sticky;left:0;width:0;height:0;z-index:2}
