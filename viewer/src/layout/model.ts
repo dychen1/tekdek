@@ -92,6 +92,8 @@ export function withMembership(graph: DeckGraph, flow: DeckFlow | null): DeckGra
 export interface DeckState {
   /** The current step; 0 is the rest state. */
   cur: number;
+  /** The step that the last clear left, or 0. Forward from the rest state continues there. */
+  resume: number;
   /** Compact starts on at every load. Only the compact button and `c` turn it off. */
   compact: boolean;
   zoom: number;
@@ -115,8 +117,11 @@ export function initialState(model: DeckModel): DeckState {
     const row = model.rowByPath.get(file);
     if (row) openTo(open, row);
   }
-  return { cur: 0, compact: true, zoom: 1, zoomMax: ZOOM_MAX, full: false, open, folded: new Set(), browseFile: null, anchor: null };
+  return { cur: 0, resume: 0, compact: true, zoom: 1, zoomMax: ZOOM_MAX, full: false, open, folded: new Set(), browseFile: null, anchor: null };
 }
+
+/** Returns the step that forward goes to: the next step, or from the rest state the step that a clear left. */
+export const nextStep = (state: Pick<DeckState, "cur" | "resume">) => state.cur ? state.cur + 1 : state.resume || 1;
 
 /** Returns the file whose box shows, with the cluster and the function that the box marks as current.
  *  A browsed file wins over the step and marks neither. A step with no function in the graph shows no file. */

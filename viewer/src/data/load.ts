@@ -8,7 +8,7 @@ import type { ArtifactEntry, ArtifactIndex, FlowArtifact, FlowEntry, GraphDocume
 // ============ errors ============
 
 /** The cause of a load failure. Each cause has one recovery step in the page. */
-export type LoadReason = "fetch" | "digest" | "graph" | "flow" | "empty";
+export type LoadReason = "fetch" | "server" | "digest" | "graph" | "flow" | "empty";
 
 /** A load failure with its cause. */
 export class LoadError extends Error {
@@ -19,12 +19,12 @@ export class LoadError extends Error {
 
 const artifactUrl = (path: string) => "/artifacts/" + path.split("/").map(encodeURIComponent).join("/");
 
-/** Fetches one URL. No answer or an HTTP error is a `fetch` failure. */
+/** Fetches one URL. No answer is a `fetch` failure; an HTTP error is a `server` failure. */
 async function fetchOk(url: string, what: string): Promise<Response> {
   let response: Response;
   try { response = await fetch(url, { cache: "no-store" }); }
   catch { throw new LoadError("fetch", `The viewer server did not answer the request for ${what}.`); }
-  if (!response.ok) throw new LoadError("fetch", `Could not load ${what} (HTTP ${response.status}).`);
+  if (!response.ok) throw new LoadError("server", `Could not load ${what} (HTTP ${response.status}).`);
   return response;
 }
 
@@ -39,7 +39,7 @@ async function fetchJson<T>(url: string, what: string, reason: LoadReason): Prom
 
 /** Loads the artifact index. An index with no codebase is an `empty` failure. */
 export async function loadIndex(): Promise<ArtifactIndex> {
-  const index = await fetchJson<ArtifactIndex>(artifactUrl("index.json"), "index.json", "fetch");
+  const index = await fetchJson<ArtifactIndex>(artifactUrl("index.json"), "index.json", "server");
   if (!index?.artifacts?.length) throw new LoadError("empty", "No codebase is indexed yet.");
   return index;
 }
@@ -83,6 +83,6 @@ export async function loadFlow(entry: FlowEntry): Promise<FlowArtifact> {
 /** Loads the source of every step function of one flow. The server cuts it from the project files. */
 export async function loadSource(artifact: string, flow: string): Promise<Map<string, SourceView>> {
   const url = `/source?artifact=${encodeURIComponent(artifact)}&flow=${encodeURIComponent(flow)}`;
-  const document = await fetchJson<SourceDocument>(url, `the source of ${flow}`, "fetch");
+  const document = await fetchJson<SourceDocument>(url, `the source of ${flow}`, "server");
   return new Map((document.functions ?? []).map(view => [view.key, view]));
 }

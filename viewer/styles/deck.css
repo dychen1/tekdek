@@ -76,7 +76,7 @@
   --blink:1060ms;
   /* layout: explorer at left, the code column at right, the canvas frame and the bottom bar between them */
   --sb:262px; --rc:clamp(440px,36vw,580px); --gap:12px; --lab:66px;
-  --bar-h:126px; --bar-bottom:34px; --top-band:112px;
+  --bar-h:126px; --bar-bottom:34px; --top-band:52px;  /* layoutTop() measures it; 52px is its value for the 28px map tools */
   --frame-l:calc(var(--sb) + 16px);
   --frame-r:calc(var(--rc) + var(--gap) + 16px);
 }
@@ -161,7 +161,7 @@ code{font:inherit;color:var(--keyword)}
 .dfront{left:0;top:100%;width:100%;height:var(--deck-t);transform-origin:50% 0;transform:rotateX(-90deg);border-radius:0 0 var(--r-m) var(--r-m);
   background:color-mix(in srgb,var(--c) var(--front-mix),var(--tn-black))}
 .dlabel{position:absolute;left:9px;top:8px;max-width:calc(100% - 18px);height:20px;padding:0 8px;display:flex;align-items:center;gap:9px;
-  border-radius:var(--r-s);background:var(--c);white-space:nowrap;font:var(--fw-bold) var(--fs-ui) var(--font-code);color:var(--on-accent)}
+  border-radius:var(--r-s);background:var(--c);white-space:nowrap;font:var(--fw-bold) var(--fs-ui) var(--font-code);color:var(--on-accent);pointer-events:auto}
 .dlabel .dname{min-width:0;overflow:hidden;text-overflow:ellipsis}
 
 /* ============ lifted boxes: a lid and a front face ============ */
@@ -281,12 +281,12 @@ button.pbadge:hover{filter:brightness(1.12)}
 .keypop{position:absolute;top:calc(100% + 6px);left:-1px;width:352px;padding:10px 12px 12px;pointer-events:auto}
 .kp-cl{margin:0 -6px;padding:0;list-style:none;display:grid;gap:1px}
 .kp-hd{display:flex;justify-content:space-between;margin:0 0 3px;padding:0 6px 0 26px;font:var(--fs-ui-s)/16px var(--font-code);color:var(--dim)}
-.kp-c{width:100%;height:22px;padding:0 6px;display:grid;grid-template-columns:12px minmax(0,1fr) auto;gap:8px;align-items:center;border:0;border-radius:var(--r-s);
+.kp-c{width:100%;min-height:22px;padding:3px 6px;display:grid;grid-template-columns:12px minmax(0,1fr) auto;gap:8px;align-items:center;border:0;border-radius:var(--r-s);
   background:transparent;text-align:left;font:var(--fs-ui-s) var(--font-code);color:var(--ink-2);cursor:pointer;transition:background-color var(--dur-hover),color var(--dur-hover)}
 .kp-c:hover{background:var(--surface-hover);color:var(--ink)}
 .kp-c.on{background:color-mix(in srgb,var(--c) 14%,transparent);color:var(--ink)}
 .kp-c .sw{width:9px;height:9px;border-radius:var(--r-xs);background:var(--c)}
-.kp-c .ll{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.kp-c .ll{overflow-wrap:anywhere}
 .kp-c.on .ll{color:var(--c);font-weight:var(--fw-bold)}
 .kp-c .rng{color:var(--dim)}
 .kp-c:hover .rng,.kp-c.on .rng{color:var(--ink-2)}
@@ -299,12 +299,14 @@ button.pbadge:hover{filter:brightness(1.12)}
 .kp-g .g1{stroke:var(--line);stroke-width:1;fill:none}
 .kp-g .g3{stroke:var(--accent);stroke-width:1.5;fill:none}
 .kp-g .h3{fill:var(--accent)}
-.kp-keys{margin:10px 0 0;padding:10px 0 0;border-top:1px solid var(--line-faint);display:grid;grid-template-columns:56px 1fr;gap:3px 10px;font:var(--fs-ui-s)/18px var(--font-code);color:var(--ink-2)}
+.kp-keys{margin:10px 0 0;padding:10px 0 0;border-top:1px solid var(--line-faint);display:grid;grid-template-columns:64px 1fr;gap:3px 10px;font:var(--fs-ui-s)/18px var(--font-code);color:var(--ink-2)}
 .kp-keys dt{display:flex;align-items:center;gap:1px}
 .kp-keys dd{margin:0}
 kbd{display:inline-flex;align-items:center;gap:1px;height:16px;padding:0 4px;border-radius:var(--r-xs);background:var(--key-bg);font:var(--fw-bold) var(--fs-ui-s) var(--font-code);color:var(--accent)}
-.kp-theme{margin:10px 0 0;padding:10px 0 0;border-top:1px solid var(--line-faint);display:grid;grid-template-columns:56px 1fr;gap:0 10px;align-items:center;
+.kp-theme{margin:10px 0 0;padding:10px 0 0;border-top:1px solid var(--line-faint);display:grid;grid-template-columns:64px 1fr;gap:0 10px;align-items:center;
   font:var(--fs-ui-s)/18px var(--font-code);color:var(--ink-2)}
+/* the shortcut switch belongs to the key list above it */
+.kp-sw{margin-top:6px;padding-top:0;border-top:0}
 .seg{display:flex;gap:2px;width:max-content;padding:3px;border:1px solid var(--line-soft);border-radius:var(--r-m)}
 .seg-b{height:20px;padding:0 9px;border:0;border-radius:var(--r-s);background:transparent;font:var(--fs-ui-s) var(--font-code);color:var(--ink-2);cursor:pointer;
   transition:background-color var(--dur-hover),color var(--dur-hover)}
@@ -326,7 +328,7 @@ kbd{display:inline-flex;align-items:center;gap:1px;height:16px;padding:0 4px;bor
   font:var(--fs-ui-s)/16px var(--font-code);color:var(--ink)}
 .tip .sw{width:8px;height:8px;flex:0 0 auto;border-radius:var(--r-xs);background:var(--c)}
 .tip b{color:var(--step)}
-.tip span{overflow:hidden;text-overflow:ellipsis}
+.tip span{white-space:normal;overflow-wrap:anywhere}
 
 /* ============ top band: the flow picker and freshness beside the map tools ============ */
 .fh-top{position:fixed;z-index:8;top:var(--gap);left:var(--fh-l,560px);right:var(--frame-r);height:28px;display:flex;align-items:center;gap:12px;min-width:0}
@@ -349,9 +351,9 @@ kbd{display:inline-flex;align-items:center;gap:1px;height:16px;padding:0 4px;bor
 .card.folded .cd-step{display:none}
 .cd-no{flex:0 0 auto;min-width:22px;height:20px;padding:0 6px;border-radius:var(--r-s);background:var(--step);color:var(--on-accent);box-shadow:var(--badge-shadow);
   font:var(--fw-bold) var(--fs-code)/20px var(--font-code);text-align:center}
-.cd-title{flex:1 1 auto;min-width:0;margin:0;display:flex;align-items:center;font:var(--fw-bold) var(--fs-title)/20px var(--font-code);color:var(--ink)}
-.cd-title .ctt{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.cursor{flex:0 0 auto;width:8px;height:15px;margin-left:3px;border-radius:1px;background:var(--accent);animation:blink var(--blink) steps(1,end) infinite}
+/* The step title is the step's identity: it wraps, and the cursor ends its last line. */
+.cd-title{flex:1 1 auto;min-width:0;margin:0;font:var(--fw-bold) var(--fs-title)/20px var(--font-code);color:var(--ink);overflow-wrap:anywhere}
+.cursor{flex:0 0 auto;display:inline-block;vertical-align:-3px;width:8px;height:15px;margin-left:3px;border-radius:1px;background:var(--accent);animation:blink var(--blink) steps(1,end) infinite}
 @keyframes blink{50%{opacity:0}}
 .cd-step{flex:0 1 auto;min-height:0;overflow:auto;padding:8px 16px 12px;scrollbar-width:thin;scrollbar-color:var(--line-soft) transparent}
 .cd-step.swap,.code.swap{animation:swap var(--dur-state) var(--ease-out)}
@@ -377,6 +379,8 @@ button.ref:hover{text-decoration:underline;text-underline-offset:3px}
 .status[hidden]{display:none}
 .status .st-line{display:flex;align-items:center;max-width:100%}
 .status .st-line span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* A notice: the link named a flow or a codebase that is missing. */
+.status .st-note{margin:0;color:var(--warn)}
 /* The code viewer: the header names path:line. The gutter stays put while long lines scroll sideways. */
 .reader-head{flex:0 0 auto;height:36px;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:0 6px 0 14px;background:var(--surface-raised);border-top:1px solid var(--line-faint);border-bottom:1px solid var(--line-faint)}
 .cw-path{min-width:0;font:var(--fs-source) var(--font-code);color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-variant-ligatures:none}
@@ -427,6 +431,11 @@ button.ref:hover{text-decoration:underline;text-underline-offset:3px}
 .help .hk{display:inline-flex;align-items:center;margin-right:.6ch;color:var(--keyword)}
 .help .hk .ic{width:11px;height:11px}
 .help .hsep{width:3px;height:3px;margin:0 1.2ch;border-radius:var(--r-pill);background:var(--line-strong)}
+.help .ck{display:inline-flex;align-items:center}
+/* no deck: the keys do nothing, so the help dims like the disabled controls */
+.help.idle{opacity:.42}
+/* the key popover turned off the one-character keys */
+:root[data-shortcuts="off"] .ck{display:none}
 
 /* ============ full screen code: the code column takes the canvas; the explorer, the top band, and the bar stay ============ */
 .fsbtn{flex:0 0 26px;width:26px;height:26px}

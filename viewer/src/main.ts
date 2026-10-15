@@ -2,9 +2,9 @@
    the source load, and the URL state (`?artifact=&flow=&step=`). It creates one deck for the selected
    codebase and flow, and replaces it on a change.
    # Sections
-   status, loading, pickers and badges, URL state, boot */
+   status, loading, pickers and badges, cut text, URL state, boot */
 import type { ArtifactEntry, ArtifactIndex, DeckFlow, DeckGraph, FlowEntry, SourceView } from "./data/models.ts";
-import { bindingDigest, deckFlow, deckGraph, pickArtifact, pickFlow, frozenFlows } from "./data/adapt.ts";
+import { bindingDigest, deckFlow, deckGraph, pickFlow, frozenFlows, resolveLink } from "./data/adapt.ts";
 import { loadFlow, loadGraph, loadIndex, loadSource, LoadError, type LoadReason } from "./data/load.ts";
 import { pageOrigin } from "./deck/context.ts";
 import { createDeck, type DeckInstance } from "./deck/deck.ts";
@@ -24,32 +24,42 @@ function showLoading(line: string | null) {
   status.innerHTML = `<div class="st-line"><span>${esc(line)}</span><i class="cursor" aria-hidden="true"></i></div>`;
 }
 
+/** Shows a notice at the top of the code column, or hides it. A notice stays until the next step or load. */
+function showNotice(text: string | null) {
+  const status = $("status");
+  status.hidden = text === null;
+  status.innerHTML = text === null ? "" : `<p class="st-note">${esc(text)}</p>`;
+}
+
 /** Shows or hides the code header and the code viewer. They hide while no deck is loaded. */
 function showReader(visible: boolean) {
   for (const id of ["codeHead", "code"]) $(id).style.display = visible ? "" : "none";
 }
 
 /** Fills the code column and empties the flow band while no deck is loaded. The chrome stays visible and inert.
- *  A deck part returns its own elements to the shell state when the deck is destroyed. */
-function showShell(badge: string, color: string, desc: string, meta: string) {
+ *  An alert text goes to screen readers at once. A deck part returns its own elements to the shell state when the deck is destroyed. */
+function showShell(badge: string, color: string, desc: string, meta: string, alert = false) {
   document.documentElement.style.setProperty("--cc", color);
   $("cdHead").innerHTML = `<span class="pbadge" style="--c:${esc(color)}"><span>${esc(badge)}</span></span>`;
-  $("cdStep").innerHTML = `<p class="cd-ann">${desc}</p>` + (meta ? `<p class="cd-empty">${meta}</p>` : "");
+  const text = `<p class="cd-ann">${desc}</p>` + (meta ? `<p class="cd-empty">${meta}</p>` : "");
+  $("cdStep").innerHTML = alert ? `<div role="alert">${text}</div>` : text;
   showReader(false);
   renderFlowBand(null);
   setChrome(false);
 }
 
-/** Enables or disables every control that needs a deck. */
+/** Enables or disables every control that needs a deck, and dims the key help while the keys do nothing. */
 function setChrome(enabled: boolean) {
   for (const id of ["prevBtn", "nextBtn", "clearBtn", "compactBtn", "zoomOut", "zoomIn", "keyBtn", "fullBtn"]) {
     $<HTMLButtonElement>(id).disabled = !enabled;
   }
+  $("help").classList.toggle("idle", !enabled);
 }
 
 /** The recovery step for each cause of a load failure. */
 const RECOVERY: Record<LoadReason, string> = {
   fetch: "Start the viewer server with <code>tekdek serve</code>, then reload this page.",
+  server: "Reload this page. If the error stays, run <code>tekdek index</code> and restart <code>tekdek serve</code>.",
   digest: "Reload this page: the graph or its semantic cache changed while the page loaded.",
   graph: "Reindex the codebase with <code>tekdek index</code> to write a current graph.",
   flow: "Freeze the flow again with <code>tekdek flow import</code>, then reload this page.",
@@ -64,7 +74,7 @@ function fail(error: unknown, mine = ticket) {
   showLoading(null);
   const reason = error instanceof LoadError ? error.reason : "fetch";
   const message = error instanceof Error ? error.message : String(error);
-  showShell("error", "var(--danger)", esc(message), RECOVERY[reason]);
+  showShell("error", "var(--danger)", esc(message), RECOVERY[reason], true);
 }
 
 // ============ loading ============
@@ -77,7 +87,7 @@ let deck: DeckInstance | null = null;
 let ticket = 0;
 
 /** Loads one codebase, verifies its graph, and opens the requested flow. A failure shows unless a newer load started. */
-async function openArtifact(file: string, flowName: string | null, step: number) {
+async function openArtifact(file: string, flowName: string | null, step: number, notice: string | null = null) {
   const mine = ++ticket;
   try {
     const next = index!.artifacts.find(item => item.file === file) ?? null;
@@ -91,7 +101,7 @@ async function openArtifact(file: string, flowName: string | null, step: number)
     const document = await loadGraph(entry);
     if (mine !== ticket) return;
     graph = deckGraph(document);
-    await openFlow(pickFlow(frozenFlows(entry.flows), flowName), step);
+    await openFlow(pickFlow(frozenFlows(entry.flows), flowName), step, notice);
   } catch (error) {
     fail(error, mine);
   }
@@ -99,7 +109,7 @@ async function openArtifact(file: string, flowName: string | null, step: number)
 
 /** Loads one flow of the current codebase and the source of its step functions, then replaces the deck.
  *  A failed source load still plays the flow: every code viewer shows the unreadable note. */
-async function openFlow(next: FlowEntry | null, step: number) {
+async function openFlow(next: FlowEntry | null, step: number, notice: string | null = null) {
   const mine = ++ticket;
   try {
     let flow: DeckFlow | null = null;
@@ -120,7 +130,8 @@ async function openFlow(next: FlowEntry | null, step: number) {
     showLoading(null);
     setChrome(true);
     showReader(true);
-    deck = createDeck({ graph: graph!, flow, sources, onStep: n => writeUrl(n) });
+    deck = createDeck({ graph: graph!, flow, sources, onStep: n => { showNotice(null); writeUrl(n); } });
+    showNotice(notice);
     renderFlowBand(flow);
     (window as unknown as { __deck: unknown }).__deck = deck.inspect;
     writeUrl(0);
@@ -219,6 +230,16 @@ function renderFlowBand(flow: DeckFlow | null) {
     : "";
 }
 
+// ============ cut text ============
+// A chip, a deck label, or a bar description that is cut shows its full text in a tooltip. The title is set when the
+// pointer enters, so it follows the current width, and text that shows in full gets no tooltip.
+
+const CUT = "#chipText,#cDesc,.dname";
+document.addEventListener("pointerover", e => {
+  const el = (e.target as Element).closest<HTMLElement>(CUT);
+  if (el) el.title = el.scrollWidth > el.clientWidth || el.scrollHeight > el.clientHeight ? el.textContent ?? "" : "";
+});
+
 // ============ URL state ============
 
 function readUrl() {
@@ -241,8 +262,8 @@ async function boot() {
   showShell("loading", "var(--accent)", "Reading the artifact index.", "");
   showLoading("loading the artifact index");
   index = await loadIndex();
-  const want = readUrl();
-  await openArtifact(pickArtifact(index, want.artifact)!.file, want.flow, want.step);
+  const link = resolveLink(index, readUrl())!;
+  await openArtifact(link.file, link.flow, link.step, link.notice);
 }
 
 boot().catch(fail);

@@ -74,7 +74,7 @@ export function createDeck(options: DeckOptions): DeckInstance {
   // Nothing on the canvas moves between steps: each step sets the file box, the deck, and the connectors at their
   // final place in one frame. A cluster change replaces the deck. Only the code column and the bar text fade in.
 
-  /** Goes to a step. A step clears a browsed file, also when the step does not change. */
+  /** Goes to a step. A step clears a browsed file, also when the step does not change. A clear keeps its step for forward. */
   function go(n: number) {
     n = clamp(Math.round(n), 0, model.N);
     if (!Number.isFinite(n)) return;
@@ -82,6 +82,7 @@ export function createDeck(options: DeckOptions): DeckInstance {
     state.browseFile = null;
     if (n === state.cur) { if (browsed) render(n); return; }
     const prev = state.cur;
+    if (!n) state.resume = prev;
     state.cur = n;
     render(prev);
   }

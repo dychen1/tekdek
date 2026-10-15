@@ -12,8 +12,11 @@
   Run `tekdek serve` and open the URL that it prints.
 -->
 <script>
-// Apply the saved Tokyo Night variant before first paint.
-try { const v = localStorage.getItem('tekdek.deck.variant'); if (v === 'storm' || v === 'moon') document.documentElement.dataset.variant = v; } catch (err) { /* storage is blocked: keep Night */ }
+// Apply the saved Tokyo Night variant and shortcut switch before first paint.
+try {
+  const v = localStorage.getItem('tekdek.deck.variant'); if (v === 'storm' || v === 'moon') document.documentElement.dataset.variant = v;
+  if (localStorage.getItem('tekdek.deck.shortcuts') === 'off') document.documentElement.dataset.shortcuts = 'off';
+} catch (err) { /* storage is blocked: keep Night and the shortcuts */ }
 </script>
 <link rel="stylesheet" href="./dist/app.css">
 <script type="module" src="./dist/app.js"></script>
@@ -56,9 +59,16 @@ try { const v = localStorage.getItem('tekdek.deck.variant'); if (v === 'storm' |
       <li><svg class="kp-g" width="28" height="8" viewBox="0 0 28 8" aria-hidden="true"><path class="g3" d="M1 4H21"/><path class="h3" d="M20 1 27 4 20 7z"/></svg><span>Arrow: the current box to its source in the code column.</span></li>
     </ul>
     <dl class="kp-keys" aria-label="More keys">
-      <dt><kbd>c</kbd></dt><dd>fold or name the functions off the flow path</dd>
+      <dt class="ck"><kbd>c</kbd></dt><dd class="ck">fold or name the functions off the flow path</dd>
       <dt><kbd>⌘</kbd> scroll</dt><dd>zoom the map</dd>
     </dl>
+    <div class="kp-theme kp-sw" role="group" aria-label="Single-key shortcuts">
+      <span aria-hidden="true">shortcuts</span>
+      <div class="seg">
+        <button class="seg-b" type="button" data-shortcuts="on" aria-pressed="true">on</button>
+        <button class="seg-b" type="button" data-shortcuts="off" aria-pressed="false">off</button>
+      </div>
+    </div>
     <div class="kp-theme" role="group" aria-labelledby="kpThemeLbl">
       <span id="kpThemeLbl">theme</span>
       <div class="seg">
@@ -93,7 +103,8 @@ try { const v = localStorage.getItem('tekdek.deck.variant'); if (v === 'storm' |
   <p class="c-desc" id="cDesc"></p>
   <div class="ticks" id="ticks" role="group" aria-label="Steps"></div>
 </section>
-<p class="help" aria-label="Shortcuts"><span class="hk">j/<svg class="ic" aria-hidden="true"><use href="#i-left"/></svg><span class="vh"> or left arrow</span></span>back<i class="hsep" aria-hidden="true"></i><span class="hk">k/<svg class="ic" aria-hidden="true"><use href="#i-right"/></svg><span class="vh"> or right arrow</span></span>forward<i class="hsep" aria-hidden="true"></i><span class="hk">f</span>full screen<i class="hsep" aria-hidden="true"></i><span class="hk">esc</span>clear<i class="hsep" aria-hidden="true"></i><span class="hk">?</span>key</p>
+<!-- The .ck parts name the one-character keys; they hide while the key popover turns those keys off. -->
+<p class="help" id="help" aria-label="Shortcuts"><span class="hk"><span class="ck">j/<span class="vh"> or </span></span><svg class="ic" aria-hidden="true"><use href="#i-left"/></svg><span class="vh">left arrow</span></span>back<i class="hsep" aria-hidden="true"></i><span class="hk"><span class="ck">k/<span class="vh"> or </span></span><svg class="ic" aria-hidden="true"><use href="#i-right"/></svg><span class="vh">right arrow</span></span>forward<span class="ck"><i class="hsep" aria-hidden="true"></i><span class="hk">f</span>full screen</span><i class="hsep" aria-hidden="true"></i><span class="hk">esc</span>clear<span class="ck"><i class="hsep" aria-hidden="true"></i><span class="hk">?</span>key</span></p>
 
 <!-- The map follows the controls in DOM order, so Tab reaches the tree, the tools, the code column, and the controls first. -->
 <main class="cv" id="cv" aria-label="Map: the current file and the current cluster">

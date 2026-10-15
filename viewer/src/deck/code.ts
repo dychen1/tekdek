@@ -65,10 +65,11 @@ export function createCode(ctx: DeckContext): CodeColumn {
 
   // ============ empty states ============
 
-  /** The rest state, or the state of a codebase with no flow. */
+  /** The rest state, or the state of a codebase with no flow. After a clear, the rest state names the step that forward continues at. */
   function renderEmpty() {
     head.innerHTML = title(model.flow ? "No step" : "No flow");
-    stepEl.innerHTML = `<p class="cd-empty">${md(model.flow ? REST : NO_FLOW)}</p>`;
+    const rest = state.resume ? `The flow is clear. Press \`k\` to continue at step ${state.resume}.` : REST;
+    stepEl.innerHTML = `<p class="cd-empty">${md(model.flow ? rest : NO_FLOW)}</p>`;
     whereEl.innerHTML = "";
     codeEl.innerHTML = "";
     fitFold();

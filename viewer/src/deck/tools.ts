@@ -1,7 +1,7 @@
-/* Deck tools. This module owns the map tools (compact, zoom, key), the key popover with its cluster legend and the
-   theme switch, full screen code, and the top band layout. `main.ts` owns the flow badge in the top band.
+/* Deck tools. This module owns the map tools (compact, zoom, key), the key popover with its cluster legend, the
+   theme switch, and the shortcut switch, full screen code, and the top band layout. `main.ts` owns the flow badge in the top band.
    # Sections
-   key popover, theme variant, map tools, full screen, top band */
+   key popover, theme variant, shortcuts, map tools, full screen, top band */
 import { ZOOM_MIN } from "../layout/deck-geometry.ts";
 import { rangesOf } from "../layout/plan.ts";
 import { clamp, esc } from "../layout/util.ts";
@@ -10,6 +10,7 @@ import { $, pageOrigin, type DeckContext, type Tools } from "./context.ts";
 
 const VARIANTS = ["night", "storm", "moon"];
 const KEY_VARIANT = "tekdek.deck.variant";
+const KEY_SHORTCUTS = "tekdek.deck.shortcuts";
 
 /** Per-viewer conveniences. Blocked storage keeps the in-memory state. */
 const store = {
@@ -48,7 +49,7 @@ export function createTools(ctx: DeckContext): Tools {
   // ============ theme variant ============
   // The variant swaps the palette tokens on the root. Night is the default. The choice is kept for each viewer.
 
-  const varBtns = [...document.querySelectorAll<HTMLElement>(".seg-b")];
+  const varBtns = [...document.querySelectorAll<HTMLElement>(".seg-b[data-variant]")];
   function setVariant(v: string | null, save: boolean) {
     const name = v && VARIANTS.includes(v) ? v : "night";
     if (name === "night") delete document.documentElement.dataset.variant; else document.documentElement.dataset.variant = name;
@@ -57,6 +58,19 @@ export function createTools(ctx: DeckContext): Tools {
   }
   varBtns.forEach(b => b.addEventListener("click", () => setVariant(b.dataset.variant!, true), { signal }));
   setVariant(store.get(KEY_VARIANT), false);
+
+  // ============ shortcuts ============
+  // The switch turns the one-character keys (j, k, f, c, ?) on or off. `input.ts` reads the root flag, and the
+  // help line and the key list hide those keys while it is off. The choice is kept for each viewer.
+
+  const keyBtns = [...document.querySelectorAll<HTMLElement>(".seg-b[data-shortcuts]")];
+  function setShortcuts(on: boolean, save: boolean) {
+    if (on) delete document.documentElement.dataset.shortcuts; else document.documentElement.dataset.shortcuts = "off";
+    keyBtns.forEach(b => b.setAttribute("aria-pressed", String((b.dataset.shortcuts === "on") === on)));
+    if (save) store.set(KEY_SHORTCUTS, on ? "on" : "off");
+  }
+  keyBtns.forEach(b => b.addEventListener("click", () => setShortcuts(b.dataset.shortcuts === "on", true), { signal }));
+  setShortcuts(store.get(KEY_SHORTCUTS) !== "off", false);
 
   // ============ map tools ============
 

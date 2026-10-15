@@ -3,6 +3,7 @@
    The bar keeps one fixed size in each state.
    # Sections
    step strip, explainer, buttons */
+import { nextStep } from "../layout/model.ts";
 import { rangesOf } from "../layout/plan.ts";
 import { clamp, esc, f1, plural } from "../layout/util.ts";
 import { md } from "./markup.ts";
@@ -52,7 +53,7 @@ export function createBar(ctx: DeckContext): Bar {
     $("#chipText").textContent = C ? C.label : model.flow ? "No cluster lifted" : "No flow";
     $("#cMeta").textContent = C ? `${plural(model.members.get(C.id)?.length ?? 0, "function")} · steps ${rangesOf(model.plan, C.id)}`
       : model.flow ? `${plural(N, "step")} in ${plural(model.clusters.length, "cluster")}` : "";
-    cDesc.innerHTML = C ? md(C.description) : model.flow && !state.cur ? "Step forward to lift the first cluster onto its deck." : "";
+    cDesc.innerHTML = C ? md(C.description) : model.flow && !state.cur && !state.resume ? "Step forward to lift the first cluster onto its deck." : "";
     if (clusterChanged && !document.body.classList.contains("booting")) {
       for (const el of [cExpl, cDesc]) { el.classList.remove("swap"); void el.offsetWidth; el.classList.add("swap"); }
     }
@@ -73,7 +74,7 @@ export function createBar(ctx: DeckContext): Bar {
   // ============ buttons ============
 
   prevBtn.addEventListener("click", () => ctx.go(state.cur - 1), { signal });
-  nextBtn.addEventListener("click", () => ctx.go(state.cur + 1), { signal });
+  nextBtn.addEventListener("click", () => ctx.go(nextStep(state)), { signal });
   clearBtn.addEventListener("click", () => ctx.go(0), { signal });
 
   return {
