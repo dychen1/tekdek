@@ -89,7 +89,14 @@
 /* ============ base ============ */
 *{box-sizing:border-box}
 /* The page keeps a minimum size and scrolls in a smaller window. The body contains the fixed panels, so they scroll with it. */
-html{height:100%;overflow:auto;overscroll-behavior:none;scrollbar-color:var(--line-strong) var(--bg)}
+html{height:100%;overflow:auto;overscroll-behavior:none}
+/* A styled page scrollbar always shows in Chromium and Safari, also where the system shows scrollbars only during a scroll.
+   Chromium ignores these rules when the element sets scrollbar-color, so only Firefox gets the color on the root. */
+html::-webkit-scrollbar{width:12px;height:12px}
+html::-webkit-scrollbar-track,html::-webkit-scrollbar-corner{background:var(--bg)}
+html::-webkit-scrollbar-thumb{border:2px solid var(--bg);border-radius:var(--r-pill);background:var(--quiet)}
+html::-webkit-scrollbar-thumb:hover{background:var(--dim)}
+@supports not selector(::-webkit-scrollbar){html{scrollbar-color:var(--quiet) var(--bg)}}
 body{margin:0;height:100%;min-width:1280px;min-height:720px;overflow:hidden;contain:layout}
 body{background:var(--bg);color:var(--ink);font:var(--fs-ui) var(--font-code);-webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums;
   caret-color:var(--accent);accent-color:var(--accent);scrollbar-color:var(--line-soft) transparent}
@@ -215,7 +222,7 @@ code{font:inherit;color:var(--keyword)}
 button.sb-title{cursor:pointer;transition:filter var(--dur-hover)}
 button.sb-title:hover{filter:brightness(1.12)}
 .sb-title .ic{width:12px;height:12px}
-.sb-tree{position:relative;overflow:auto;pointer-events:auto;max-height:calc(100vh - 60px);padding:2px 4px 4px 0;scrollbar-width:thin;scrollbar-color:var(--line-soft) transparent}
+.sb-tree{position:relative;overflow:hidden auto;pointer-events:auto;max-height:calc(100vh - 60px);padding:2px 4px 4px 0;scrollbar-width:thin;scrollbar-color:var(--line-soft) transparent}
 .sl{position:relative;display:flex;align-items:center;width:100%;height:18px;padding:0 4px 0 12px;border:0;border-radius:var(--r-xs);background:transparent;
   white-space:nowrap;text-align:left;font:var(--fs-code) var(--font-code);color:var(--dim);cursor:pointer}
 .sl[hidden]{display:none}
@@ -230,7 +237,7 @@ button.sb-title:hover{filter:brightness(1.12)}
 .gd.pipe::before,.gd.tee::before{top:0;bottom:0;border-left-width:1px}
 .gd.tee::after{top:50%;width:7px;border-top-width:1px}
 .gd.end::before{top:0;height:50%;width:7px;border-left-width:1px;border-bottom-width:1px;border-bottom-left-radius:4px}
-.snm{overflow:hidden;text-overflow:ellipsis;flex:0 0 auto;max-width:100%;margin-left:3px}
+.snm{overflow:hidden;text-overflow:ellipsis;flex:0 1 auto;min-width:0;max-width:100%;margin-left:3px}
 .sl:hover .snm{text-decoration:underline;text-decoration-color:var(--line-strong);text-underline-offset:3px}
 .meta{display:inline-flex;align-items:center;gap:6px;flex:0 0 auto;margin-left:6px}
 .dots{display:inline-flex;gap:3px}

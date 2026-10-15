@@ -231,10 +231,10 @@ function renderFlowBand(flow: DeckFlow | null) {
 }
 
 // ============ cut text ============
-// A chip, a deck label, or a bar description that is cut shows its full text in a tooltip. The title is set when the
-// pointer enters, so it follows the current width, and text that shows in full gets no tooltip.
+// A chip, a deck label, a bar description, or an explorer name that is cut shows its full text in a tooltip. The title
+// is set when the pointer enters, so it follows the current width, and text that shows in full gets no tooltip.
 
-const CUT = "#chipText,#cDesc,.dname";
+const CUT = "#chipText,#cDesc,.dname,.snm";
 document.addEventListener("pointerover", e => {
   const el = (e.target as Element).closest<HTMLElement>(CUT);
   if (el) el.title = el.scrollWidth > el.clientWidth || el.scrollHeight > el.clientHeight ? el.textContent ?? "" : "";

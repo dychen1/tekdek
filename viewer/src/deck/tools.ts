@@ -39,6 +39,8 @@ export function createTools(ctx: DeckContext): Tools {
   function setKey(open: boolean, returnFocus = false) {
     keyPop.classList.toggle("show", open);
     keyBtn.setAttribute("aria-expanded", String(open));
+    // a scrolled small window can hide the map tools: scroll the button, then the popover under it, into view
+    if (open) for (const el of [keyBtn, keyPop]) el.scrollIntoView({ block: "nearest", inline: "nearest" });
     if (!open && returnFocus) keyBtn.focus();
   }
   keyBtn.addEventListener("click", () => setKey(!keyOpen()), { signal });
