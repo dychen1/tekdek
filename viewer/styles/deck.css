@@ -84,7 +84,7 @@
 /* ============ base ============ */
 *{box-sizing:border-box}
 /* The page keeps a minimum size and scrolls in a smaller window. The body contains the fixed panels, so they scroll with it. */
-html{height:100%;overflow:auto;overscroll-behavior:none}
+html{height:100%;overflow:auto;overscroll-behavior:none;scrollbar-color:var(--line-strong) var(--bg)}
 body{margin:0;height:100%;min-width:1280px;min-height:720px;overflow:hidden;contain:layout}
 body{background:var(--bg);color:var(--ink);font:var(--fs-ui) var(--font-code);-webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums;
   caret-color:var(--accent);accent-color:var(--accent);scrollbar-color:var(--line-soft) transparent}
