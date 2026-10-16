@@ -1,6 +1,7 @@
 /* Deck links. This module owns the three connectors, drawn in screen space from the on-screen rectangles
    of the two elements that each one joins: the guide (explorer row to file node), the tether (current slot to
    current lid), and the arrow (current lid to code header). Each end touches its element. */
+import { shownZoom } from "../layout/model.ts";
 import { arrowPath, guidePath, tetherPath } from "../layout/paths.ts";
 import { f1 } from "../layout/util.ts";
 import { $, type DeckContext, type Links } from "./context.ts";
@@ -24,7 +25,7 @@ export function createLinks(ctx: DeckContext): Links {
     if (!ends.length) return false;
     const sx = Math.max(...ends.map(el => el.getBoundingClientRect().right)) + 6;
     const fr = frameEl.getBoundingClientRect();
-    guideEl.setAttribute("d", guidePath(sx, y, node.getBoundingClientRect(), state.zoom, fr.width > 0 ? fr : undefined));
+    guideEl.setAttribute("d", guidePath(sx, y, node.getBoundingClientRect(), shownZoom(state), fr.width > 0 ? fr : undefined));
     return true;
   }
 

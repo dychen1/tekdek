@@ -25,7 +25,7 @@ export function createInput(ctx: DeckContext): void {
       else ctx.go(0);
       return;
     }
-    if (k === "?") { e.preventDefault(); tools.setKey(!tools.keyOpen()); return; }
+    if (k === "?") { e.preventDefault(); tools.setKey(!tools.keyOpen(), true); return; }
     if (k === "j" || k === "ArrowLeft") { e.preventDefault(); if (state.cur > 1) ctx.go(state.cur - 1); return; }
     if (k === "k" || k === "ArrowRight") { e.preventDefault(); if (state.cur < model.N) ctx.go(nextStep(state)); return; }
     if (k === "f") { tools.setFull(!state.full); return; }

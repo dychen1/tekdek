@@ -42,6 +42,7 @@ export function createExplorer(ctx: DeckContext): Explorer {
     const el = document.createElement("div");
     el.className = "sl " + row.kind; el.tabIndex = view === views[0] ? 0 : -1; el.dataset.path = row.path;
     el.setAttribute("role", "treeitem"); el.setAttribute("aria-level", String(row.depth + 1));
+    el.setAttribute("aria-posinset", String(row.pos)); el.setAttribute("aria-setsize", String(row.size));
     let meta = "";
     if (row.kind === "file") {
       const held = model.clustersByFile.get(row.path) ?? [];
@@ -91,6 +92,18 @@ export function createExplorer(ctx: DeckContext): Explorer {
         el.querySelectorAll<HTMLElement>(".dots i").forEach(dot => dot.classList.toggle("on", dot.dataset.c === cid));
       }
     }
+    // a collapse can hide the row with the tab stop: the stop, and the focus it had, move to its nearest shown directory
+    const stop = views.find(view => view.el?.tabIndex === 0);
+    if (stop?.el?.hidden) {
+      const to = viewByPath.get(anchorRow(stop.row, state.open).path)!.el!;
+      moveStop(stop.el, to, document.activeElement === stop.el);
+    }
+  }
+
+  /** Moves the tree's one tab stop from a row to another, and the focus with it when `focus` is set. */
+  function moveStop(from: HTMLElement, to: HTMLElement, focus: boolean) {
+    from.tabIndex = -1; to.tabIndex = 0;
+    if (focus) to.focus();
   }
 
   /** The element of the current file's row, or of its nearest shown directory. */
@@ -130,15 +143,21 @@ export function createExplorer(ctx: DeckContext): Explorer {
     ctx.place();
   }
 
-  // A row is a tree item, not a button: Enter and Space click it.
+  // The tree keys: Up and Down move between the shown rows, Home and End go to the ends, Right opens a directory or goes to
+  // its first row, Left closes a directory or goes to the parent, and Enter and Space click a row. The deck keys never see them.
+  const TREE_KEYS = ["ArrowDown", "ArrowUp", "Home", "End", "ArrowRight", "ArrowLeft", "Enter", " "];
   sbTree.addEventListener("keydown", e => {
-    const list = views.flatMap(view => (view.el && !view.el.hidden ? [view.el] : [])), i = list.indexOf(document.activeElement as HTMLElement);
-    if (i < 0) return;
-    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.stopPropagation(); list[i].click(); return; }
-    if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) return;
+    const shown = views.filter(view => view.el && !view.el.hidden), i = shown.findIndex(view => view.el === document.activeElement);
+    if (i < 0 || !TREE_KEYS.includes(e.key)) return;
     e.preventDefault(); e.stopPropagation();
-    const j = clamp(e.key === "ArrowDown" ? i + 1 : e.key === "ArrowUp" ? i - 1 : e.key === "Home" ? 0 : list.length - 1, 0, list.length - 1);
-    list[i].tabIndex = -1; list[j].tabIndex = 0; list[j].focus();
+    const { row, el } = shown[i], open = state.open.has(row.path);
+    if (e.key === "Enter" || e.key === " ") { el!.click(); return; }
+    if (row.kind === "dir" && ((e.key === "ArrowRight" && !open) || (e.key === "ArrowLeft" && open))) { toggleDir(row); return; }
+    let j = i;
+    if (e.key === "ArrowLeft") j = row.parent ? shown.findIndex(view => view.row === row.parent) : i;
+    else if (e.key === "ArrowRight") j = row.kind === "dir" ? i + 1 : i;
+    else j = clamp(e.key === "ArrowDown" ? i + 1 : e.key === "ArrowUp" ? i - 1 : e.key === "Home" ? 0 : shown.length - 1, 0, shown.length - 1);
+    moveStop(el!, shown[j].el!, true);
   }, { signal });
 
   return {

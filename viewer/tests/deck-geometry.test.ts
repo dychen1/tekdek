@@ -8,9 +8,12 @@ import { boxWidth, COS, DECK_Z, deckHeight, deckSize, deckSpot, deckTransform, f
 const close = (actual: number, expected: number) => assert.ok(Math.abs(actual - expected) < 0.01, `${actual} != ${expected}`);
 const frame = { left: 290, top: 52, width: 700, height: 738 };
 
-test("a box fits its name and step numbers, and the file path when it lives in another file", () => {
+test("a box fits its name and step numbers, and the file name of its path when it lives in another file", () => {
   assert.equal(boxWidth("freeze", "src/flow/import.rs", [18], false), 90);
-  assert.equal(boxWidth("freeze", "src/flow/import.rs", [18], true), 167);
+  // the lid cuts the path from its start: the box makes room for "…/import.rs"
+  assert.equal(boxWidth("freeze", "src/flow/import.rs", [18], true), 121);
+  assert.equal(boxWidth("freeze", "src/flow/import.rs", [18], true), boxWidth("freeze", "…/import.rs", [18], true));
+  assert.equal(boxWidth("x", "import.rs", [18], true), boxWidth("x", "…/import.rs", [18], true) - 13);
 });
 
 test("the deck takes the widest cluster's width and the tallest cluster's height, once", () => {

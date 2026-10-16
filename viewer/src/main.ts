@@ -131,7 +131,8 @@ async function openFlow(next: FlowEntry | null, step: number, notice: string | n
     showLoading(null);
     setChrome(true);
     showReader(true);
-    deck = createDeck({ graph: graph!, flow, sources, onStep: n => { showNotice(null); writeUrl(n); nameTab(n); } });
+    // a step clears a notice, but not the loading line of a newer flow load
+    deck = createDeck({ graph: graph!, flow, sources, onStep: n => { if ($("status").querySelector(".st-note")) showNotice(null); writeUrl(n); nameTab(n); } });
     renderFlowBand(flow);
     (window as unknown as { __deck: unknown }).__deck = deck.inspect;
     writeUrl(0);

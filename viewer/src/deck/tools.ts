@@ -3,6 +3,7 @@
    # Sections
    key popover, theme variant, map tools, full screen, shortcuts, top band */
 import { ZOOM_MIN } from "../layout/deck-geometry.ts";
+import { shownZoom } from "../layout/model.ts";
 import { rangesOf } from "../layout/plan.ts";
 import { clamp, esc } from "../layout/util.ts";
 import { icon } from "./markup.ts";
@@ -12,11 +13,18 @@ const VARIANTS = ["night", "storm", "moon"];
 const KEY_VARIANT = "tekdek.deck.variant";
 const KEY_SHORTCUTS = "tekdek.deck.shortcuts";
 
-/** Per-viewer conveniences. Blocked storage keeps the in-memory state. */
+/** Per-viewer conveniences. The inline script in `index.html` reads them onto the root before first paint, and every
+ *  deck starts from the root, so blocked storage keeps the choice of this page. */
 const store = {
-  get(key: string) { try { return localStorage.getItem(key); } catch { return null; } },
   set(key: string, value: string) { try { localStorage.setItem(key, value); } catch { /* storage is blocked */ } },
 };
+
+/** Scrolls the page, never the body, until a screen box shows in the window: a scrolled small window can hide the map tools. */
+function scrollPageTo(r: { left: number; top: number; right: number; bottom: number }) {
+  const w = document.documentElement.clientWidth, h = document.documentElement.clientHeight;
+  const dx = r.left < 8 ? r.left - 8 : Math.max(0, r.right - w + 8), dy = r.top < 8 ? r.top - 8 : Math.max(0, r.bottom - h + 8);
+  if (dx || dy) scrollBy(dx, dy);
+}
 
 export function createTools(ctx: DeckContext): Tools {
   const { model, state, signal } = ctx;
@@ -36,12 +44,17 @@ export function createTools(ctx: DeckContext): Tools {
     if (run) ctx.go(run.start);
   }, { signal });
   const keyOpen = () => keyBtn.getAttribute("aria-expanded") === "true";
-  function setKey(open: boolean, returnFocus = false) {
+  /** Opens or closes the key. With `moveFocus`, an open moves the focus into the key and a close returns it to the key button.
+   *  A close also returns the focus that was inside the key, so it never falls to the page. */
+  function setKey(open: boolean, moveFocus = false) {
+    const inside = keyPop.contains(document.activeElement);
     keyPop.classList.toggle("show", open);
     keyBtn.setAttribute("aria-expanded", String(open));
-    // a scrolled small window can hide the map tools: scroll the button, then the popover under it, into view
-    if (open) for (const el of [keyBtn, keyPop]) el.scrollIntoView({ block: "nearest", inline: "nearest" });
-    if (!open && returnFocus) keyBtn.focus();
+    if (open) {
+      const b = keyBtn.getBoundingClientRect(), p = keyPop.getBoundingClientRect();
+      scrollPageTo({ left: Math.min(b.left, p.left), top: b.top, right: Math.max(b.right, p.right), bottom: p.bottom });
+      if (moveFocus) keyPop.querySelector<HTMLElement>("button")?.focus();
+    } else if (moveFocus || inside) keyBtn.focus({ preventScroll: true });
   }
   keyBtn.addEventListener("click", () => setKey(!keyOpen()), { signal });
   document.addEventListener("pointerdown", e => {
@@ -59,7 +72,7 @@ export function createTools(ctx: DeckContext): Tools {
     if (save) store.set(KEY_VARIANT, name);
   }
   varBtns.forEach(b => b.addEventListener("click", () => setVariant(b.dataset.variant!, true), { signal }));
-  setVariant(store.get(KEY_VARIANT), false);
+  setVariant(document.documentElement.dataset.variant ?? null, false);
 
   // ============ map tools ============
 
@@ -69,16 +82,17 @@ export function createTools(ctx: DeckContext): Tools {
   /** Shows the compact state, the zoom level and its limits, and the current cluster in the key.
    *  Compact is off at rest. Compact and zoom are off in full screen, where the map does not show. */
   function sync() {
+    const k = shownZoom(state);
     compactBtn.disabled = !state.cur || state.full;
     compactBtn.setAttribute("aria-pressed", String(state.compact));
-    zoomLbl.textContent = `${Math.round(state.zoom * 100)}%`;
-    zoomOut.disabled = state.full || state.zoom <= ZOOM_MIN + 1e-3;
-    zoomIn.disabled = state.full || state.zoom >= state.zoomMax - 1e-3;
+    zoomLbl.textContent = `${Math.round(k * 100)}%`;
+    zoomOut.disabled = state.full || k <= ZOOM_MIN + 1e-3;
+    zoomIn.disabled = state.full || k >= state.zoomMax - 1e-3;
     const id = model.stepCluster(state.cur);
     kpClusters.querySelectorAll<HTMLElement>(".kp-c").forEach(b => b.classList.toggle("on", !!id && b.dataset.c === id));
   }
 
-  /** Scales the canvas around the file node, from 50% to the largest zoom at which the deck fits the frame. */
+  /** Sets the user's zoom, from 50% to the largest zoom at which the deck fits the frame. The canvas scales around the file node. */
   function setZoom(k: number) {
     state.zoom = clamp(k, ZOOM_MIN, state.zoomMax);
     ctx.place();
@@ -96,8 +110,8 @@ export function createTools(ctx: DeckContext): Tools {
 
   compactBtn.addEventListener("click", toggleCompact, { signal });
   // The buttons step to the next tenth, also after a wheel zoom left the level between tenths.
-  zoomOut.addEventListener("click", () => setZoom(Math.round(state.zoom * 10 - 1) / 10), { signal });
-  zoomIn.addEventListener("click", () => setZoom(Math.round(state.zoom * 10 + 1) / 10), { signal });
+  zoomOut.addEventListener("click", () => setZoom(Math.round(shownZoom(state) * 10 - 1) / 10), { signal });
+  zoomIn.addEventListener("click", () => setZoom(Math.round(shownZoom(state) * 10 + 1) / 10), { signal });
 
   // Cmd + scroll over the canvas frame zooms continuously; a trackpad pinch sends the wheel with Ctrl.
   // The scroll of one frame applies once, so a fast trackpad places the map at most once a frame.
@@ -111,7 +125,7 @@ export function createTools(ctx: DeckContext): Tools {
     wheel += e.deltaMode === WheelEvent.DOM_DELTA_LINE ? e.deltaY * 33 : e.deltaY;
     pending ||= requestAnimationFrame(() => {
       pending = 0;
-      setZoom(state.zoom * Math.exp(-wheel * 0.002));
+      setZoom(shownZoom(state) * Math.exp(-wheel * 0.002));
       wheel = 0;
     });
   }, { passive: false, signal });
@@ -157,7 +171,7 @@ export function createTools(ctx: DeckContext): Tools {
     if (save) store.set(KEY_SHORTCUTS, on ? "on" : "off");
   }
   keyBtns.forEach(b => b.addEventListener("click", () => setShortcuts(b.dataset.shortcuts === "on", true), { signal }));
-  setShortcuts(store.get(KEY_SHORTCUTS) !== "off", false);
+  setShortcuts(document.documentElement.dataset.shortcuts !== "off", false);
 
   // ============ top band ============
 

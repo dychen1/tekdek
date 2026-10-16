@@ -1,5 +1,6 @@
 /* Connector paths. This module owns the SVG path data of the guide, the tether, and the arrow.
    Inputs are screen points from the rectangles of the two ends; it never reads the DOM. */
+import { CLEAR } from "./deck-geometry.ts";
 import { f1 } from "./util.ts";
 
 type Pt = [number, number];
@@ -37,11 +38,14 @@ const sCurve = (a: { x: number; y: number }, tx: number, b: { x: number; y: numb
   return `M${P2(a.x, a.y)} L${P2(tx, a.y)} C${P2(tx + dx * 0.55, a.y)} ${P2(b.x - dx * 0.55, b.y)} ${P2(b.x, b.y)}`;
 };
 
+/** The level run of the tether past the widest row, under the CLEAR that the rows keep from the deck. */
+const LEAD = 10;
+
 /** The tether: level out of the slot past the widest row, then one S into the lid.
- *  Hidden when the lid leaves under 40 px for the curve past the rows: a shorter curve would cross a row. */
+ *  Hidden when the lid leaves under CLEAR px for the curve past the rows: a shorter curve would cross a row. */
 export function tetherPath(a: { x: number; y: number }, rowsRight: number, b: { x: number; y: number }): { d: string; ok: boolean } {
-  const mx = Math.max(a.x, rowsRight) + 10;
-  return { d: sCurve(a, mx, b), ok: mx <= b.x - 40 };
+  const mx = Math.max(a.x, rowsRight) + LEAD;
+  return { d: sCurve(a, mx, b), ok: mx <= b.x - CLEAR };
 }
 
 /** The arrow: out of the lid past the deck's right edge, then one S into the code header. Hidden under 24 px of room. */

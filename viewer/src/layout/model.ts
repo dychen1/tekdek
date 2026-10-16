@@ -96,8 +96,9 @@ export interface DeckState {
   resume: number;
   /** Compact starts on at every load. Only the compact button and `c` turn it off. */
   compact: boolean;
+  /** The user's zoom. The map shows it lowered to `zoomMax` (see `shownZoom`), and gets it back in a larger frame. */
   zoom: number;
-  /** The largest zoom that fits the frame; place() sets it. */
+  /** The largest zoom that fits the frame. place() sets it, except in full screen, where the frame has no size. */
   zoomMax: number;
   full: boolean;
   /** Open directories. */
@@ -119,6 +120,9 @@ export function initialState(model: DeckModel): DeckState {
   }
   return { cur: 0, resume: 0, compact: true, zoom: 1, zoomMax: ZOOM_MAX, full: false, open, folded: new Set(), browseFile: null, anchor: null };
 }
+
+/** The zoom that the map shows: the user's zoom, lowered to the largest zoom that fits the frame. It never changes the user's zoom. */
+export const shownZoom = (state: Pick<DeckState, "zoom" | "zoomMax">) => Math.min(state.zoom, state.zoomMax);
 
 /** Returns the step that forward goes to: the next step, or from the rest state the step that a clear left. */
 export const nextStep = (state: Pick<DeckState, "cur" | "resume">) => state.cur ? state.cur + 1 : state.resume || 1;

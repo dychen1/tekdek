@@ -5,7 +5,7 @@
    instance, stepping, placement, boot and teardown */
 import { deckSpot, fileBoxCenter, FILE_X, fileRoom, zoomFit } from "../layout/deck-geometry.ts";
 import { openTo } from "../layout/explorer.ts";
-import { buildModel, initialState } from "../layout/model.ts";
+import { buildModel, initialState, shownZoom } from "../layout/model.ts";
 import { clamp, f1 } from "../layout/util.ts";
 import { createBar } from "./bar.ts";
 import { createClusterDeck } from "./cluster-deck.ts";
@@ -126,9 +126,10 @@ export function createDeck(options: DeckOptions): DeckInstance {
     const o = pageOrigin(), r = frameEl.getBoundingClientRect();
     const frame = { left: r.left - o.x, top: r.top - o.y, width: r.width, height: r.height };
     const codeLeft = card.getBoundingClientRect().left - o.x;
-    const fit = zoomFit(frame, codeLeft, model.deckSize, model.fileRight, model.fileMin);
-    state.zoomMax = fit.max;
-    const k = state.zoom = Math.min(state.zoom, fit.max), x = frame.left + FILE_X;
+    // full screen hides the frame, and a fit of no frame is the floor: the last fit stays
+    const fit = state.full ? null : zoomFit(frame, codeLeft, model.deckSize, model.fileRight, model.fileMin);
+    if (fit) state.zoomMax = fit.max;
+    const k = shownZoom(state), x = frame.left + FILE_X;
     const spot = deckSpot(frame, codeLeft, model.deckSize.width, model.deckSize.maxHeight, k);
     // with a deck up, a row that would reach it ends in an ellipsis, so the tether never crosses a row
     if (deckCluster !== null) fileblk.style.setProperty("--fb-room", `${f1(fileRoom(frame.left, spot.x, k))}px`);
@@ -145,7 +146,7 @@ export function createDeck(options: DeckOptions): DeckInstance {
     cv.style.setProperty("--k", String(k));
     clusterDeck.pin(spot, state.anchor, k);
     links.draw();
-    return fit.start;
+    return fit?.start ?? k;
   }
 
   function placeSoon() {
@@ -194,7 +195,8 @@ export function createDeck(options: DeckOptions): DeckInstance {
     inspect: {
       go,
       get cur() { return state.cur; },
-      get zoom() { return state.zoom; },
+      /** The zoom that the map shows. */
+      get zoom() { return shownZoom(state); },
       get full() { return state.full; },
       get compact() { return state.compact; },
       /** The screen box of the deck camera (its pinned spot), or null without a deck. */

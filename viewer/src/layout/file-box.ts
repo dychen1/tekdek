@@ -1,7 +1,7 @@
 /* File box rows. This module owns the rows of the current file's box for one step: mode, place, and width.
    Inputs: the file's functions in source order, the flow visits, and the step. It never reads the DOM. */
 import type { DeckFunction } from "../data/models.ts";
-import { mono, plural } from "./util.ts";
+import { FS_CODE, mono, plural } from "./util.ts";
 
 /** Row height and pitch for each kind of row. */
 const ROW = { flow: [20, 26], named: [16, 22], stub: [3, 7] } as const;
@@ -45,7 +45,7 @@ export interface FileBox {
 export function fileBox(input: FileBoxInput): FileBox {
   const rows: FileRow[] = [];
   // the file node: its border and padding, the fold button, and the function count in bold code text
-  const head = 31 + mono(plural(input.fns.length, "function").length, 11);
+  const head = 31 + mono(plural(input.fns.length, "function").length, FS_CODE);
   let y = FILE_TOP, height = 20, right = head, min = head, offFlow = 0;
   for (const fn of input.fns) {
     const steps = [...(input.visits.get(fn.id) ?? [])];
@@ -58,10 +58,10 @@ export function fileBox(input: FileBoxInput): FileBox {
     const short = fn.name.length > NAME_CAP ? fn.name.slice(0, NAME_CAP - 1) + "…" : fn.name;
     const current = fn.id === input.currentKey;
     // one pill for each step, 6 px apart
-    const pill = flow && !current ? steps.reduce((sum, i) => sum + 6 + Math.max(22, 12 + mono(String(i).length, 11)), 0) : 0;
-    const w = mode === "slot" ? Math.round(26 + mono(Math.min(fn.name.length, 40), 11))
-      : mode === "stub" ? Math.max(22, Math.round((20 + mono(Math.min(fn.name.length, 40), 11)) * 0.55))
-        : Math.round(16 + (flow ? 12 : 0) + mono(short.length, 11));
+    const pill = flow && !current ? steps.reduce((sum, i) => sum + 6 + Math.max(22, 12 + mono(String(i).length, FS_CODE)), 0) : 0;
+    const w = mode === "slot" ? Math.round(26 + mono(Math.min(fn.name.length, 40), FS_CODE))
+      : mode === "stub" ? Math.max(22, Math.round((20 + mono(Math.min(fn.name.length, 40), FS_CODE)) * 0.55))
+        : Math.round(16 + (flow ? 12 : 0) + mono(short.length, FS_CODE));
     const row: FileRow = { key: fn.id, name: fn.name, short, steps, cluster: fn.cluster, mode, flow, current, y, h, w, min: Math.min(w, flow ? MIN_FLOW_NODE : 22), right: 26 + w + pill };
     rows.push(row);
     right = Math.max(right, row.right);

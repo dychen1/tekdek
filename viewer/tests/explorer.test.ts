@@ -17,6 +17,7 @@ test("the explorer lists files before subdirectories, with tree guides", () => {
   assert.deepEqual(guideKinds(row("src/cli/flow.rs")), ["pipe", "tee"]);
   assert.deepEqual(guideKinds(row("src/store/graph.rs")), ["gap", "end"]);
   assert.deepEqual(row("src/cli/").files, ["src/cli/flow.rs", "src/cli/mod.rs"]);
+  assert.deepEqual([row("src/main.rs"), row("src/store/")].map(r => [r.pos, r.size]), [[1, 3], [3, 3]]);
 });
 
 test("opening a path shows the row, and a closed directory anchors its files", () => {

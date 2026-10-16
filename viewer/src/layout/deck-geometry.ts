@@ -2,7 +2,7 @@
    It is pure math: it reads rectangles and returns numbers or a CSS transform.
    # Sections
    constants, boxes and deck, placement */
-import { clamp, f1, mono } from "./util.ts";
+import { clamp, f1, FS_CODE, FS_CODE_L, mono } from "./util.ts";
 
 // ============ constants ============
 
@@ -17,16 +17,21 @@ const DECK_TOP = 120, ARROW_GAP = 90;
 export const MIN_DECK_W = 272;
 /** The file box's left edge, from the frame's left edge. */
 export const FILE_X = 30;
-/** The file box rows end CLEAR px before the deck, so the tether runs level out of the rows before it curves. */
-const CLEAR = 40;
+/** The file box rows end CLEAR px before the deck, so the tether runs level out of the rows before it curves.
+ *  `paths.ts` hides a tether whose curve gets less room. */
+export const CLEAR = 40;
 /** The zoom range. The floor keeps 11 px map text at 8 px or more on screen. */
 export const ZOOM_MIN = 0.5, ZOOM_MAX = 1.5, ZOOM_FLOOR = 0.75;
 
 // ============ boxes and deck ============
 
-/** The width of a lifted box: its name (or its file path when it lives in another file) and its step numbers. */
+/** The characters of a file path that a lid makes room for: "…/" and the file name, or a shorter whole path.
+ *  The lid cuts a longer path from its start, so the deck stays narrow and the file name shows. */
+const lidPathLength = (file: string) => Math.min(file.length, file.length - file.lastIndexOf("/") + 1);
+
+/** The width of a lifted box: its name (or the end of its file path when it lives in another file) and its step numbers. */
 export const boxWidth = (name: string, file: string, steps: readonly number[], away: boolean) =>
-  Math.round(17 + Math.max(mono(name.length, 11.5), away ? mono(file.length, 11) : 0) + 10 + mono(steps.join(" ").length, 11) + 8);
+  Math.round(17 + Math.max(mono(name.length, FS_CODE_L), away ? mono(lidPathLength(file), FS_CODE) : 0) + 10 + mono(steps.join(" ").length, FS_CODE) + 8);
 
 export const deckHeight = (members: number) => BAND + members * PITCH + 4;
 

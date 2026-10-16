@@ -7,10 +7,11 @@ import { plural } from "./util.ts";
 
 // ============ rows ============
 
-/** One explorer row. A directory path ends with "/". `files` holds every file at or under the row. */
+/** One explorer row. A directory path ends with "/". `files` holds every file at or under the row.
+ *  `pos` is the row's place among its `size` siblings, from 1. */
 export interface ExplorerRow {
   kind: "dir" | "file"; path: string; name: string; depth: number;
-  parent: ExplorerRow | null; last: boolean; files: string[];
+  parent: ExplorerRow | null; last: boolean; files: string[]; pos: number; size: number;
 }
 
 /** Builds the rows in tree order. The tree already lists files before subdirectories, each in name order. */
@@ -20,7 +21,7 @@ export function buildExplorer(tree: DeckTree): ExplorerRow[] {
     const keys = Object.keys(node), files: string[] = [];
     keys.forEach((key, i) => {
       const kind = key.endsWith("/") ? "dir" : "file";
-      const row: ExplorerRow = { kind, path: path + key, name: key, depth, parent, last: i === keys.length - 1, files: [] };
+      const row: ExplorerRow = { kind, path: path + key, name: key, depth, parent, last: i === keys.length - 1, files: [], pos: i + 1, size: keys.length };
       rows.push(row);
       row.files = kind === "dir" ? walk(node[key] ?? {}, row.path, row, depth + 1) : [row.path];
       files.push(...row.files);
