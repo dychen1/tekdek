@@ -78,7 +78,7 @@ pub(super) fn detect_languages<'a>(
 ///
 /// # Errors
 ///
-/// Returns one setup error that lists every missing program.
+/// Returns one `MissingServer` error that lists every missing program.
 pub(super) fn preflight_server_programs(
     detected: &[&LanguageProfile],
 ) -> Result<(), PipelineError> {
@@ -101,7 +101,7 @@ fn preflight_server_programs_with(
     if missing.is_empty() {
         Ok(())
     } else {
-        Err(PipelineError::Setup(format!(
+        Err(PipelineError::MissingServer(format!(
             "cannot start language servers: {}. Run `tekdek doctor` for the install commands",
             missing.join("; ")
         )))

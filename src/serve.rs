@@ -2,8 +2,10 @@
 //!
 //! This module serves the Lift Deck on the loopback address. The viewer page,
 //! its script, its stylesheet, and its fonts come from the binary. Store files
-//! come from one store directory, and only when its catalog lists them. The
-//! `/source` route also reads the source files of the step functions of a flow.
+//! come from one store directory, and only when its catalog lists them. A graph
+//! file comes with the edges of its semantic cache, as the catalog digest
+//! states. The `/source` route also reads the source files of the step
+//! functions of a flow.
 //! It reads them inside the project folder that holds the store. The server
 //! builds the catalog from the store for each request and never writes. A store
 //! directory and a port are the inputs. HTTP responses are the output.
@@ -39,6 +41,7 @@ use crate::{
     store::{
         graph::{check_graph_name, read_graph},
         reject_symlink,
+        semantic::merged_graph_bytes,
     },
 };
 
@@ -285,7 +288,14 @@ fn route(store: &Path, parts: &[String], query: Option<&str>) -> Result<Reply, R
             if !catalog_files(store)?.contains(&rest.join("/")) {
                 return Err(not_found());
             }
-            Ok(Reply::json(read_store(store, rest)?))
+            match rest {
+                [file] => Ok(Reply::json(
+                    merged_graph_bytes(store, file)
+                        .map_err(|error| read_failure(&error))?
+                        .0,
+                )),
+                _ => Ok(Reply::json(read_store(store, rest)?)),
+            }
         }
         // Serve the source of every step function of one flow.
         ["source"] => Ok(Reply::json(source_document(store, query)?)),
@@ -489,7 +499,14 @@ mod tests {
     };
 
     use super::{JSON, PAGE, Reply, ViewerServer, answer};
-    use crate::flow::fixtures::{self, frozen, import, output};
+    use crate::{
+        flow::fixtures::{self, frozen, import, output},
+        store::{
+            digest_of,
+            graph::{GraphArtifact, RelationKind},
+            semantic::{SemanticCache, SemanticEdge, write_cache},
+        },
+    };
 
     const HOST: &str = "127.0.0.1:9";
 
@@ -613,6 +630,41 @@ mod tests {
         }
         let empty = tempfile::tempdir().expect("empty store");
         assert_error(&get(empty.path(), "/artifacts/index.json"), 404);
+    }
+
+    #[test]
+    fn serves_a_graph_with_its_cached_edges_under_the_catalog_digest() {
+        let (root, _) = fixture();
+        let store = root.path();
+        let file = fs::read(store.join("graph.json")).expect("graph");
+        assert_eq!(get(store, "/artifacts/graph.json").body, file);
+        write_cache(
+            store,
+            "graph.json",
+            &SemanticCache {
+                edges: vec![SemanticEdge {
+                    source: "src/main.rs::callable:main".to_owned(),
+                    target: "src/parse.rs::callable:read_input".to_owned(),
+                    kind: RelationKind::Calls,
+                    weight: 1,
+                }],
+                ..SemanticCache::new(digest_of(&file))
+            },
+        )
+        .expect("cache");
+
+        let served = get(store, "/artifacts/graph.json");
+        let catalog: serde_json::Value =
+            serde_json::from_slice(&get(store, "/artifacts/index.json").body).expect("catalog");
+
+        assert_eq!(catalog["artifacts"][0]["digest"], digest_of(&served.body));
+        assert_eq!(catalog["artifacts"][0]["graphDigest"], digest_of(&file));
+        let graph = GraphArtifact::read(&served.body).expect("graph").graph;
+        assert!(
+            graph.edges.iter().any(|edge| {
+                (edge.source, edge.target, edge.kind) == (0, 2, RelationKind::Calls)
+            })
+        );
     }
 
     #[test]

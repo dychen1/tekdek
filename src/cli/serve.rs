@@ -15,13 +15,17 @@ use tekdek::{
 };
 use url::Url;
 
-use super::{split_arguments, store_directory};
+use super::{index::refresh_project_graph, split_arguments, store_directory};
 
 pub(super) const USAGE: &str =
-    "usage: tekdek serve [--store <directory>] [--port <n>] [--flow <name>] [--open]
+    "usage: tekdek serve [--store <directory>] [--port <n>] [--flow <name>] [--open] [--no-index]
 serve starts the Lift Deck on 127.0.0.1 and prints its URL. The default store
 is the nearest .tekdek folder. The default port is 8000; port 0 selects a free
-port. --flow prints the URL that opens one flow. --open opens the URL in a browser.";
+port. --flow prints the URL that opens one flow. --open opens the URL in a browser.
+Before it serves a .tekdek store, serve reindexes the project graph if the source
+changed after the last index, as tekdek index does. --no-index skips that step.
+serve sends each graph with the semantic edges in its cache, and starts no
+language server.";
 
 const DEFAULT_PORT: u16 = 8000;
 
@@ -30,6 +34,7 @@ struct Arguments {
     port: u16,
     flow: Option<String>,
     open: bool,
+    index: bool,
 }
 
 /// Serves the viewer for one store until the process ends.
@@ -37,6 +42,17 @@ pub(super) fn run(raw: impl Iterator<Item = String>) -> Result<(), String> {
     let arguments = parse(raw).map_err(|message| format!("{message}\n{USAGE}"))?;
     let store = store_directory(arguments.store)?;
     let server = ViewerServer::bind(&store, arguments.port).map_err(|error| error.to_string())?;
+    if arguments.index {
+        match refresh_project_graph(&store, None) {
+            Ok(Some(summary)) => eprintln!("{summary}"),
+            Ok(None) => {}
+            Err(error) => {
+                eprintln!(
+                    "warning: cannot reindex the project, so the viewer shows the last index: {error}"
+                );
+            }
+        }
+    }
     let url = match &arguments.flow {
         Some(flow) => flow_url(&server.url(), &store, flow)?,
         None => server.url(),
@@ -54,7 +70,7 @@ pub(super) fn run(raw: impl Iterator<Item = String>) -> Result<(), String> {
 
 /// Parses the arguments after `serve`.
 fn parse(raw: impl Iterator<Item = String>) -> Result<Arguments, String> {
-    let (operands, mut options, _) = split_arguments(raw, &["--store", "--port", "--flow"], &[])?;
+    let (operands, mut options) = split_arguments(raw, &["--store", "--port", "--flow"])?;
     if let Some(operand) = operands.first() {
         return Err(format!("unexpected argument: {operand}"));
     }
@@ -69,6 +85,7 @@ fn parse(raw: impl Iterator<Item = String>) -> Result<Arguments, String> {
         .unwrap_or(DEFAULT_PORT);
     let flow = options.remove("--flow");
     let open = options.remove("--open").is_some();
+    let index = options.remove("--no-index").is_none();
     if let Some(option) = options.keys().next() {
         return Err(format!("unexpected option: {option}"));
     }
@@ -77,6 +94,7 @@ fn parse(raw: impl Iterator<Item = String>) -> Result<Arguments, String> {
         port,
         flow,
         open,
+        index,
     })
 }
 
@@ -137,11 +155,13 @@ mod tests {
         assert_eq!(parsed.store, Some(std::path::PathBuf::from("demo")));
         assert_eq!(parsed.port, 0);
         assert!(parsed.open);
+        assert!(parsed.index);
         let defaults = arguments(&[]).expect("defaults");
         assert_eq!(
             (defaults.store, defaults.port, defaults.open),
             (None, 8000, false)
         );
+        assert!(!arguments(&["--no-index"]).expect("no index").index);
     }
 
     #[test]

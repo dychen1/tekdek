@@ -1,14 +1,13 @@
 //! Shared language-server session.
 //!
-//! This module owns the server lifecycle: start, initialization, capability
-//! validation, readiness waiting, and shutdown. `capture` sends the document
-//! requests in between, and `normalize` turns the capture into facts. A
-//! session configuration and selected sources are the inputs. Semantic facts
-//! are the output.
+//! This module owns the server start: process start, initialization,
+//! capability validation, and readiness waiting. The resolver sends the
+//! requests of `capture` to the ready server and stops it. A session
+//! configuration is the input. A ready client is the output.
 
 use std::{
     fs,
-    path::Path,
+    path::{Path, PathBuf},
     time::{Duration, Instant},
 };
 
@@ -20,13 +19,10 @@ use lsp_types::{
 };
 use serde_json::{Value, json};
 
-use crate::analysis::{
-    fact::SemanticFact,
-    language::{Language, ServerCommand},
-    source::Sources,
-};
+use crate::analysis::language::{Language, ServerCommand};
 
-use super::{FallbackPolicy, LspClient, LspError, capture, file_uri, normalize};
+use super::{FallbackPolicy, LspClient, LspError, file_uri, normalize};
+use crate::analysis::timing;
 
 pub struct SessionConfig<'a> {
     pub root: &'a Path,
@@ -58,18 +54,15 @@ pub enum ServerReadiness {
     QuiescentServerStatus { timeout: Duration },
 }
 
-/// Produces semantic facts during one language-server session.
+/// Starts one server and returns it ready for semantic requests, with the canonical root.
 ///
-/// The session validates the server capabilities that capture uses before it
-/// opens a document or sends a document request.
+/// A server that fails validation or readiness gets a shutdown request, and
+/// the first error wins.
 ///
 /// # Errors
 ///
-/// Returns an error if setup, capture, validation, or normalization fails.
-pub fn produce_semantic_facts(
-    config: &SessionConfig<'_>,
-    sources: &Sources<'_>,
-) -> Result<Vec<SemanticFact>, LspError> {
+/// Returns an error if the server cannot start, initialize, or become ready.
+pub(crate) fn start(config: &SessionConfig<'_>) -> Result<(LspClient, PathBuf), LspError> {
     let root = fs::canonicalize(config.root).map_err(|error| {
         LspError::new(format!(
             "cannot resolve the {} codebase root {}: {error}",
@@ -83,6 +76,7 @@ pub fn produce_semantic_facts(
         .and_then(|name| name.to_str())
         .unwrap_or("workspace")
         .to_owned();
+    let started = timing::start();
     let mut client = LspClient::start(&config.server.program, &config.server.arguments)?;
     let result = client.initialize(
         initialize_parameters(
@@ -93,16 +87,14 @@ pub fn produce_semantic_facts(
         ),
         INITIALIZE_TIMEOUT,
     )?;
-    let captured = validate_capabilities(&result.capabilities).and_then(|()| {
-        await_readiness(&mut client, config)?;
-        capture::capture_document_semantics(&mut client, config, &root, sources)
-    });
-    let shutdown = client.shutdown();
-
-    let captured = captured?;
-    shutdown?;
-    normalize::validate_capture(&captured)?;
-    normalize::normalize_capture(&root, sources, captured, config.fallback)
+    if let Err(error) = validate_capabilities(&result.capabilities)
+        .and_then(|()| await_readiness(&mut client, config))
+    {
+        let _ = client.shutdown();
+        return Err(error);
+    }
+    timing::record_stage(started, || format!("{} server start", config.language));
+    Ok((client, root))
 }
 
 #[allow(
@@ -123,6 +115,10 @@ fn initialize_parameters(
             text_document: Some(TextDocumentClientCapabilities {
                 call_hierarchy: Some(DynamicRegistrationClientCapabilities {
                     dynamic_registration: Some(false),
+                }),
+                definition: Some(GotoCapability {
+                    dynamic_registration: Some(false),
+                    link_support: Some(true),
                 }),
                 document_symbol: Some(DocumentSymbolClientCapabilities {
                     symbol_kind: Some(SymbolKindCapability {
@@ -199,7 +195,8 @@ fn await_readiness(client: &mut LspClient, config: &SessionConfig<'_>) -> Result
     }
 }
 
-/// Requires the four capabilities that capture uses for every symbol.
+/// Requires the capabilities that capture uses for every symbol and every
+/// imported name.
 fn validate_capabilities(capabilities: &ServerCapabilities) -> Result<(), LspError> {
     if !matches!(
         capabilities.document_symbol_provider,
@@ -238,6 +235,14 @@ fn validate_capabilities(capabilities: &ServerCapabilities) -> Result<(), LspErr
             "the language server does not support type definitions",
         ));
     }
+    if !matches!(
+        capabilities.definition_provider,
+        Some(OneOf::Left(true) | OneOf::Right(_))
+    ) {
+        return Err(LspError::new(
+            "the language server does not support definitions",
+        ));
+    }
 
     Ok(())
 }
@@ -253,7 +258,7 @@ const INITIALIZE_TIMEOUT: Duration = Duration::from_mins(2);
 
 #[cfg(test)]
 mod tests {
-    use std::{path::PathBuf, time::Duration};
+    use std::time::Duration;
 
     use lsp_types::{
         CallHierarchyServerCapability, OneOf, ServerCapabilities, TypeDefinitionProviderCapability,
@@ -261,14 +266,12 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        ServerReadiness, SessionConfig, initialize_parameters, produce_semantic_facts,
-        validate_capabilities,
+        ServerReadiness, SessionConfig, initialize_parameters, start, validate_capabilities,
     };
     use crate::analysis::{
-        fact::{ResolutionFallback, SemanticFact},
+        fact::ResolutionFallback,
         language::Language,
         lsp::{LspError, ProtocolSymbolSite, fake_server::FakeServer},
-        source::{DocumentSnapshot, Sources},
     };
 
     #[test]
@@ -294,6 +297,10 @@ mod tests {
                     "experimental": {"serverStatusNotification": true},
                     "textDocument": {
                         "callHierarchy": {"dynamicRegistration": false},
+                        "definition": {
+                            "dynamicRegistration": false,
+                            "linkSupport": true,
+                        },
                         "documentSymbol": {
                             "symbolKind": {"valueSet": (1..=26).collect::<Vec<_>>()},
                             "hierarchicalDocumentSymbolSupport": true,
@@ -350,29 +357,38 @@ mod tests {
     }
 
     #[test]
-    fn captures_facts_with_a_shared_session() {
-        let facts = run_session(
-            &FakeServer::new(),
-            "serve",
-            Language::Python,
-            IMMEDIATE,
-            true,
-        )
-        .expect("the fake language server should complete");
+    fn rejects_a_server_without_definitions() {
+        let capabilities = ServerCapabilities {
+            document_symbol_provider: Some(OneOf::Left(true)),
+            call_hierarchy_provider: Some(CallHierarchyServerCapability::Simple(true)),
+            references_provider: Some(OneOf::Left(true)),
+            type_definition_provider: Some(TypeDefinitionProviderCapability::Simple(true)),
+            ..ServerCapabilities::default()
+        };
 
-        assert_eq!(facts, Vec::new());
+        let error =
+            validate_capabilities(&capabilities).expect_err("definitions should be required");
+
+        assert_eq!(
+            error.to_string(),
+            "the language server does not support definitions"
+        );
+    }
+
+    #[test]
+    fn starts_and_stops_a_ready_session() {
+        let server = FakeServer::new();
+
+        run_session(&server, "serve", Language::Python, IMMEDIATE)
+            .expect("the fake language server should start and stop");
+
+        assert!(server.shutdown_marker().exists());
     }
 
     #[test]
     fn includes_server_standard_error_when_startup_fails() {
-        let error = run_session(
-            &FakeServer::new(),
-            "fail",
-            Language::Python,
-            IMMEDIATE,
-            false,
-        )
-        .expect_err("the fake language server should fail");
+        let error = run_session(&FakeServer::new(), "fail", Language::Python, IMMEDIATE)
+            .expect_err("the fake language server should fail");
 
         assert!(
             error.to_string().contains("invalid project configuration"),
@@ -384,7 +400,7 @@ mod tests {
     fn does_not_request_shutdown_after_initialize_rejection() {
         let server = FakeServer::new();
 
-        run_session(&server, "reject", Language::Python, IMMEDIATE, false)
+        run_session(&server, "reject", Language::Python, IMMEDIATE)
             .expect_err("the fake language server should reject initialization");
 
         assert!(
@@ -395,14 +411,8 @@ mod tests {
 
     #[test]
     fn includes_server_standard_error_with_initialize_rejection() {
-        let error = run_session(
-            &FakeServer::new(),
-            "reject",
-            Language::Python,
-            IMMEDIATE,
-            false,
-        )
-        .expect_err("the fake language server should reject initialization");
+        let error = run_session(&FakeServer::new(), "reject", Language::Python, IMMEDIATE)
+            .expect_err("the fake language server should reject initialization");
         let message = error.to_string();
 
         assert!(
@@ -427,7 +437,6 @@ mod tests {
             "undecodable-initialize",
             Language::Python,
             IMMEDIATE,
-            false,
         )
         .expect_err("the initialize result should not decode");
         let message = error.to_string();
@@ -448,13 +457,12 @@ mod tests {
     }
 
     #[test]
-    fn returns_shutdown_failure_after_successful_capture() {
+    fn returns_a_shutdown_failure() {
         let error = run_session(
             &FakeServer::new(),
             "shutdown-error",
             Language::Python,
             IMMEDIATE,
-            true,
         )
         .expect_err("the fake language server should reject shutdown");
 
@@ -465,66 +473,14 @@ mod tests {
     }
 
     #[test]
-    fn preserves_capture_failure_when_shutdown_also_fails() {
-        let error = run_session(
-            &FakeServer::new(),
-            "capture-and-shutdown-error",
-            Language::Python,
-            IMMEDIATE,
-            true,
-        )
-        .expect_err("the fake language server should reject capture and shutdown");
-        let message = error.to_string();
-
-        assert!(
-            message.contains("document symbol capture failed"),
-            "the capture error must have precedence: {message}"
-        );
-        assert!(
-            !message.contains("shutdown failed"),
-            "the shutdown error must not replace the capture error: {message}"
-        );
-    }
-
-    #[test]
-    fn includes_server_standard_error_with_semantic_rejection() {
-        let error = run_session(
-            &FakeServer::new(),
-            "semantic-reject-stderr",
-            Language::Python,
-            IMMEDIATE,
-            true,
-        )
-        .expect_err("the fake language server should reject semantic capture");
-        let message = error.to_string();
-
-        assert!(
-            message.contains("document symbol capture failed"),
-            "the error should retain the protocol rejection: {message}"
-        );
-        assert!(
-            message.contains("semantic request diagnostic"),
-            "the error should include server standard error: {message}"
-        );
-        assert_eq!(
-            message.matches("language server standard error:").count(),
-            1,
-            "the error should include standard error once: {message}"
-        );
-    }
-
-    #[test]
-    fn waits_for_a_quiescent_server_status_before_capture() {
-        let facts = run_session(
+    fn waits_for_a_quiescent_server_status() {
+        run_session(
             &FakeServer::new(),
             "status-quiescent",
             Language::Rust,
             quiescent(Duration::from_secs(10)),
-            true,
         )
         .expect("the session should proceed after the quiescent status");
-
-        assert_eq!(facts, Vec::new());
     }
 
     #[test]
@@ -534,7 +490,6 @@ mod tests {
             "status-error",
             Language::Rust,
             quiescent(Duration::from_secs(10)),
-            false,
         )
         .expect_err("the error status should fail the session");
 
@@ -551,7 +506,6 @@ mod tests {
             "status-silent",
             Language::Rust,
             quiescent(Duration::from_millis(300)),
-            false,
         )
         .expect_err("the silent server should time out");
 
@@ -569,26 +523,14 @@ mod tests {
         ServerReadiness::QuiescentServerStatus { timeout }
     }
 
-    /// Runs one session against the fake server in the given mode.
-    ///
-    /// With `with_source`, the session opens one `app.py` document.
+    /// Starts and stops one session against the fake server in the given mode.
     fn run_session(
         server: &FakeServer,
         mode: &str,
         language: Language,
         readiness: ServerReadiness,
-        with_source: bool,
-    ) -> Result<Vec<SemanticFact>, LspError> {
+    ) -> Result<(), LspError> {
         let command = server.command(mode);
-        let source = DocumentSnapshot {
-            path: PathBuf::from("app.py"),
-            content: "def run():\n    pass\n".to_owned(),
-        };
-        let sources = Sources::new(if with_source {
-            vec![&source]
-        } else {
-            Vec::new()
-        });
         let config = SessionConfig {
             root: server.root(),
             language,
@@ -598,7 +540,7 @@ mod tests {
             readiness,
         };
 
-        produce_semantic_facts(&config, &sources)
+        start(&config)?.0.shutdown()
     }
 
     fn fallback(_: &ProtocolSymbolSite) -> ResolutionFallback {

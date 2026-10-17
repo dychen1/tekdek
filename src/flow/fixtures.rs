@@ -76,6 +76,7 @@ pub fn write_graph(directory: &Path, extra: &str) -> GraphArtifact {
         schema_version: 1,
         graph: ArtifactGraph {
             languages: vec!["rust".to_owned()],
+            source_hash: None,
             nodes,
             edges: vec![edge(0, 1), edge(1, 2), edge(0, 3), edge(3, 4), edge(0, 5)],
         },

@@ -110,8 +110,32 @@ export function pickFlow(flows: readonly FlowEntry[], requested: string | null):
   return flows.find(flow => flow.name === requested) ?? flows[0] ?? null;
 }
 
+/** Returns the graph file digest that flows of a codebase bind. A server without `graphDigest` serves the file as it is. */
+export const bindingDigest = (entry: Pick<ArtifactEntry, "digest" | "graphDigest">) => entry.graphDigest ?? entry.digest;
+
 /** Picks the codebase to open: the requested file, else the index default, else the first codebase. */
 export function pickArtifact(index: ArtifactIndex, requested: string | null): ArtifactEntry | null {
   const find = (file: string | null | undefined) => index.artifacts.find(item => item.file === file);
   return find(requested) ?? find(index.defaultArtifact) ?? index.artifacts[0] ?? null;
+}
+
+/** Resolves the codebase, flow, and step of a page link. A missing name opens the fallback at step 0 with a notice.
+ *  A missing codebase also drops the flow of the link, because that flow belongs to the missing codebase.
+ *  A step past the end of the flow opens its last step with a notice. */
+export function resolveLink(index: ArtifactIndex, want: { artifact: string | null; flow: string | null; step: number }):
+  { file: string; flow: string | null; step: number; notice: string | null } | null {
+  const entry = pickArtifact(index, want.artifact);
+  if (!entry) return null;
+  const name = entry.label ?? entry.file;
+  if (want.artifact && entry.file !== want.artifact) {
+    return { file: entry.file, flow: null, step: 0, notice: `No codebase named ${want.artifact}. This page shows ${name}.` };
+  }
+  const flow = pickFlow(frozenFlows(entry.flows), want.flow);
+  if (want.flow && flow?.name !== want.flow) {
+    return { file: entry.file, flow: null, step: 0, notice: `No flow named ${want.flow} in ${name}.${flow ? ` This page shows ${flow.name}.` : ""}` };
+  }
+  if (flow?.stepCount && want.step > flow.stepCount) {
+    return { file: entry.file, flow: want.flow, step: flow.stepCount, notice: `No step ${want.step} in ${flow.name}. This page shows its last step, ${flow.stepCount}.` };
+  }
+  return { file: entry.file, flow: want.flow, step: want.step, notice: null };
 }

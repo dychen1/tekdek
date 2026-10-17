@@ -27,7 +27,9 @@ use std::{collections::BTreeSet, fmt, io, path::Path};
 
 use serde::{Deserialize, Serialize};
 
-use super::{digest_of, lock_store, read_bytes, reject_symlink, write_bytes};
+use super::{
+    digest_of, lock_store, read_bytes, reject_symlink, semantic::SEMANTIC_SUFFIX, write_bytes,
+};
 use crate::analysis::{
     fact::{self, EntityKind},
     graph::{Edge, Graph, Node, NodeId, ProvenanceOrigin},
@@ -53,6 +55,13 @@ pub struct GraphArtifact {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ArtifactGraph {
     pub languages: Vec<String>,
+    /// The hash of the source files that the graph was built from. A graph from an older version has none.
+    #[serde(
+        rename = "sourceHash",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub source_hash: Option<String>,
     pub nodes: Vec<ArtifactNode>,
     pub edges: Vec<ArtifactEdge>,
 }
@@ -142,7 +151,7 @@ impl fmt::Display for NodeKind {
 }
 
 /// The kind of one graph edge. Serde refuses any other value on read.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RelationKind {
     Contains,
@@ -181,6 +190,7 @@ impl GraphArtifact {
             schema_version: SCHEMA_VERSION,
             graph: ArtifactGraph {
                 languages,
+                source_hash: None,
                 nodes: graph
                     .identified_nodes()
                     .map(|(id, node)| artifact_node(id, node))
@@ -188,6 +198,13 @@ impl GraphArtifact {
                 edges: graph.edges.iter().map(artifact_edge).collect(),
             },
         }
+    }
+
+    /// Records the hash of the source files that the graph was built from.
+    #[must_use]
+    pub fn with_source_hash(mut self, hash: String) -> Self {
+        self.graph.source_hash = Some(hash);
+        self
     }
 }
 
@@ -283,7 +300,7 @@ fn artifact_range(range: SourceRange) -> ArtifactRange {
     }
 }
 
-fn relation_kind(kind: fact::RelationKind) -> RelationKind {
+pub(crate) fn relation_kind(kind: fact::RelationKind) -> RelationKind {
     match kind {
         // Encode containment.
         fact::RelationKind::Contains => RelationKind::Contains,
@@ -414,7 +431,8 @@ impl ArtifactGraph {
 ///
 /// # Errors
 /// Returns `InvalidInput` for a path, a leading dot, a control character, outer
-/// whitespace, another extension, or the reserved name `index.json`.
+/// whitespace, another extension, the reserved name `index.json`, or the name of
+/// a semantic cache, `<graph>.semantic.json`.
 pub fn check_graph_name(file: &str) -> io::Result<()> {
     let invalid = |message: String| io::Error::new(io::ErrorKind::InvalidInput, message);
     if file.is_empty()
@@ -436,6 +454,12 @@ pub fn check_graph_name(file: &str) -> io::Result<()> {
         return Err(invalid(
             "the graph file must end with .json and must not be index.json".to_owned(),
         ));
+    }
+    // A case-insensitive file system holds `app.Semantic.json` and the cache of `app.json` in one file.
+    if file.to_ascii_lowercase().ends_with(SEMANTIC_SUFFIX) {
+        return Err(invalid(format!(
+            "invalid store name {file:?}: a graph file name cannot end with {SEMANTIC_SUFFIX}"
+        )));
     }
     Ok(())
 }
@@ -526,6 +550,23 @@ mod tests {
     }
 
     #[test]
+    fn keeps_the_source_hash_and_reads_a_graph_without_one() {
+        let artifact = GraphArtifact::new(&two_node_graph()).with_source_hash("00ff".to_owned());
+        let bytes = artifact.to_bytes().expect("bytes");
+        let value: serde_json::Value = serde_json::from_slice(&bytes).expect("value");
+        assert_eq!(value["graph"]["sourceHash"], "00ff");
+        let read = GraphArtifact::read(&bytes).expect("read");
+        assert_eq!(read.graph.source_hash.as_deref(), Some("00ff"));
+
+        let older = GraphArtifact::new(&two_node_graph())
+            .to_bytes()
+            .expect("bytes");
+        assert!(!String::from_utf8_lossy(&older).contains("sourceHash"));
+        let read = GraphArtifact::read(&older).expect("an older graph should stay readable");
+        assert_eq!(read.graph.source_hash, None);
+    }
+
+    #[test]
     fn reads_an_older_graph_with_clustering_comparison_and_position_fields() {
         let mut value = serde_json::to_value(GraphArtifact::new(&two_node_graph())).expect("value");
         value["clustering"] =
@@ -567,6 +608,8 @@ mod tests {
             "",
             ".hidden.json",
             "a:b.json",
+            "app.semantic.json",
+            "app.Semantic.json",
         ] {
             assert!(check_graph_name(name).is_err(), "{name:?}");
         }

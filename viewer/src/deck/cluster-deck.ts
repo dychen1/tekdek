@@ -28,7 +28,7 @@ export function createClusterDeck(ctx: DeckContext): ClusterDeck {
     const el = document.createElement("div");
     el.className = "mbox"; el.dataset.key = key; el.style.setProperty("--c", cluster.cv);
     el.innerHTML = `<div class="face fshadow"></div><div class="riser"><div class="face front"></div><div class="face lid">${PTR}` +
-      `<button class="tmain" type="button" tabindex="-1"${steps.length ? ` data-step="${steps[0]}"` : ""}><span class="lp">${esc(fn.file)}</span><span class="ln">${esc(fn.name)}</span></button>` +
+      `<button class="tmain" type="button" tabindex="-1"${steps.length ? ` data-step="${steps[0]}"` : ""}><span class="lp" title="${esc(fn.file)}"><bdi>${esc(fn.file)}</bdi></span><span class="ln">${esc(fn.name)}</span></button>` +
       `<span class="sn">${steps.join(" ")}</span><span class="stepno">${steps[0] ?? ""}</span></div></div>`;
     return { key, name: fn.name, file: fn.file, steps, el, lid: el.querySelector<HTMLElement>(".lid")!, btn: el.querySelector<HTMLButtonElement>(".tmain")!, badge: el.querySelector<HTMLElement>(".stepno")! };
   }
@@ -41,7 +41,7 @@ export function createClusterDeck(ctx: DeckContext): ClusterDeck {
     const cam = document.createElement("div");
     cam.className = "deckcam"; cam.style.setProperty("--c", cluster.cv); cam.style.setProperty("--deck-z", `${DECK_Z}px`);
     cam.innerHTML = `<div class="slab" style="width:${model.deckSize.width}px;height:${deckHeight(keys.length)}px"><div class="shadow"></div><div class="deck"><div class="dfront"></div>` +
-      `<div class="dtop"><div class="dlabel"><span class="dname">flow functions in this cluster</span></div></div></div></div>`;
+      `<div class="dtop"><div class="dlabel"><span class="dname">${esc(cluster.label)}</span></div></div></div></div>`;
     const boxes = keys.map((key, i) => {
       const box = makeBox(key, cluster);
       cam.appendChild(box.el);

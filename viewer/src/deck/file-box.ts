@@ -34,13 +34,13 @@ export function createFileBox(ctx: DeckContext): FileBoxView {
       const stepList = x.steps.join(", ");
       let node: string;
       if (mode === "slot") {
-        node = `<button class="node" type="button" data-step="${x.steps[0]}" style="width:${x.w}px" aria-label="Slot of ${esc(x.name)}, step ${stepList}"><span class="nm">${esc(x.name)}</span></button>`;
+        node = `<button class="node" type="button" data-step="${x.steps[0]}" style="width:${x.w}px;min-width:${f1(x.min)}px" title="${esc(x.name)}" aria-label="Slot of ${esc(x.name)}, step ${stepList}"><span class="nm">${esc(x.name)}</span></button>`;
       } else if (flow) {
-        node = `<button class="node" type="button" data-step="${x.steps[0]}" aria-label="${esc(x.name)}, step ${stepList}"><span class="nm">${esc(x.name)}</span></button>`;
+        node = `<button class="node" type="button" data-step="${x.steps[0]}" style="min-width:${f1(x.min)}px" title="${esc(x.name)}" aria-label="${esc(x.name)}, step ${stepList}"><span class="nm">${esc(x.name)}</span></button>`;
       } else if (mode === "stub") {
-        node = `<div class="node" style="width:${x.w}px" title="${esc(x.name)}"><span class="nm">${esc(x.short)}</span></div>`;
+        node = `<div class="node" style="width:${x.w}px;min-width:${f1(x.min)}px" title="${esc(x.name)}"><span class="nm">${esc(x.short)}</span></div>`;
       } else {
-        node = `<div class="node" title="${esc(x.name)}"><span class="nm">${esc(x.short)}</span></div>`;
+        node = `<div class="node" style="min-width:${f1(x.min)}px" title="${esc(x.name)}"><span class="nm">${esc(x.short)}</span></div>`;
       }
       // every flow row carries its step pill, except the current slot: its tether and box carry the step
       const pills = flow && !focus ? x.steps.map(i => `<button class="spill" type="button" data-step="${i}" aria-label="Go to step ${i}">${i}</button>`).join("") : "";
@@ -64,7 +64,8 @@ export function createFileBox(ctx: DeckContext): FileBoxView {
     height: () => shown?.box.height ?? 0,
     nodeEl: () => fbIn.querySelector<HTMLElement>("#fileNode"),
     slotEl: () => fbIn.querySelector<HTMLElement>(".row.fn.focus .node"),
-    rowsRight: () => Math.max(0, ...[...fbIn.querySelectorAll<HTMLElement>(".rowin")].map(el => el.getBoundingClientRect().right)),
+    // the file node, and each row's node and pills: pills that do not fit the room run past the row's own box
+    rowsRight: () => Math.max(0, ...[...fbIn.querySelectorAll<HTMLElement>("#fileNode, .rowin > *")].map(el => el.getBoundingClientRect().right)),
     destroy() { fbIn.replaceChildren(); fileblk.hidden = true; shown = null; },
   };
 }

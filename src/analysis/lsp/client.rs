@@ -12,6 +12,7 @@
 //! `File URIs` converts file paths to file URIs and back.
 
 use std::{
+    collections::BTreeMap,
     io::{BufRead, BufReader, Read, Write},
     path::{Path, PathBuf},
     process::{Child, ChildStdin, Command, Stdio},
@@ -32,7 +33,7 @@ use serde_json::{Value, json};
 use url::Url;
 
 use super::LspError;
-use crate::analysis::program::find_program;
+use crate::analysis::{program::find_program, timing};
 
 // -----------------------------------------------------------------------------
 // Client
@@ -159,13 +160,39 @@ impl LspClient {
                 R::METHOD
             ))
         })?;
-        self.request_value(R::METHOD, &parameters, timeout)
+        let started = timing::start();
+        let result = self.request_value(R::METHOD, &parameters, timeout);
+        timing::record_request(started, R::METHOD);
+        result
             .and_then(|result| {
                 serde_json::from_value(result).map_err(|error| {
                     LspError::new(format!("cannot decode the {} result: {error}", R::METHOD))
                 })
             })
             .map_err(|error| self.with_standard_error(error))
+    }
+
+    /// Sends many requests with at most `window` in flight, and returns the
+    /// results in input order.
+    ///
+    /// The batch times out when no request gets an answer for `timeout`, so a
+    /// server that answers one request after the other never times out a
+    /// queued request. Server requests that arrive in between are answered,
+    /// and other messages are skipped. After the first error, the batch sends
+    /// nothing more.
+    ///
+    /// # Errors
+    ///
+    /// Returns the input index and the error of the first request that fails
+    /// or cannot be sent. A timeout names the oldest unanswered request.
+    pub fn request_batch(
+        &mut self,
+        requests: &[(&'static str, Value)],
+        window: usize,
+        timeout: Duration,
+    ) -> Result<Vec<Value>, (usize, LspError)> {
+        self.batch_values(requests, window.max(1), timeout)
+            .map_err(|(index, error)| (index, self.with_standard_error(error)))
     }
 
     /// Sends the initialization request and then the initialized notification.
@@ -265,6 +292,67 @@ impl LspClient {
         }
     }
 
+    /// Keeps up to `window` requests in flight and matches answers by ID.
+    fn batch_values(
+        &mut self,
+        requests: &[(&'static str, Value)],
+        window: usize,
+        timeout: Duration,
+    ) -> Result<Vec<Value>, (usize, LspError)> {
+        let mut results = vec![Value::Null; requests.len()];
+        let mut unsent = requests.iter().enumerate();
+        let mut in_flight = BTreeMap::<u64, InFlight>::new();
+        let mut deadline = Instant::now() + timeout;
+
+        loop {
+            while in_flight.len() < window {
+                let Some((index, (method, parameters))) = unsent.next() else {
+                    break;
+                };
+                let request_id = self.allocate_request_id();
+                self.send(&json!({
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "method": method,
+                    "params": parameters,
+                }))
+                .map_err(|error| (index, error))?;
+                in_flight.insert(
+                    request_id,
+                    InFlight {
+                        index,
+                        method,
+                        started: timing::start(),
+                    },
+                );
+            }
+            let Some((_, oldest)) = in_flight.first_key_value() else {
+                return Ok(results);
+            };
+            let (oldest_index, oldest_method) = (oldest.index, oldest.method);
+
+            let message = self
+                .receive(oldest_method, deadline)
+                .map_err(|error| (oldest_index, error))?;
+            if is_server_request(&message) {
+                self.answer_server_request(&message)
+                    .map_err(|error| (oldest_index, error))?;
+                continue;
+            }
+            let Some(request) = message
+                .get("id")
+                .and_then(Value::as_u64)
+                .and_then(|request_id| in_flight.remove(&request_id))
+            else {
+                continue;
+            };
+            deadline = Instant::now() + timeout;
+            timing::record_request(request.started, request.method);
+            results[request.index] =
+                response_result(&message).map_err(|error| (request.index, error))?;
+        }
+    }
+
     fn allocate_request_id(&mut self) -> u64 {
         self.request_id_counter += 1;
         self.request_id_counter
@@ -318,9 +406,10 @@ impl LspClient {
 
     /// Adds the retained server standard error to one failure.
     ///
-    /// Only the public methods call this, so each error gets the text once.
-    /// The wait lets a server that stops at the failure write its last lines.
-    fn with_standard_error(&mut self, error: LspError) -> LspError {
+    /// The public methods and the batch decoder of `capture` call this once
+    /// for each error. The wait lets a server that stops at the failure write
+    /// its last lines.
+    pub(crate) fn with_standard_error(&mut self, error: LspError) -> LspError {
         let deadline = Instant::now() + STDERR_EXIT_WAIT;
 
         loop {
@@ -340,6 +429,13 @@ impl LspClient {
 
         append_standard_error(error, &self.standard_error)
     }
+}
+
+/// One batch request that waits for its answer.
+struct InFlight {
+    index: usize,
+    method: &'static str,
+    started: Option<Instant>,
 }
 
 impl Drop for LspClient {
@@ -598,14 +694,86 @@ mod tests {
         io::{BufReader, Cursor},
         path::Path,
         sync::{Arc, Mutex},
+        time::Duration,
     };
 
     use serde_json::json;
 
     use super::{
-        STDERR_CAPTURE_LIMIT, file_uri, read_message, read_standard_error, server_request_response,
-        uri_path, write_message,
+        LspClient, STDERR_CAPTURE_LIMIT, file_uri, read_message, read_standard_error,
+        server_request_response, uri_path, write_message,
     };
+    use crate::analysis::lsp::fake_server::FakeServer;
+
+    #[test]
+    fn returns_batch_answers_in_input_order_and_answers_server_requests() {
+        let server = FakeServer::new();
+        let mut client = echo_client(&server, "batch");
+
+        let results = client
+            .request_batch(&echo_requests(), 64, Duration::from_secs(10))
+            .expect("the batch should complete");
+
+        assert_eq!(results, [json!(1), json!(2), json!(3)]);
+    }
+
+    #[test]
+    fn returns_the_index_of_a_failed_batch_request() {
+        let server = FakeServer::new();
+        let mut client = echo_client(&server, "batch-error");
+
+        let (index, error) = client
+            .request_batch(&echo_requests(), 64, Duration::from_secs(10))
+            .expect_err("the second answer is an error");
+
+        assert_eq!(index, 1);
+        assert!(
+            error.to_string().contains("echo failed"),
+            "the error should name the server error: {error}"
+        );
+    }
+
+    #[test]
+    fn times_out_only_when_no_answer_arrives_for_the_timeout() {
+        let server = FakeServer::new();
+        let mut client = echo_client(&server, "batch-slow");
+        // A first batch waits out the start of the new server program.
+        client
+            .request_batch(&echo_requests(), 64, Duration::from_secs(10))
+            .expect("the first batch should complete");
+
+        let results = client
+            .request_batch(&echo_requests(), 64, Duration::from_millis(500))
+            .expect("each answer arrives within the timeout of the previous one");
+
+        assert_eq!(results, [json!(1), json!(2), json!(3)]);
+    }
+
+    #[test]
+    fn keeps_no_more_requests_in_flight_than_the_window() {
+        let server = FakeServer::new();
+        let mut client = echo_client(&server, "window-2");
+
+        let results = client
+            .request_batch(&echo_requests(), 2, Duration::from_secs(10))
+            .expect("the fake server should see at most two unanswered requests");
+
+        assert_eq!(results, [json!(1), json!(2), json!(3)]);
+    }
+
+    fn echo_client(server: &FakeServer, mode: &str) -> LspClient {
+        let command = server.command(mode);
+        LspClient::start(&command.program, &command.arguments)
+            .expect("the fake language server should start")
+    }
+
+    fn echo_requests() -> [(&'static str, serde_json::Value); 3] {
+        [
+            ("test/echo", json!(1)),
+            ("test/echo", json!(2)),
+            ("test/echo", json!(3)),
+        ]
+    }
 
     #[test]
     fn reads_a_written_message() {

@@ -1,7 +1,7 @@
 //! Artifact catalog.
 //!
 //! This module builds the catalog that the viewer reads as `index.json`. It
-//! lists every graph file of one store with its digest, and the current
+//! lists every graph file of one store with its digests, and the current
 //! generation of every flow lineage under the graph that the flow binds. The
 //! store directory is the input. One catalog document in memory is the output.
 //! No command stores the catalog: the graph files and the flow lineages are the
@@ -28,7 +28,10 @@ use crate::{
         lineage::{lineage_ids, read_current},
         models::FLOW_ARTIFACT_SCHEMA_VERSION,
     },
-    store::{digest_of, graph::check_graph_name, read_bytes, reject_symlink},
+    store::{
+        digest_of, graph::check_graph_name, read_bytes, reject_symlink,
+        semantic::merged_graph_bytes,
+    },
 };
 
 // -----------------------------------------------------------------------------
@@ -46,11 +49,16 @@ pub struct ArtifactIndex {
     artifacts: Vec<ArtifactIndexEntry>,
 }
 
+/// One graph file. `digest` names the merged graph document that `serve`
+/// sends, and `graph_digest` names the bytes of the graph file, as flows bind
+/// them. The two differ when the semantic cache adds edges.
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct ArtifactIndexEntry {
     label: String,
     file: String,
     digest: String,
+    graph_digest: String,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     flows: Vec<FlowListing>,
 }
@@ -169,7 +177,15 @@ fn artifact_index(
     files: &[String],
     default_artifact: String,
 ) -> io::Result<ArtifactIndex> {
-    let digests = graph_digests(directory, files)?;
+    let mut entries = BTreeMap::new();
+    for file in files {
+        let (document, graph_digest) = merged_graph_bytes(directory, file)?;
+        entries.insert(file.clone(), (digest_of(&document), graph_digest));
+    }
+    let digests = entries
+        .iter()
+        .map(|(file, (_, graph_digest))| (file.clone(), graph_digest.clone()))
+        .collect();
     let mut listings: BTreeMap<String, Vec<FlowListing>> = BTreeMap::new();
     for lineage in lineage_listings(directory)? {
         listings
@@ -179,7 +195,7 @@ fn artifact_index(
     }
 
     let mut artifacts = Vec::new();
-    for (file, digest) in digests {
+    for (file, (digest, graph_digest)) in entries {
         let Some(label) = file.strip_suffix(".json").map(str::to_owned) else {
             continue;
         };
@@ -189,6 +205,7 @@ fn artifact_index(
             label,
             file,
             digest,
+            graph_digest,
             flows,
         });
     }
@@ -324,7 +341,11 @@ mod tests {
     use super::{build_catalog, default_artifact, list_flows, readable_files};
     use crate::{
         flow::fixtures::{self, frozen, import, output},
-        store::digest_of,
+        store::{
+            digest_of,
+            graph::RelationKind,
+            semantic::{SemanticCache, SemanticEdge, merged_graph_bytes, write_cache},
+        },
     };
 
     fn catalog(directory: &std::path::Path) -> Value {
@@ -344,6 +365,7 @@ mod tests {
         assert_eq!(document["defaultArtifact"], "alpha.json");
         assert_eq!(document["artifacts"][0]["label"], "alpha");
         assert_eq!(document["artifacts"][0]["digest"], digest_of(b"{}"));
+        assert_eq!(document["artifacts"][0]["graphDigest"], digest_of(b"{}"));
         assert_eq!(document["artifacts"][1]["file"], "zeta.json");
         assert_eq!(document["artifacts"].as_array().map(Vec::len), Some(2));
         assert!(document["artifacts"][0].get("flows").is_none());
@@ -389,6 +411,31 @@ mod tests {
                 format!("flows/{}", generation.file)
             ]
         );
+        let graph_digest = document["artifacts"][0]["graphDigest"].clone();
+        assert_eq!(document["artifacts"][0]["digest"], graph_digest);
+
+        // Cached edges change the served document, not the flow binding.
+        write_cache(
+            path,
+            "graph.json",
+            &SemanticCache {
+                edges: vec![SemanticEdge {
+                    source: "src/main.rs::callable:main".to_owned(),
+                    target: "src/parse.rs::callable:read_input".to_owned(),
+                    kind: RelationKind::UsesValue,
+                    weight: 1,
+                }],
+                ..SemanticCache::new(graph_digest.as_str().expect("digest").to_owned())
+            },
+        )
+        .expect("cache");
+        let cached = catalog(path);
+        let (served, _) = merged_graph_bytes(path, "graph.json").expect("document");
+        assert_eq!(cached["artifacts"][0]["digest"], digest_of(&served));
+        assert_ne!(cached["artifacts"][0]["digest"], graph_digest);
+        assert_eq!(cached["artifacts"][0]["graphDigest"], graph_digest);
+        assert_eq!(cached["artifacts"][0]["flows"][0]["stale"], false);
+
         fixtures::write_graph(path, "src/extra.rs::callable:another");
         assert_eq!(catalog(path)["artifacts"][0]["flows"][0]["stale"], true);
     }

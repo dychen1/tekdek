@@ -2,24 +2,26 @@
    header (`path:line`), and the code viewer with its line numbers, colors, and margin marks. The facts come from
    `layout/step-facts.ts` and the lines from the `/source` answer. Every data string goes through `esc`.
    # Sections
-   markup, empty states, facts, code viewer, step */
+   markup, fold, empty states, facts, code viewer, step */
 import type { DeckStep, SourceView } from "../data/models.ts";
 import { displayName } from "../data/adapt.ts";
 import { highlight } from "../layout/highlight.ts";
 import { nearestStep } from "../layout/plan.ts";
 import { callRefs, calleesOf, callersOf, lineSpan, oneLineSignature, otherVisits, sourceNote, transitionFact, whole, type CallRef } from "../layout/step-facts.ts";
 import { clamp, esc, plural } from "../layout/util.ts";
-import { md } from "./markup.ts";
+import { icon, md } from "./markup.ts";
 import { $, type CodeColumn, type DeckContext } from "./context.ts";
 
 // ============ markup ============
 
 const SEP = '<span class="sep">, </span>';
-const REST = "The flow is clear. Press `k` to start it.";
+/** The forward keys. The `.ck` part hides while the key popover turns the one-character keys off. */
+const FORWARD = '<code class="ck">k</code><span class="ck"> or </span><code>→</code>';
 const NO_FLOW = "No saved flow for this codebase. Write one with `/tekdek:flow`, then reload.";
 
-/** The header title with its cursor. */
-const title = (text: string) => `<h2 class="cd-title"><span class="ctt">${esc(text)}</span><i class="cursor" aria-hidden="true"></i></h2>`;
+/** The header title with its cursor. A step title starts with the step number for screen readers; the badge shows it on screen. */
+const title = (text: string, step = 0) =>
+  `<h2 class="cd-title">${step ? `<span class="vh">Step ${step}: </span>` : ""}<span class="ctt">${esc(text)}</span><i class="cursor" aria-hidden="true"></i></h2>`;
 
 /** The note that replaces code. It may hold `code` spans. */
 const noteHtml = (text: string) => `<p class="cd-empty">${md(text)}</p>`;
@@ -41,17 +43,50 @@ function refList(refs: readonly CallRef[]): string {
 }
 
 export function createCode(ctx: DeckContext): CodeColumn {
-  const { model, state } = ctx;
-  const head = $("#cdHead"), stepEl = $("#cdStep"), whereEl = $("#where"), codeEl = $("#code");
+  const { model, state, signal } = ctx;
+  const head = $("#cdHead"), stepEl = $("#cdStep"), codeHead = $("#codeHead"), whereEl = $("#where"), codeEl = $("#code");
+  const card = $("#card"), foldBtn = $<HTMLButtonElement>("#foldBtn");
+
+  // ============ fold ============
+  // The step details take at most the top half of the column and scroll there. The fold stays across steps.
+  // The fact rows start closed under the annotation; their open state also stays across steps.
+
+  let factsOpen = false;
+
+  /** Shows the fold button when the step details overflow the top half, or are folded. */
+  function fitFold() {
+    foldBtn.hidden = !card.classList.contains("folded") && stepEl.scrollHeight <= stepEl.clientHeight + 1;
+  }
+  /** Hides or shows the step details under the step title. */
+  function setFold(folded: boolean) {
+    card.classList.toggle("folded", folded);
+    const label = folded ? "Show the step details" : "Hide the step details";
+    foldBtn.setAttribute("aria-expanded", String(!folded)); foldBtn.title = label; foldBtn.setAttribute("aria-label", label);
+    fitFold();
+  }
+  // the code header moves with the fold, so the arrow to it is drawn again
+  foldBtn.addEventListener("click", () => { setFold(!card.classList.contains("folded")); ctx.place(); }, { signal });
+  // `toggle` does not bubble; it also fires when a step renders the facts open
+  stepEl.addEventListener("toggle", e => {
+    if (!(e.target as Element).matches(".cd-more")) return;
+    factsOpen = (e.target as HTMLDetailsElement).open;
+    fitFold();
+    ctx.place();
+  }, { capture: true, signal });
+  addEventListener("resize", fitFold, { signal });
 
   // ============ empty states ============
 
-  /** The rest state, or the state of a codebase with no flow. */
+  /** The rest state, or the state of a codebase with no flow. After a clear, the rest state names the step that forward continues at.
+   *  The code header hides: it has no path and nothing to show full screen. */
   function renderEmpty() {
     head.innerHTML = title(model.flow ? "No step" : "No flow");
-    stepEl.innerHTML = `<p class="cd-empty">${md(model.flow ? REST : NO_FLOW)}</p>`;
+    const rest = `The flow is clear. Press ${FORWARD} to ${state.resume ? `continue at step ${state.resume}` : "start it"}.`;
+    stepEl.innerHTML = `<p class="cd-empty">${model.flow ? rest : md(NO_FLOW)}</p>`;
+    codeHead.hidden = true;
     whereEl.innerHTML = "";
     codeEl.innerHTML = "";
+    fitFold();
   }
 
   // ============ facts ============
@@ -130,7 +165,8 @@ export function createCode(ctx: DeckContext): CodeColumn {
   function render(prev: number) {
     const step = model.stepAt(state.cur);
     if (!step) { renderEmpty(); return; }
-    head.innerHTML = `<span class="cd-no" aria-label="Step ${step.index}">${step.index}</span>${title(step.title)}`;
+    head.innerHTML = `<span class="cd-no" aria-hidden="true">${step.index}</span>${title(step.title, step.index)}`;
+    codeHead.hidden = false;
     const facts: [string, string][] = [];
     const from = fromFact(step);
     if (from) facts.push(from);
@@ -155,7 +191,12 @@ export function createCode(ctx: DeckContext): CodeColumn {
       if (step.documentation && !marks.doc) facts.push(["doc", esc(step.documentation)]);
       if (step.signature && !marks.sig) facts.push(["signature", `<code>${esc(oneLineSignature(step.signature))}</code>`]);
     }
-    stepEl.innerHTML = `<p class="cd-ann">${md(step.annotation)}</p><dl class="cd-facts">${facts.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("")}</dl>`;
+    // the summary names the closed rows, so a reader knows what opens
+    const more = facts.length ? `<details class="cd-more"${factsOpen ? " open" : ""}><summary>${icon("chev")}<span class="cd-keys">${facts.map(([k]) => k).join(" · ")}</span></summary>` +
+      `<dl class="cd-facts">${facts.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("")}</dl></details>` : "";
+    stepEl.innerHTML = `<p class="cd-ann">${md(step.annotation)}</p>${more}`;
+    stepEl.scrollTop = 0;
+    fitFold();
     swap(prev);
   }
 
@@ -164,6 +205,7 @@ export function createCode(ctx: DeckContext): CodeColumn {
     destroy() {
       for (const el of [head, stepEl, whereEl, codeEl]) el.replaceChildren();
       stepEl.classList.remove("swap"); codeEl.classList.remove("swap");
+      setFold(false);
     },
   };
 }

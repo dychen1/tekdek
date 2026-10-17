@@ -2,8 +2,9 @@
 //!
 //! This module owns the store folder on disk: its location, its lock, its
 //! reads, its atomic writes, its link checks, and the content digest of stored
-//! bytes. The `graph` submodule owns the graph artifact. The flow modules read
-//! and write through these helpers.
+//! bytes. The `graph` submodule owns the graph artifact, and `semantic` owns the
+//! semantic cache of a graph. The flow modules read and write through these
+//! helpers.
 //!
 //! # Sections
 //!
@@ -14,6 +15,7 @@
 //! `Digests` names stored bytes.
 
 pub mod graph;
+pub mod semantic;
 
 use std::{
     fmt::Write as _,
@@ -33,10 +35,10 @@ pub const PROJECT_STORE: &str = ".tekdek";
 
 /// The ignore file of a new project store.
 ///
-/// The lock and interrupted writes stay local. An older tekdek wrote the catalog
-/// to `index.json`; tekdek now builds it in memory, so the file stays out of Git.
-const PROJECT_IGNORE: &str =
-    "# Local files of tekdek. Commit the rest of this folder.\n.store.lock\n*.tmp\nindex.json\n";
+/// The locks, the daemon files, and interrupted writes stay local. An older
+/// tekdek wrote the catalog to `index.json`; tekdek now builds it in memory, so
+/// the file stays out of Git.
+const PROJECT_IGNORE: &str = "# Local files of tekdek. Commit the rest of this folder.\n.store.lock\n*.tmp\nindex.json\ndaemon.lock\ndaemon.log\ndaemon.sock\n";
 
 /// Returns the nearest project store in `start` or one of its parents.
 ///
@@ -84,6 +86,36 @@ pub fn create_project_store(store: &Path) -> io::Result<()> {
     }
     fs::create_dir_all(store)?;
     write_bytes(&store.join(".gitignore"), PROJECT_IGNORE.as_bytes())
+}
+
+/// Adds the daemon lines of a new ignore file that the ignore file of a store lacks.
+///
+/// A store from an older tekdek has no daemon lines. A store without an ignore
+/// file stays as it is.
+///
+/// # Errors
+///
+/// Returns an error if the ignore file cannot be read or written.
+pub fn update_project_ignore(store: &Path) -> io::Result<()> {
+    let path = store.join(".gitignore");
+    let mut bytes = match read_bytes(&path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error),
+    };
+    let text = String::from_utf8_lossy(&bytes);
+    let missing = PROJECT_IGNORE
+        .lines()
+        .filter(|line| line.starts_with("daemon.") && !text.lines().any(|old| old.trim() == *line))
+        .collect::<Vec<_>>();
+    if missing.is_empty() {
+        return Ok(());
+    }
+    if bytes.last().is_some_and(|byte| *byte != b'\n') {
+        bytes.push(b'\n');
+    }
+    bytes.extend(format!("{}\n", missing.join("\n")).bytes());
+    write_bytes(&path, &bytes)
 }
 
 // -----------------------------------------------------------------------------
@@ -290,8 +322,28 @@ mod tests {
 
     use super::{
         PROJECT_STORE, create_project_store, digest_of, find_project_store, find_store_below,
-        write_bytes,
+        update_project_ignore, write_bytes,
     };
+
+    #[test]
+    fn adds_the_missing_daemon_lines_to_the_ignore_file_of_an_older_store() {
+        let store = tempfile::tempdir().expect("store");
+        let ignore = store.path().join(".gitignore");
+        update_project_ignore(store.path()).expect("no ignore file");
+        assert!(
+            !ignore.exists(),
+            "a store without an ignore file stays as it is"
+        );
+
+        fs::write(&ignore, "kept\ndaemon.log").expect("older ignore file");
+        update_project_ignore(store.path()).expect("update");
+        update_project_ignore(store.path()).expect("second update");
+
+        assert_eq!(
+            fs::read_to_string(&ignore).expect("ignore file"),
+            "kept\ndaemon.log\ndaemon.lock\ndaemon.sock\n"
+        );
+    }
 
     #[test]
     fn finds_the_nearest_project_store_and_creates_one_with_an_ignore_file() {

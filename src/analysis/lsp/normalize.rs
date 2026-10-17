@@ -11,7 +11,8 @@
 //! `Protocol Validation` validates protocol kinds, sites, and locations.
 //! `Normalization` converts captured protocol facts into semantic facts.
 //! `Source Paths` converts selected source paths to UTF-8 text.
-//! `Source Positions` converts UTF-16 protocol positions to byte offsets.
+//! `Source Positions` converts between UTF-16 protocol positions and byte
+//! offsets.
 
 use std::{collections::HashMap, path::Path};
 
@@ -137,6 +138,7 @@ fn validate_facts(facts: &[CapturedSemanticFact]) -> Result<(), LspError> {
                 validate_symbol_site(queried_symbol)?;
                 validate_locations(targets)?;
             }
+            CapturedSemanticFact::Definition { targets, .. } => validate_locations(targets)?,
         }
     }
 
@@ -301,6 +303,10 @@ fn normalize_fact(
             queried_symbol: normalize_symbol(queried_symbol, lookup, fallback_policy)?,
             targets: normalize_locations(&targets, lookup)?,
         }),
+        CapturedSemanticFact::Definition { query, targets } => Ok(SemanticFact::Definition {
+            query,
+            targets: normalize_locations(&targets, lookup)?,
+        }),
     }
 }
 
@@ -433,6 +439,31 @@ fn position_to_byte_offset(source: &str, path: &str, position: Position) -> Resu
     Err(invalid_character(path, position))
 }
 
+/// Converts one UTF-8 byte offset into a zero-based UTF-16 LSP position.
+///
+/// This is the inverse of `position_to_byte_offset`.
+///
+/// # Errors
+///
+/// Returns an error if the offset is outside the source or splits a character.
+pub(crate) fn byte_offset_to_position(
+    source: &str,
+    path: &str,
+    offset: u32,
+) -> Result<Position, LspError> {
+    let invalid = || LspError::new(format!("the source offset {offset} is invalid in {path}"));
+    let prefix = usize::try_from(offset)
+        .ok()
+        .and_then(|offset| source.get(..offset))
+        .ok_or_else(invalid)?;
+    let line_start = prefix.rfind('\n').map_or(0, |index| index + 1);
+    let line = u32::try_from(prefix.matches('\n').count()).map_err(|_| invalid())?;
+    let character =
+        u32::try_from(prefix[line_start..].encode_utf16().count()).map_err(|_| invalid())?;
+
+    Ok(Position::new(line, character))
+}
+
 /// # Errors
 ///
 /// Returns an error if the combined offset does not fit in a source offset.
@@ -462,7 +493,7 @@ fn invalid_character(path: &str, position: Position) -> LspError {
 mod tests {
     use lsp_types::Position;
 
-    use super::position_to_byte_offset;
+    use super::{byte_offset_to_position, position_to_byte_offset};
 
     #[test]
     fn converts_utf16_positions_into_utf8_offsets() {
@@ -478,6 +509,35 @@ mod tests {
                 .expect("the final line must be valid"),
             14
         );
+    }
+
+    #[test]
+    fn converts_utf8_offsets_into_utf16_positions_and_back() {
+        let cases = [
+            ("alpha\né😀z\n", 12, Position::new(1, 3)),
+            ("alpha\né😀z\n", 14, Position::new(2, 0)),
+            ("\u{feff}use a;\n", 7, Position::new(0, 5)),
+            ("line\r\nnext", 8, Position::new(1, 2)),
+        ];
+
+        for (source, offset, position) in cases {
+            assert_eq!(
+                byte_offset_to_position(source, "app.py", offset)
+                    .expect("the offset must be valid"),
+                position
+            );
+            assert_eq!(
+                position_to_byte_offset(source, "app.py", position)
+                    .expect("the position must be valid"),
+                offset
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_an_offset_inside_a_utf8_character() {
+        assert!(byte_offset_to_position("é", "app.py", 1).is_err());
+        assert!(byte_offset_to_position("a", "app.py", 2).is_err());
     }
 
     #[test]

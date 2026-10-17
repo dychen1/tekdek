@@ -7,7 +7,7 @@ import { deckFlow, deckGraph } from "../src/data/adapt.ts";
 import type { DeckFlow } from "../src/data/models.ts";
 import { isShown } from "../src/layout/explorer.ts";
 import { MIN_DECK_W } from "../src/layout/deck-geometry.ts";
-import { buildModel, initialState, shownFile, withMembership } from "../src/layout/model.ts";
+import { buildModel, initialState, nextStep, shownFile, withMembership } from "../src/layout/model.ts";
 
 import { artifact, DIGEST, graphDocument, must } from "./fixtures.ts";
 
@@ -87,3 +87,10 @@ test("the step and its function at an index, and neither at rest or past the end
     assert.equal(model.fnAt(index), null);
   }
 });
+
+test("forward goes to the next step, and from the rest state continues at the step that a clear left", () => {
+  assert.equal(nextStep(initialState(model)), 1);
+  assert.equal(nextStep({ cur: 0, resume: 12 }), 12);
+  assert.equal(nextStep({ cur: 12, resume: 4 }), 13);
+});
+

@@ -19,7 +19,13 @@ mod graph;
 mod index;
 mod serve;
 
-use std::{collections::BTreeMap, env, io::Read, path::PathBuf, process::ExitCode};
+use std::{
+    collections::BTreeMap,
+    env, io,
+    io::Read,
+    path::{Path, PathBuf},
+    process::ExitCode,
+};
 
 use serde::Serialize;
 use tekdek::store::{PROJECT_STORE, find_project_store};
@@ -55,9 +61,9 @@ pub fn run(arguments: Vec<String>, input: &mut impl Read) -> ExitCode {
         // Index one codebase.
         Some("index") => finish(index::run(arguments.into_iter())),
         // Run one graph query; its output is one document on standard output.
-        Some("graph") => report(graph::run(arguments, json)),
+        Some("graph") => report(graph::run(arguments, json, &tekdek::semantic::ensure)),
         // Run one flow command; its output is one document on standard output.
-        Some("flow") => report(flow::run(arguments, json, input)),
+        Some("flow") => report(flow::run(arguments, json, input, &tekdek::semantic::ensure)),
         // Serve the viewer until the process ends.
         Some("serve") => finish(serve::run(arguments.into_iter())),
         // Check the language servers; the report is one document on standard output.
@@ -74,6 +80,9 @@ pub fn run(arguments: Vec<String>, input: &mut impl Read) -> ExitCode {
             );
             ExitCode::SUCCESS
         }
+        // Serve the semantic requests of one store; clients start it, so the summary does not list it.
+        #[cfg(unix)]
+        Some("daemon") => finish(daemon(arguments)),
         // Print the version.
         Some("version" | "--version" | "-V") => {
             println!("tekdek {}", env!("CARGO_PKG_VERSION"));
@@ -95,25 +104,22 @@ pub fn run(arguments: Vec<String>, input: &mut impl Read) -> ExitCode {
 // -----------------------------------------------------------------------------
 
 /// The options that take no value. Each command removes the flags it accepts.
-const FLAGS: [&str; 3] = ["--json", "--check", "--open"];
+const FLAGS: [&str; 4] = ["--json", "--check", "--open", "--no-index"];
 
-/// The operands, the single options, and the repeated options of one command line.
-type SplitArguments = (Vec<String>, BTreeMap<String, String>, Vec<(String, String)>);
+/// The operands and the options of one command line.
+type SplitArguments = (Vec<String>, BTreeMap<String, String>);
 
 /// Separates options from command operands.
 ///
-/// Each option in `FLAGS` takes no value. Each option in `value_options` or
-/// `repeatable` takes one value, as `--option value` or `--option=value`. A
-/// separate value cannot start with a hyphen, except `-` itself. Only an option
-/// in `repeatable` can repeat. Its values come back in input order.
+/// Each option in `FLAGS` takes no value. Each option in `value_options` takes
+/// one value, as `--option value` or `--option=value`. A separate value cannot
+/// start with a hyphen, except `-` itself. An option cannot repeat.
 fn split_arguments(
     mut arguments: impl Iterator<Item = String>,
     value_options: &[&str],
-    repeatable: &[&str],
 ) -> Result<SplitArguments, String> {
     let mut operands = Vec::new();
     let mut options = BTreeMap::new();
-    let mut repeated = Vec::new();
     while let Some(argument) = arguments.next() {
         if !argument.starts_with('-') {
             if argument.trim().is_empty() {
@@ -135,7 +141,7 @@ fn split_arguments(
                 return Err(format!("{argument} does not accept a value"));
             }
             String::new()
-        } else if value_options.contains(&argument) || repeatable.contains(&argument) {
+        } else if value_options.contains(&argument) {
             let value = if let Some(value) = inline {
                 value.to_owned()
             } else {
@@ -154,13 +160,9 @@ fn split_arguments(
         } else {
             return Err(format!("unknown option: {argument}"));
         };
-        if repeatable.contains(&argument) {
-            repeated.push((argument.to_owned(), value));
-        } else {
-            options.insert(argument.to_owned(), value);
-        }
+        options.insert(argument.to_owned(), value);
     }
-    Ok((operands, options, repeated))
+    Ok((operands, options))
 }
 
 /// Returns the store of a command: the `--store` value, or the nearest project store.
@@ -179,6 +181,23 @@ fn store_directory(explicit: Option<PathBuf>) -> Result<PathBuf, String> {
         )
     })
 }
+
+/// Runs the semantic daemon of the `--store` folder until it is idle.
+#[cfg(unix)]
+fn daemon(arguments: Vec<String>) -> Result<(), String> {
+    let (operands, mut options) = split_arguments(arguments.into_iter(), &["--store"])?;
+    let store = required(&mut options, "--store")?;
+    if !operands.is_empty() {
+        return Err("usage: tekdek daemon --store <directory>".to_owned());
+    }
+    tekdek::semantic::daemon::serve(store.as_ref(), |config| {
+        tekdek::analysis::config::configured_profiles(config).map_err(std::io::Error::other)
+    })
+    .map_err(|error| error.to_string())
+}
+
+/// Resolves the semantic edges of node keys into the cache of one graph, as `tekdek::semantic::ensure` does.
+type Ensure<'a> = dyn Fn(&Path, &str, &[String], Option<&Path>) -> io::Result<()> + 'a;
 
 /// Removes one required option value.
 fn required(options: &mut BTreeMap<String, String>, key: &str) -> Result<String, String> {

@@ -7,37 +7,28 @@ use std::path::Path;
 use lsp_types::SymbolKind;
 
 use crate::analysis::{
-    fact::{ResolutionFallback, SemanticFact},
+    fact::ResolutionFallback,
     language::{Language, LanguageProfile},
     lsp::{
-        LspError, ProtocolSymbolSite,
+        ProtocolSymbolSite,
         session::{self, SessionConfig},
     },
-    source::Sources,
 };
 
-/// Produces semantic facts from one Python language-server session.
-///
-/// # Errors
-///
-/// Returns an error if the shared session fails.
-pub(super) fn produce_semantic_facts(
-    root: &Path,
-    profile: &LanguageProfile,
-    sources: &Sources<'_>,
-) -> Result<Vec<SemanticFact>, LspError> {
-    session::produce_semantic_facts(
-        &SessionConfig {
-            root,
-            language: Language::Python,
-            language_id: &profile.language_id,
-            server: &profile.server,
-            fallback: resolution_fallback,
-            // Pyright analyzes each document before it answers a request.
-            readiness: session::ServerReadiness::Immediate,
-        },
-        sources,
-    )
+/// Returns the session configuration of one Python profile.
+pub(crate) fn session_config<'a>(
+    root: &'a Path,
+    profile: &'a LanguageProfile,
+) -> SessionConfig<'a> {
+    SessionConfig {
+        root,
+        language: Language::Python,
+        language_id: &profile.language_id,
+        server: &profile.server,
+        fallback: resolution_fallback,
+        // Pyright analyzes each document before it answers a request.
+        readiness: session::ServerReadiness::Immediate,
+    }
 }
 
 /// Returns the resolution fallback for one Pyright protocol symbol.

@@ -1,15 +1,16 @@
 //! Syntax graph index.
 //!
 //! Matches source positions to the nodes of one syntax graph: declarations,
-//! bodies, scopes, signature annotations, constructors, and import sites.
+//! bodies, scopes, file modules, signature annotations, constructors, and
+//! import statements.
 //!
 //! Position queries use one index to avoid a full node scan. Owner queries
 //! select the narrowest range. Equal widths select the lowest ID.
 
-use std::collections::HashMap;
+use std::{cmp::Reverse, collections::HashMap};
 
 use crate::analysis::{
-    fact::{CallableKind, EntityKind, RelationKind},
+    fact::{CallableKind, EntityKind, ImportSite, RelationKind},
     graph::{Graph, Node, NodeId},
     language::Language,
     source::SourceRange,
@@ -36,7 +37,7 @@ impl SignatureRole {
     }
 }
 
-pub(super) struct SyntaxGraphIndex<'a> {
+pub(crate) struct SyntaxGraphIndex<'a> {
     graph: &'a Graph,
     paths: HashMap<(Language, &'a str), PathRanges>,
     constructors: HashMap<NodeId, NodeId>,
@@ -49,12 +50,14 @@ struct PathRanges {
     bodies: Vec<(SourceRange, NodeId)>,
     scopes: Vec<(SourceRange, NodeId)>,
     callable_or_module_bodies: Vec<(SourceRange, NodeId)>,
+    modules: Vec<(SourceRange, NodeId)>,
     type_inputs: Vec<(SourceRange, NodeId)>,
     type_outputs: Vec<(SourceRange, NodeId)>,
 }
 
 impl<'a> SyntaxGraphIndex<'a> {
-    pub(super) fn new(graph: &'a Graph) -> Self {
+    /// Indexes the syntax graph and the import statements of one language.
+    pub(crate) fn new(graph: &'a Graph, imports: &'a [(NodeId, ImportSite)]) -> Self {
         let mut paths = HashMap::<(Language, &str), PathRanges>::new();
 
         for (id, node) in graph.identified_nodes() {
@@ -65,6 +68,9 @@ impl<'a> SyntaxGraphIndex<'a> {
             }
             if let Some(scope) = node.scope() {
                 ranges.scopes.push((scope, id));
+                if matches!(node.kind, EntityKind::Module) {
+                    ranges.modules.push((scope, id));
+                }
             }
             if let Some(body) = node.body() {
                 ranges.bodies.push((body, id));
@@ -84,7 +90,7 @@ impl<'a> SyntaxGraphIndex<'a> {
             graph,
             paths,
             constructors: constructors_by_class(graph),
-            import_ranges: import_ranges_by_path(graph),
+            import_ranges: import_ranges_by_path(graph, imports),
         }
     }
 
@@ -103,7 +109,7 @@ impl<'a> SyntaxGraphIndex<'a> {
     }
 
     /// Returns the smallest node body that owns one source byte offset.
-    pub(super) fn body_owner_at(
+    pub(crate) fn body_owner_at(
         &self,
         language: Language,
         path: &str,
@@ -134,6 +140,19 @@ impl<'a> SyntaxGraphIndex<'a> {
         })
     }
 
+    /// Returns the file module of one source path.
+    ///
+    /// The file module has the widest module scope. Equal widths select the
+    /// lowest ID.
+    pub(super) fn file_module(&self, language: Language, path: &str) -> Option<NodeId> {
+        self.paths
+            .get(&(language, path))?
+            .modules
+            .iter()
+            .max_by_key(|(range, id)| (range_width(*range), Reverse(id.0)))
+            .map(|(_, id)| *id)
+    }
+
     /// Returns the callable and role for an annotation.
     pub(super) fn signature_role_at(
         &self,
@@ -154,8 +173,8 @@ impl<'a> SyntaxGraphIndex<'a> {
         self.constructors.get(&class).copied()
     }
 
-    /// Returns `true` when an import observation contains one byte offset.
-    pub(super) fn is_import_position(&self, language: Language, path: &str, offset: u32) -> bool {
+    /// Returns `true` when an import statement contains one byte offset.
+    pub(crate) fn is_import_position(&self, language: Language, path: &str, offset: u32) -> bool {
         self.import_ranges
             .get(&(language, path))
             .is_some_and(|ranges| ranges.iter().any(|range| contains(*range, offset)))
@@ -178,7 +197,7 @@ impl<'a> SyntaxGraphIndex<'a> {
 }
 
 /// Indexes the last direct constructor of each class.
-fn constructors_by_class(graph: &Graph) -> HashMap<NodeId, NodeId> {
+pub(crate) fn constructors_by_class(graph: &Graph) -> HashMap<NodeId, NodeId> {
     let mut constructors = HashMap::<NodeId, NodeId>::new();
 
     for edge in &graph.edges {
@@ -203,23 +222,24 @@ fn constructors_by_class(graph: &Graph) -> HashMap<NodeId, NodeId> {
     constructors
 }
 
-/// Returns every import observation range, grouped by source path.
-fn import_ranges_by_path(graph: &Graph) -> HashMap<(Language, &str), Vec<SourceRange>> {
+/// Returns every import statement range, grouped by source path.
+///
+/// An unresolved import still counts, so a reference at it never becomes a
+/// use edge.
+fn import_ranges_by_path<'a>(
+    graph: &Graph,
+    imports: &'a [(NodeId, ImportSite)],
+) -> HashMap<(Language, &'a str), Vec<SourceRange>> {
     let mut import_ranges = HashMap::<(Language, &str), Vec<SourceRange>>::new();
 
-    for edge in &graph.edges {
-        if edge.kind != RelationKind::Imports {
-            continue;
-        }
-        let Some(source) = graph.nodes.get(edge.source.index()) else {
+    for (owner, site) in imports {
+        let Some(owner) = graph.nodes.get(owner.index()) else {
             continue;
         };
-        for observation in &edge.provenance.evidence.observations {
-            import_ranges
-                .entry((source.language, observation.path.as_str()))
-                .or_default()
-                .push(observation.range);
-        }
+        import_ranges
+            .entry((owner.language, site.statement.path.as_str()))
+            .or_default()
+            .push(site.statement.range);
     }
 
     import_ranges
@@ -255,7 +275,7 @@ mod tests {
             ],
             edges: Vec::new(),
         };
-        let lookup = SyntaxGraphIndex::new(&graph);
+        let lookup = SyntaxGraphIndex::new(&graph, &[]);
 
         assert_eq!(
             lookup.declaration_at(Language::Python, "app.py", 32),
@@ -278,5 +298,9 @@ mod tests {
             Some(NodeId(0))
         );
         assert_eq!(lookup.body_owner_at(Language::Python, "other.py", 50), None);
+        assert_eq!(
+            lookup.file_module(Language::Python, "app.py"),
+            Some(NodeId(0))
+        );
     }
 }

@@ -1,267 +1,259 @@
-//! Semantic capture.
+//! Semantic requests.
 //!
-//! This module owns every document request: document opening, document
-//! symbols, the semantic requests of each symbol, and response conversion. An
-//! initialized client, a session configuration, and selected sources are the
-//! inputs. One protocol capture is the output.
+//! This module owns the requests that the resolver sends: request batches,
+//! their parameters, the definition request of each imported name, and the
+//! conversion of answers into captured facts. An initialized client and the
+//! parsed sources are the inputs. Captured protocol facts are the output.
 //!
 //! # Sections
 //!
-//! `Document Capture` opens the documents and captures their symbols and facts.
-//! `Per-Symbol Requests` requests each supported fact type for one symbol.
+//! `Facts` converts the answers of many symbols, items, or names into facts.
+//! `Requests` sends the requests of one round and builds their parameters.
+//! `Documents` finds the URI and the text of each source, and converts ranges.
+//! `Import Definitions` builds the definition request of each imported name.
 //! `Symbol Sites` converts hierarchical symbols into ordered protocol sites.
-//! `Response Conversion` converts protocol responses into captured facts.
+//! `Response Conversion` converts one protocol response into captured facts.
 
-use std::{path::Path, time::Duration};
+use std::{collections::HashMap, time::Duration, vec};
 
 use lsp_types::{
     CallHierarchyIncomingCall, CallHierarchyIncomingCallsParams, CallHierarchyItem,
     CallHierarchyOutgoingCall, CallHierarchyOutgoingCallsParams, CallHierarchyPrepareParams,
-    DidOpenTextDocumentParams, DocumentSymbol, DocumentSymbolParams, DocumentSymbolResponse,
-    GotoDefinitionParams, GotoDefinitionResponse, Location, PartialResultParams, Range,
-    ReferenceContext, ReferenceParams, TextDocumentIdentifier, TextDocumentItem,
-    TextDocumentPositionParams, Uri, WorkDoneProgressParams,
-    notification::DidOpenTextDocument,
-    request::{
-        CallHierarchyIncomingCalls, CallHierarchyOutgoingCalls, CallHierarchyPrepare,
-        DocumentSymbolRequest, GotoTypeDefinition, References, Request,
-    },
+    DocumentSymbol, DocumentSymbolParams, DocumentSymbolResponse, GotoDefinitionParams,
+    GotoDefinitionResponse, Location, PartialResultParams, Position, Range, ReferenceContext,
+    ReferenceParams, TextDocumentIdentifier, TextDocumentPositionParams, Uri,
+    WorkDoneProgressParams, request::Request,
 };
+
+use serde_json::Value;
 
 use super::{
     CapturedDocument, CapturedSemanticFact, LspClient, LspError, ProtocolSymbolSite,
-    SemanticCapture, file_uri,
-    normalize::source_path,
-    session::{SessionConfig, language_title},
+    normalize::{byte_offset_to_position, source_path},
 };
-use crate::analysis::source::Sources;
+use crate::analysis::{
+    fact::ImportSite,
+    source::{SourceRange, SourceSpan, Sources},
+};
 
 // -----------------------------------------------------------------------------
-// Document Capture
+// Facts
 // -----------------------------------------------------------------------------
 
-/// Opens all documents, then captures facts for every hierarchical symbol.
-///
-/// # Errors
-///
-/// Returns an error if a document cannot open or a request fails.
-pub(crate) fn capture_document_semantics(
-    client: &mut LspClient,
-    config: &SessionConfig<'_>,
-    root: &Path,
-    sources: &Sources<'_>,
-) -> Result<SemanticCapture, LspError> {
-    let mut files = Vec::with_capacity(sources.len());
-
-    for document in sources.iter() {
-        let path = source_path(document)?;
-        let uri = file_uri(&root.join(path))?;
-        client
-            .notify::<DidOpenTextDocument>(DidOpenTextDocumentParams {
-                text_document: TextDocumentItem::new(
-                    uri.clone(),
-                    config.language_id.to_owned(),
-                    1,
-                    document.content.clone(),
-                ),
-            })
-            .map_err(|error| LspError::new(format!("cannot open {path}: {error}")))?;
-        files.push((path.to_owned(), uri));
-    }
-
-    let files = files
-        .into_iter()
-        .enumerate()
-        .map(|(index, (path, uri))| {
-            let timeout = if index == 0 {
-                FIRST_REQUEST_TIMEOUT
-            } else {
-                REQUEST_TIMEOUT
-            };
-            let response = client
-                .request::<DocumentSymbolRequest>(
-                    DocumentSymbolParams {
-                        text_document: TextDocumentIdentifier::new(uri.clone()),
-                        work_done_progress_params: WorkDoneProgressParams::default(),
-                        partial_result_params: PartialResultParams::default(),
-                    },
-                    timeout,
-                )
-                .map_err(|error| {
-                    LspError::new(format!(
-                        "cannot read {} symbols from {path}: {error}",
-                        language_title(config.language)
-                    ))
-                })?;
-
-            Ok(CapturedDocument {
-                symbols: nested_symbols(response, &path)?,
-                path,
-                uri,
+/// Converts the type definitions of some symbols into facts. An empty answer adds no fact.
+pub(crate) fn type_definition_facts(
+    symbols: &[(&str, ProtocolSymbolSite)],
+    responses: Vec<Option<GotoDefinitionResponse>>,
+) -> Vec<CapturedSemanticFact> {
+    symbols
+        .iter()
+        .zip(responses)
+        .filter_map(|((_, symbol), response)| {
+            let targets = response.map(definition_locations).unwrap_or_default();
+            (!targets.is_empty()).then(|| CapturedSemanticFact::TypeDefinition {
+                queried_symbol: symbol.clone(),
+                targets,
             })
         })
-        .collect::<Result<Vec<_>, LspError>>()?;
-
-    let facts = request_facts(client, &files)?;
-
-    Ok(SemanticCapture {
-        documents: files,
-        facts,
-    })
+        .collect()
 }
 
-/// Captures all supported semantic facts for every document symbol.
-/// Fact order follows document order and parent-first symbol order.
-/// For each symbol, prepared items retain server order.
-/// Each item adds outgoing calls, then incoming calls, in response order.
-/// References follow all prepared items. Type definitions follow references.
-///
-/// # Errors
-///
-/// Returns an error if any semantic request fails.
-fn request_facts(
-    client: &mut LspClient,
-    documents: &[CapturedDocument],
-) -> Result<Vec<CapturedSemanticFact>, LspError> {
-    let mut facts = Vec::new();
-    for document in documents {
-        for symbol in symbol_sites(&document.uri, &document.symbols) {
-            capture_symbol(client, &document.path, &symbol, &mut facts)?;
-        }
-    }
+/// Converts the definitions of some imported names into facts. An empty answer adds no fact.
+pub(crate) fn definition_facts(
+    queries: Vec<SourceSpan>,
+    responses: Vec<Option<GotoDefinitionResponse>>,
+) -> Vec<CapturedSemanticFact> {
+    queries
+        .into_iter()
+        .zip(responses)
+        .filter_map(|(query, response)| {
+            let targets = response.map(definition_locations).unwrap_or_default();
+            (!targets.is_empty()).then_some(CapturedSemanticFact::Definition { query, targets })
+        })
+        .collect()
+}
 
-    Ok(facts)
+/// Converts each call response of one item into caller-to-callee facts.
+pub(crate) fn call_facts<C>(
+    items: &[(&str, &CallHierarchyItem)],
+    responses: Vec<Option<Vec<C>>>,
+    fact: fn(&CallHierarchyItem, C) -> CapturedSemanticFact,
+) -> Vec<CapturedSemanticFact> {
+    items
+        .iter()
+        .zip(responses)
+        .flat_map(|((_, item), calls)| {
+            calls
+                .unwrap_or_default()
+                .into_iter()
+                .map(move |call| fact(item, call))
+        })
+        .collect()
 }
 
 const FIRST_REQUEST_TIMEOUT: Duration = Duration::from_mins(5);
 const REQUEST_TIMEOUT: Duration = Duration::from_mins(1);
 
 // -----------------------------------------------------------------------------
-// Per-Symbol Requests
+// Requests
 // -----------------------------------------------------------------------------
 
-/// Appends calls, references, and type definitions for one symbol.
-///
-/// Empty reference and type-definition responses add no fact.
+/// One request: the source path and the queried name for its error, and its
+/// parameters.
+pub(crate) type Labeled<'a, P> = (&'a str, &'a str, P);
+
+/// The number of requests that one batch keeps in flight.
+const REQUEST_WINDOW: usize = 64;
+
+/// Requests that the client sends together, with the label of each.
+pub(crate) struct Batch<'a> {
+    requests: Vec<(&'static str, Value)>,
+    labels: Vec<(&'a str, &'a str)>,
+    describe: Describe,
+    timeout: Duration,
+}
+
+/// Describes one request from its method, source path, and queried name.
+type Describe = fn(&str, &str, &str) -> String;
+
+pub(crate) fn describe_request(method: &str, path: &str, name: &str) -> String {
+    format!("cannot request {method} for {name} in {path}")
+}
+
+impl<'a> Batch<'a> {
+    pub(crate) fn new(describe: Describe) -> Self {
+        Self {
+            requests: Vec::new(),
+            labels: Vec::new(),
+            describe,
+            timeout: REQUEST_TIMEOUT,
+        }
+    }
+
+    /// Waits as long as for the first answer of a server, which can analyze the workspace first.
+    pub(crate) fn first(self) -> Self {
+        Self {
+            timeout: FIRST_REQUEST_TIMEOUT,
+            ..self
+        }
+    }
+
+    /// Adds the requests of one method and returns their count.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if parameters cannot be encoded.
+    pub(crate) fn add<R: Request>(
+        &mut self,
+        requests: Vec<Labeled<'a, R::Params>>,
+    ) -> Result<usize, LspError> {
+        let count = requests.len();
+        for (path, name, parameters) in requests {
+            let parameters = serde_json::to_value(parameters).map_err(|error| {
+                LspError::new(format!(
+                    "cannot encode the {} parameters: {error}",
+                    R::METHOD
+                ))
+            })?;
+            self.requests.push((R::METHOD, parameters));
+            self.labels.push((path, name));
+        }
+        Ok(count)
+    }
+
+    /// Sends every request and returns the raw results in input order.
+    ///
+    /// # Errors
+    ///
+    /// Returns a server failure for the first request that fails.
+    pub(crate) fn send(self, client: &mut LspClient) -> Result<BatchResults<'a>, LspError> {
+        match client.request_batch(&self.requests, REQUEST_WINDOW, self.timeout) {
+            Ok(values) => Ok(BatchResults {
+                batch: self,
+                values: values.into_iter(),
+                next: 0,
+            }),
+            Err((index, error)) => Err(self.error(index, &error).server_failure()),
+        }
+    }
+
+    /// Adds the method, source path, and queried name of one request to its error.
+    fn error(&self, index: usize, error: &LspError) -> LspError {
+        let (path, name) = self.labels[index];
+        LspError::new(format!(
+            "{}: {error}",
+            (self.describe)(self.requests[index].0, path, name)
+        ))
+    }
+}
+
+/// The raw results of one batch, decoded group by group in input order.
+pub(crate) struct BatchResults<'a> {
+    batch: Batch<'a>,
+    values: vec::IntoIter<Value>,
+    next: usize,
+}
+
+impl BatchResults<'_> {
+    /// Decodes the next `count` raw results as results of one method.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a result does not decode.
+    pub(crate) fn decode<R: Request>(
+        &mut self,
+        client: &mut LspClient,
+        count: usize,
+    ) -> Result<Vec<R::Result>, LspError> {
+        let mut decoded = Vec::with_capacity(count);
+        for value in self.values.by_ref().take(count) {
+            let index = self.next;
+            self.next += 1;
+            decoded.push(serde_json::from_value(value).map_err(|error| {
+                let error = client.with_standard_error(LspError::new(format!(
+                    "cannot decode the {} result: {error}",
+                    R::METHOD
+                )));
+                self.batch.error(index, &error)
+            })?);
+        }
+        Ok(decoded)
+    }
+}
+
+/// Sends one batch of requests of one method and returns the results in
+/// input order.
 ///
 /// # Errors
 ///
-/// Returns an error if a semantic request fails.
-fn capture_symbol(
+/// Returns an error for the first request that fails.
+pub(crate) fn request_all<R: Request>(
     client: &mut LspClient,
-    path: &str,
-    symbol: &ProtocolSymbolSite,
-    facts: &mut Vec<CapturedSemanticFact>,
-) -> Result<(), LspError> {
-    let prepared = request::<CallHierarchyPrepare>(
-        client,
-        CallHierarchyPrepareParams {
-            text_document_position_params: symbol_position(symbol),
-            work_done_progress_params: WorkDoneProgressParams::default(),
-        },
-        path,
-        symbol,
-    )?
-    .unwrap_or_default();
-
-    for item in prepared {
-        let outgoing = request::<CallHierarchyOutgoingCalls>(
-            client,
-            CallHierarchyOutgoingCallsParams {
-                item: item.clone(),
-                work_done_progress_params: WorkDoneProgressParams::default(),
-                partial_result_params: PartialResultParams::default(),
-            },
-            path,
-            symbol,
-        )?
-        .unwrap_or_default();
-        facts.extend(
-            outgoing
-                .into_iter()
-                .map(|call| outgoing_call_fact(&item, call)),
-        );
-
-        let incoming = request::<CallHierarchyIncomingCalls>(
-            client,
-            CallHierarchyIncomingCallsParams {
-                item: item.clone(),
-                work_done_progress_params: WorkDoneProgressParams::default(),
-                partial_result_params: PartialResultParams::default(),
-            },
-            path,
-            symbol,
-        )?
-        .unwrap_or_default();
-        facts.extend(
-            incoming
-                .into_iter()
-                .map(|call| incoming_call_fact(&item, call)),
-        );
-    }
-
-    let occurrences = request::<References>(
-        client,
-        ReferenceParams {
-            text_document_position: symbol_position(symbol),
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: ReferenceContext {
-                include_declaration: false,
-            },
-        },
-        path,
-        symbol,
-    )?
-    .unwrap_or_default();
-    if !occurrences.is_empty() {
-        facts.push(CapturedSemanticFact::Reference {
-            target: symbol.clone(),
-            occurrences,
-        });
-    }
-
-    let targets = request::<GotoTypeDefinition>(
-        client,
-        GotoDefinitionParams {
-            text_document_position_params: symbol_position(symbol),
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-        },
-        path,
-        symbol,
-    )?
-    .map(type_definition_locations)
-    .unwrap_or_default();
-    if !targets.is_empty() {
-        facts.push(CapturedSemanticFact::TypeDefinition {
-            queried_symbol: symbol.clone(),
-            targets,
-        });
-    }
-
-    Ok(())
+    requests: Vec<Labeled<'_, R::Params>>,
+) -> Result<Vec<R::Result>, LspError> {
+    let mut batch = Batch::new(describe_request);
+    let count = batch.add::<R>(requests)?;
+    batch.send(client)?.decode::<R>(client, count)
 }
 
-/// Sends one request with symbol context in its error.
-fn request<R>(
-    client: &mut LspClient,
-    parameters: R::Params,
-    path: &str,
-    symbol: &ProtocolSymbolSite,
-) -> Result<R::Result, LspError>
-where
-    R: Request,
-{
-    client
-        .request::<R>(parameters, REQUEST_TIMEOUT)
-        .map_err(|error| {
-            LspError::new(format!(
-                "cannot request {} for {} in {path}: {error}",
-                R::METHOD,
-                symbol.name
-            ))
-        })
+pub(crate) fn symbol_requests<'a, P>(
+    symbols: impl IntoIterator<Item = &'a (&'a str, ProtocolSymbolSite)>,
+    parameters: fn(&ProtocolSymbolSite) -> P,
+) -> Vec<Labeled<'a, P>> {
+    symbols
+        .into_iter()
+        .map(|(path, symbol)| (*path, symbol.name.as_str(), parameters(symbol)))
+        .collect()
+}
+
+pub(crate) fn item_requests<'a, P>(
+    items: &[(&'a str, &'a CallHierarchyItem)],
+    parameters: fn(&CallHierarchyItem) -> P,
+) -> Vec<Labeled<'a, P>> {
+    items
+        .iter()
+        .map(|(path, item)| (*path, item.name.as_str(), parameters(item)))
+        .collect()
 }
 
 fn symbol_position(symbol: &ProtocolSymbolSite) -> TextDocumentPositionParams {
@@ -271,13 +263,174 @@ fn symbol_position(symbol: &ProtocolSymbolSite) -> TextDocumentPositionParams {
     )
 }
 
+pub(crate) fn prepare_parameters(symbol: &ProtocolSymbolSite) -> CallHierarchyPrepareParams {
+    CallHierarchyPrepareParams {
+        text_document_position_params: symbol_position(symbol),
+        work_done_progress_params: WorkDoneProgressParams::default(),
+    }
+}
+
+pub(crate) fn type_definition_parameters(symbol: &ProtocolSymbolSite) -> GotoDefinitionParams {
+    position_parameters(symbol_position(symbol))
+}
+
+fn position_parameters(position: TextDocumentPositionParams) -> GotoDefinitionParams {
+    GotoDefinitionParams {
+        text_document_position_params: position,
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    }
+}
+
+pub(crate) fn reference_parameters(symbol: &ProtocolSymbolSite) -> ReferenceParams {
+    ReferenceParams {
+        text_document_position: symbol_position(symbol),
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: ReferenceContext {
+            include_declaration: false,
+        },
+    }
+}
+
+pub(crate) fn outgoing_parameters(item: &CallHierarchyItem) -> CallHierarchyOutgoingCallsParams {
+    CallHierarchyOutgoingCallsParams {
+        item: item.clone(),
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    }
+}
+
+pub(crate) fn incoming_parameters(item: &CallHierarchyItem) -> CallHierarchyIncomingCallsParams {
+    CallHierarchyIncomingCallsParams {
+        item: item.clone(),
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    }
+}
+
+pub(crate) fn symbol_parameters(uri: &Uri) -> DocumentSymbolParams {
+    DocumentSymbolParams {
+        text_document: TextDocumentIdentifier::new(uri.clone()),
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Documents
+// -----------------------------------------------------------------------------
+
+/// Converts one byte range of a source into a protocol range.
+///
+/// # Errors
+///
+/// Returns an error if the range is outside the source.
+pub(crate) fn protocol_range(
+    text: &str,
+    path: &str,
+    range: SourceRange,
+) -> Result<Range, LspError> {
+    Ok(Range::new(
+        byte_offset_to_position(text, path, range.start)?,
+        byte_offset_to_position(text, path, range.end)?,
+    ))
+}
+
+pub(crate) fn range_holds(range: Range, position: Position) -> bool {
+    range.start <= position && position < range.end
+}
+
+/// The URI and text of each open document by source path.
+pub(crate) struct DocumentIndex<'a> {
+    documents: HashMap<&'a str, (&'a Uri, &'a str)>,
+}
+
+impl<'a> DocumentIndex<'a> {
+    /// # Errors
+    ///
+    /// Returns an error if a selected source path is not valid UTF-8.
+    pub(crate) fn new(
+        documents: &'a [CapturedDocument],
+        sources: &Sources<'a>,
+    ) -> Result<Self, LspError> {
+        let texts = sources
+            .iter()
+            .map(|source| Ok((source_path(source)?, source.content.as_str())))
+            .collect::<Result<HashMap<_, _>, LspError>>()?;
+        let documents = documents
+            .iter()
+            .filter_map(|document| {
+                let text = texts.get(document.path.as_str())?;
+                Some((document.path.as_str(), (&document.uri, *text)))
+            })
+            .collect();
+        Ok(Self { documents })
+    }
+
+    /// # Errors
+    ///
+    /// Returns an error if the path names no open document.
+    pub(crate) fn get(&self, path: &str) -> Result<(&'a Uri, &'a str), LspError> {
+        self.documents.get(path).copied().ok_or_else(|| {
+            LspError::new(format!(
+                "the syntax facts name a document that is not open: {path}"
+            ))
+        })
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Import Definitions
+// -----------------------------------------------------------------------------
+
+/// Returns the source span and the definition request of every imported name,
+/// in import-site order and name order.
+///
+/// # Errors
+///
+/// Returns an error if an import site names a document that is not open or a
+/// name is outside its source.
+pub(crate) fn definition_requests<'a>(
+    documents: &DocumentIndex<'a>,
+    import_sites: impl IntoIterator<Item = &'a ImportSite>,
+) -> Result<(Vec<SourceSpan>, Vec<Labeled<'a, GotoDefinitionParams>>), LspError> {
+    let mut queries = Vec::new();
+    let mut requests = Vec::new();
+
+    for site in import_sites {
+        let path = site.statement.path.as_str();
+        let (uri, text) = documents.get(path)?;
+        for name in &site.names {
+            let position = byte_offset_to_position(text, path, name.start)?;
+            let name_text = text
+                .get(name.start as usize..name.end as usize)
+                .unwrap_or("an imported name");
+            queries.push(SourceSpan {
+                path: path.to_owned(),
+                range: *name,
+            });
+            requests.push((
+                path,
+                name_text,
+                position_parameters(TextDocumentPositionParams::new(
+                    TextDocumentIdentifier::new(uri.clone()),
+                    position,
+                )),
+            ));
+        }
+    }
+
+    Ok((queries, requests))
+}
+
 // -----------------------------------------------------------------------------
 // Symbol Sites
 // -----------------------------------------------------------------------------
 
 /// Flattens one symbol tree in parent-first order.
 /// Each site uses the symbol selection start.
-fn symbol_sites(uri: &Uri, symbols: &[DocumentSymbol]) -> Vec<ProtocolSymbolSite> {
+pub(crate) fn symbol_sites(uri: &Uri, symbols: &[DocumentSymbol]) -> Vec<ProtocolSymbolSite> {
     let mut flattened = Vec::new();
     append_symbol_sites(uri, symbols, &mut flattened);
     flattened
@@ -311,7 +464,7 @@ fn append_symbol_sites(
 /// # Errors
 ///
 /// Returns an error if the server returns one or more flat symbols.
-fn nested_symbols(
+pub(crate) fn nested_symbols(
     response: Option<DocumentSymbolResponse>,
     path: &str,
 ) -> Result<Vec<DocumentSymbol>, LspError> {
@@ -330,7 +483,7 @@ fn nested_symbols(
 }
 
 /// Converts one outgoing call into caller-to-callee direction.
-fn outgoing_call_fact(
+pub(crate) fn outgoing_call_fact(
     caller: &CallHierarchyItem,
     call: CallHierarchyOutgoingCall,
 ) -> CapturedSemanticFact {
@@ -342,7 +495,7 @@ fn outgoing_call_fact(
 }
 
 /// Converts one incoming call into caller-to-callee direction.
-fn incoming_call_fact(
+pub(crate) fn incoming_call_fact(
     callee: &CallHierarchyItem,
     call: CallHierarchyIncomingCall,
 ) -> CapturedSemanticFact {
@@ -353,11 +506,11 @@ fn incoming_call_fact(
     }
 }
 
-/// Reshapes every type-definition response form into locations.
+/// Reshapes every definition or type-definition response form into locations.
 ///
 /// The protocol supports a scalar, an array, and a link response.
 /// A link uses its target selection range.
-fn type_definition_locations(response: GotoDefinitionResponse) -> Vec<Location> {
+fn definition_locations(response: GotoDefinitionResponse) -> Vec<Location> {
     match response {
         GotoDefinitionResponse::Scalar(location) => vec![location],
         GotoDefinitionResponse::Array(locations) => locations,
@@ -397,8 +550,8 @@ mod tests {
     };
 
     use super::{
-        CapturedSemanticFact, ProtocolSymbolSite, incoming_call_fact, nested_symbols,
-        outgoing_call_fact, symbol_sites, type_definition_locations,
+        CapturedSemanticFact, ProtocolSymbolSite, definition_locations, incoming_call_fact,
+        nested_symbols, outgoing_call_fact, symbol_sites,
     };
 
     #[test]
@@ -492,7 +645,7 @@ mod tests {
     }
 
     #[test]
-    fn normalizes_all_type_definition_shapes() {
+    fn normalizes_all_definition_shapes() {
         let first = Location::new(uri("file:///workspace/first.py"), range(1));
         let second = Location::new(uri("file:///workspace/second.py"), range(2));
         let link = LocationLink {
@@ -503,15 +656,15 @@ mod tests {
         };
 
         assert_eq!(
-            type_definition_locations(GotoDefinitionResponse::Scalar(first.clone())),
+            definition_locations(GotoDefinitionResponse::Scalar(first.clone())),
             vec![first.clone()]
         );
         assert_eq!(
-            type_definition_locations(GotoDefinitionResponse::Array(vec![first.clone()])),
+            definition_locations(GotoDefinitionResponse::Array(vec![first.clone()])),
             vec![first]
         );
         assert_eq!(
-            type_definition_locations(GotoDefinitionResponse::Link(vec![link])),
+            definition_locations(GotoDefinitionResponse::Link(vec![link])),
             vec![second]
         );
     }

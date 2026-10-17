@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { deckFlow, deckGraph, displayName, fileTree, pickArtifact, pickFlow, frozenFlows } from "../src/data/adapt.ts";
+import { bindingDigest, deckFlow, deckGraph, displayName, fileTree, pickArtifact, pickFlow, frozenFlows, resolveLink } from "../src/data/adapt.ts";
 import { digestOf, loadFlow, loadIndex, loadSource, LoadError, verifyGraph } from "../src/data/load.ts";
 
 import { artifact, DIGEST, graphDocument, must } from "./fixtures.ts";
@@ -29,14 +29,14 @@ test("a load whose answer is not JSON fails with the cause of its file", async (
   t.mock.method(globalThis, "fetch", async () => new Response("{", { status: 200 }));
   await assert.rejects(loadFlow({ name: "a", file: "a/generations/1-000000000000.json" }),
     (error) => error instanceof LoadError && error.reason === "flow");
-  await assert.rejects(loadIndex(), (error) => error instanceof LoadError && error.reason === "fetch");
-  await assert.rejects(loadSource("demo.json", "a"), (error) => error instanceof LoadError && error.reason === "fetch");
+  await assert.rejects(loadIndex(), (error) => error instanceof LoadError && error.reason === "server");
+  await assert.rejects(loadSource("demo.json", "a"), (error) => error instanceof LoadError && error.reason === "server");
 });
 
-test("a load that the server refuses or never answers is a fetch failure", async (t) => {
+test("a load that the server refuses is a server failure, and a load that it never answers is a fetch failure", async (t) => {
   const answer = t.mock.method(globalThis, "fetch", async () => new Response("{}", { status: 500 }));
-  await assert.rejects(loadFlow({ name: "a", file: "a.json" }), (error) => error instanceof LoadError && error.reason === "fetch");
-  await assert.rejects(loadSource("demo.json", "a"), (error) => error instanceof LoadError && error.reason === "fetch");
+  await assert.rejects(loadFlow({ name: "a", file: "a.json" }), (error) => error instanceof LoadError && error.reason === "server" && /HTTP 500/.test(error.message));
+  await assert.rejects(loadSource("demo.json", "a"), (error) => error instanceof LoadError && error.reason === "server");
   answer.mock.mockImplementation(async () => { throw new TypeError("network down"); });
   await assert.rejects(loadIndex(), (error) => error instanceof LoadError && error.reason === "fetch");
 });
@@ -82,6 +82,14 @@ test("a step whose function left the graph is marked missing and leaves the memb
   assert.equal(flow.stale, true, "another graph digest makes the flow stale");
 });
 
+test("a flow stays fresh when the served graph adds cached edges to the graph file that it binds", () => {
+  const graph = deckGraph(graphDocument());
+  const merged = { digest: "sha256:merged", graphDigest: DIGEST };
+  assert.equal(bindingDigest(merged), DIGEST);
+  assert.equal(deckFlow(artifact, graph, bindingDigest(merged)).stale, false);
+  assert.equal(bindingDigest({ digest: DIGEST }), DIGEST, "an older server sends the file digest only");
+});
+
 test("a file that is not a frozen schema 3 flow is rejected", () => {
   const graph = deckGraph(graphDocument());
   assert.throws(() => deckFlow({ ...artifact, schemaVersion: 2 }, graph, DIGEST), /schema 3/);
@@ -106,6 +114,22 @@ test("the page opens the requested codebase, else the index default, else the fi
   assert.equal(must(pickArtifact({ defaultArtifact: "gone.json", artifacts }, null)).file, "a.json");
   assert.equal(must(pickArtifact({ artifacts }, null)).file, "a.json");
   assert.equal(pickArtifact({ artifacts: [] }, null), null);
+});
+
+test("a link to a missing codebase or flow opens the fallback at step 0, with a notice that names the missing name", () => {
+  const flows = [{ name: "a", file: "a/generations/1-000000000000.json", schemaVersion: 3 }, { name: "b", file: "b/generations/1-000000000000.json", schemaVersion: 3, stepCount: 9 }];
+  const index = { defaultArtifact: "x.json", artifacts: [{ label: "x", file: "x.json", digest: "sha256:x", flows }, { file: "y.json", digest: "sha256:y" }] };
+  assert.deepEqual(resolveLink(index, { artifact: "x.json", flow: "b", step: 5 }), { file: "x.json", flow: "b", step: 5, notice: null });
+  assert.deepEqual(resolveLink(index, { artifact: null, flow: null, step: 3 }), { file: "x.json", flow: null, step: 3, notice: null });
+  assert.deepEqual(resolveLink(index, { artifact: "x.json", flow: "gone", step: 5 }),
+    { file: "x.json", flow: null, step: 0, notice: "No flow named gone in x. This page shows a." });
+  assert.deepEqual(resolveLink(index, { artifact: "gone.json", flow: "b", step: 5 }),
+    { file: "x.json", flow: null, step: 0, notice: "No codebase named gone.json. This page shows x." });
+  assert.equal(must(resolveLink(index, { artifact: "y.json", flow: "a", step: 2 })).notice, "No flow named a in y.json.");
+  assert.deepEqual(resolveLink(index, { artifact: "x.json", flow: "b", step: 999 }),
+    { file: "x.json", flow: "b", step: 9, notice: "No step 999 in b. This page shows its last step, 9." });
+  assert.equal(must(resolveLink(index, { artifact: "x.json", flow: "b", step: 9 })).notice, null);
+  assert.equal(resolveLink({ artifacts: [] }, { artifact: null, flow: null, step: 0 }), null);
 });
 
 test("the flow adapter carries the transition, the fact text, and the generation of each step", () => {

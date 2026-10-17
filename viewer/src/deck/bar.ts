@@ -3,10 +3,11 @@
    The bar keeps one fixed size in each state.
    # Sections
    step strip, explainer, buttons */
+import { nextStep } from "../layout/model.ts";
 import { rangesOf } from "../layout/plan.ts";
 import { clamp, esc, f1, plural } from "../layout/util.ts";
 import { md } from "./markup.ts";
-import { $, type Bar, type DeckContext } from "./context.ts";
+import { $, pageOrigin, type Bar, type DeckContext } from "./context.ts";
 
 export function createBar(ctx: DeckContext): Bar {
   const { model, state, signal } = ctx;
@@ -29,8 +30,8 @@ export function createBar(ctx: DeckContext): Bar {
     tip.innerHTML = `<i class="sw" style="--c:${esc(tickColor(s.index))}"></i><b>${s.index}</b><span>${esc(s.title)}</span>`;
     const r = t.getBoundingClientRect(), cr = controls.getBoundingClientRect();
     tip.classList.add("show");
-    const w = tip.offsetWidth, h = tip.offsetHeight;
-    tip.style.transform = `translate(${f1(clamp(r.left + r.width / 2 - w / 2, 8, innerWidth - w - 8))}px,${f1(cr.top - h - 6)}px)`;
+    const w = tip.offsetWidth, h = tip.offsetHeight, o = pageOrigin();
+    tip.style.transform = `translate(${f1(clamp(r.left + r.width / 2 - w / 2, 8, innerWidth - w - 8) - o.x)}px,${f1(cr.top - h - 6 - o.y)}px)`;
   }
   const hideTip = () => tip.classList.remove("show");
   ticks.addEventListener("pointerover", e => { const t = (e.target as Element).closest<HTMLElement>(".tick"); if (t) showTip(t); }, { signal });
@@ -52,7 +53,7 @@ export function createBar(ctx: DeckContext): Bar {
     $("#chipText").textContent = C ? C.label : model.flow ? "No cluster lifted" : "No flow";
     $("#cMeta").textContent = C ? `${plural(model.members.get(C.id)?.length ?? 0, "function")} · steps ${rangesOf(model.plan, C.id)}`
       : model.flow ? `${plural(N, "step")} in ${plural(model.clusters.length, "cluster")}` : "";
-    cDesc.innerHTML = C ? md(C.description) : model.flow && !state.cur ? "Step forward to lift the first cluster onto its deck." : "";
+    cDesc.innerHTML = C ? md(C.description) : model.flow && !state.cur && !state.resume ? "Step forward to lift the first cluster onto its deck." : "";
     if (clusterChanged && !document.body.classList.contains("booting")) {
       for (const el of [cExpl, cDesc]) { el.classList.remove("swap"); void el.offsetWidth; el.classList.add("swap"); }
     }
@@ -73,7 +74,7 @@ export function createBar(ctx: DeckContext): Bar {
   // ============ buttons ============
 
   prevBtn.addEventListener("click", () => ctx.go(state.cur - 1), { signal });
-  nextBtn.addEventListener("click", () => ctx.go(state.cur + 1), { signal });
+  nextBtn.addEventListener("click", () => ctx.go(nextStep(state)), { signal });
   clearBtn.addEventListener("click", () => ctx.go(0), { signal });
 
   return {

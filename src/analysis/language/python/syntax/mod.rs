@@ -11,24 +11,20 @@
 //!
 //! `Entry Points` defines source selection and fact extraction.
 //! `Source Model` defines parsed documents, scopes, and extraction state.
-//! `Document Parsing` derives module names and parses documents.
+//! `Document Parsing` parses documents.
 //! `Fact Construction` registers modules before statement traversal.
 //! `Statement Traversal` processes Python suites.
 //! `Fields` extracts class and instance fields.
-//! `Imports` matches imports to selected modules.
+//! `Imports` records import sites and the imported names to query.
 //! `Entity Evidence` computes declaration, scope, and body ranges.
 //! `Source Text` reads exact source slices.
 //!
-//! `imports` derives module names and resolves relative imports. `signature`
-//! extracts signatures, parameters, return types, and documentation.
+//! `signature` extracts signatures, parameters, return types, and
+//! documentation.
 
-mod imports;
 mod signature;
 
-use std::{
-    collections::{HashMap, HashSet},
-    ffi::OsStr,
-};
+use std::{collections::HashSet, ffi::OsStr};
 
 use rustpython_parser::{
     Mode, Parse, Tok,
@@ -36,7 +32,6 @@ use rustpython_parser::{
     lexer,
 };
 
-use imports::{import_base, join_module_name, module_name};
 use signature::{source_docstring, source_parameters, source_return_type, source_signature};
 
 use crate::analysis::{
@@ -101,8 +96,6 @@ pub(super) fn produce_syntax_facts(sources: &Sources<'_>) -> Result<SyntaxFacts,
 
 struct ParsedDocument<'a> {
     path: String,
-    module_name: String,
-    is_package_initializer: bool,
     source: &'a str,
     syntax_tree: ast::Suite,
 }
@@ -190,7 +183,6 @@ impl Scope {
 
 struct SyntaxWalker {
     builder: SyntaxFactBuilder,
-    module_keys: HashMap<String, EntityKey>,
 }
 
 // -----------------------------------------------------------------------------
@@ -221,12 +213,9 @@ fn parse_document(document: &DocumentSnapshot) -> Result<ParsedDocument<'_>, Ana
         ast::Suite::parse(&document.content, path).map_err(|error| AnalysisError {
             message: format!("cannot parse {path}: {error}"),
         })?;
-    let (module_name, is_package_initializer) = module_name(&document.path)?;
 
     Ok(ParsedDocument {
         path: path.to_owned(),
-        module_name,
-        is_package_initializer,
         source: &document.content,
         syntax_tree,
     })
@@ -238,17 +227,17 @@ fn parse_document(document: &DocumentSnapshot) -> Result<ParsedDocument<'_>, Ana
 
 /// Produces every syntax fact from already parsed Python documents.
 ///
-/// Pass one registers every module, so a forward import can resolve. Pass two
-/// walks each document and emits its entities and relations.
+/// Pass one registers every module, so module facts come first. Pass two
+/// walks each document and emits its entities, relations, and import sites.
 ///
 /// # Errors
 ///
-/// Returns an error if a module name repeats or a source range is invalid.
+/// Returns an error if a module path repeats or a source range is invalid.
 fn produce_document_facts(documents: &[ParsedDocument<'_>]) -> Result<SyntaxFacts, AnalysisError> {
     let mut walker = SyntaxWalker::new();
 
     for document in documents {
-        walker.add_module(document)?;
+        walker.builder.add_module(&document.path, document.source)?;
     }
     for document in documents {
         walker.scan_statements(
@@ -267,26 +256,7 @@ impl SyntaxWalker {
     fn new() -> Self {
         Self {
             builder: SyntaxFactBuilder::new(),
-            module_keys: HashMap::new(),
         }
-    }
-
-    /// Registers one module before syntax traversal starts.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the module name repeats or the source is too large.
-    fn add_module(&mut self, document: &ParsedDocument<'_>) -> Result<(), AnalysisError> {
-        let module = self.builder.add_module(&document.path, document.source)?;
-        if self.module_keys.contains_key(&document.module_name) {
-            return Err(AnalysisError::new(format!(
-                "duplicate source unit: {}",
-                document.module_name
-            )));
-        }
-        self.module_keys
-            .insert(document.module_name.clone(), module);
-        Ok(())
     }
 }
 
@@ -301,7 +271,7 @@ impl SyntaxWalker {
 //     → class → scan_statements with a class scope
 //     → callable → scan_statements with a callable scope
 //     → assignment → add or update a field
-//     → import → add or update an import edge
+//     → import → add an import site
 //     → control flow → scan_statements with the same scope
 
 impl SyntaxWalker {
@@ -361,9 +331,13 @@ impl SyntaxWalker {
                     self.add_field_target(document, &assignment.target, scope, None)?;
                 }
                 // Read direct imports.
-                Stmt::Import(import) => self.add_imports(document, import, scope),
+                Stmt::Import(import) => {
+                    self.add_import_site(document, import.range, &import.names, scope)?;
+                }
                 // Read from imports.
-                Stmt::ImportFrom(import) => self.add_from_imports(document, import, scope),
+                Stmt::ImportFrom(import) => {
+                    self.add_import_site(document, import.range, &import.names, scope)?;
+                }
                 // Scan suites that keep this scope.
                 _ => self.scan_control_flow(document, statement, scope)?,
             }
@@ -657,64 +631,65 @@ impl SyntaxWalker {
     // Imports
     // -----------------------------------------------------------------------------
     //
-    // Import resolution maps Python module names to selected documents. Each
-    // resolved import statement contributes one relation observation.
+    // Each import statement becomes one import site. The language server
+    // resolves each imported name later, so this pass reads no module names.
 
-    /// Adds each selected module from one `import` statement.
-    fn add_imports(
-        &mut self,
-        document: &ParsedDocument<'_>,
-        import: &ast::StmtImport,
-        scope: &Scope,
-    ) {
-        let observation = source_span(&document.path, import.range);
-        for alias in &import.names {
-            if let Some(target) = self.module_keys.get(alias.name.as_str()).cloned() {
-                self.builder.add_observed_relation(
-                    scope.owner(),
-                    &target,
-                    RelationKind::Imports,
-                    vec![observation.clone()],
-                );
-            }
-        }
-    }
-
-    /// Adds each selected module once for one `from` import statement.
+    /// Adds one import statement with the name to query for each alias.
     ///
-    /// A selected child module takes precedence over its selected base module.
-    fn add_from_imports(
+    /// The name is the last dotted segment before `as`. A star import queries
+    /// the last segment of its module instead. `from . import *` has no module
+    /// name, so it queries nothing.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a name range is invalid.
+    fn add_import_site(
         &mut self,
         document: &ParsedDocument<'_>,
-        import: &ast::StmtImportFrom,
+        statement: TextRange,
+        aliases: &[ast::Alias],
         scope: &Scope,
-    ) {
-        let Some(base) = import_base(document, import) else {
-            return;
-        };
-        let observation = source_span(&document.path, import.range);
-        let mut seen = HashSet::new();
+    ) -> Result<(), AnalysisError> {
+        let mut names = Vec::new();
+        for alias in aliases {
+            names.extend(if alias.name.as_str() == "*" {
+                last_name_before(document.source, statement, |token| {
+                    matches!(token, Tok::Import)
+                })?
+            } else {
+                last_name_before(document.source, alias.range, |token| {
+                    matches!(token, Tok::As)
+                })?
+            });
+        }
+        self.builder
+            .add_import_site(scope.owner(), source_span(&document.path, statement), names);
+        Ok(())
+    }
+}
 
-        for alias in &import.names {
-            let child = join_module_name(&base, alias.name.as_str());
-            let target = self
-                .module_keys
-                .get(&child)
-                .or_else(|| self.module_keys.get(&base))
-                .cloned();
+/// Returns the last name token in one source fragment before the first stop token.
+///
+/// The source text decides the range, because a dotted name can hold spaces.
+fn last_name_before(
+    source: &str,
+    fragment: TextRange,
+    is_stop: impl Fn(&Tok) -> bool,
+) -> Result<Option<SourceRange>, AnalysisError> {
+    let mut found = None;
 
-            if let Some(target) = target
-                && seen.insert(target.clone())
-            {
-                self.builder.add_observed_relation(
-                    scope.owner(),
-                    &target,
-                    RelationKind::Imports,
-                    vec![observation.clone()],
-                );
-            }
+    for token in lexer::lex(source_text(source, fragment)?, Mode::Module) {
+        let (token, token_range) = token.map_err(|error| token_error(&error))?;
+        if is_stop(&token) {
+            break;
+        }
+        // A soft keyword is a valid module or member name.
+        if matches!(token, Tok::Name { .. } | Tok::Match | Tok::Case | Tok::Type) {
+            found = Some(token_range_in_document(fragment, token_range)?);
         }
     }
+
+    Ok(found)
 }
 
 fn source_span(path: &str, range: TextRange) -> SourceSpan {
@@ -957,9 +932,7 @@ mod tests {
     use rustpython_parser::{Parse, ast};
 
     use crate::analysis::{
-        fact::{FactSet, RelationKind},
-        graph::build::build_graph,
-        language::Language,
+        fact::RelationKind,
         source::{DocumentSnapshot, SourceRange},
     };
 
@@ -1055,37 +1028,51 @@ mod tests {
     }
 
     #[test]
-    fn records_distinct_import_observations_on_one_edge() {
-        let library_source = "";
-        let application_source = "import library\nimport library\n";
-        let documents = vec![
-            parsed_document("library.py", "library", library_source),
-            parsed_document("application.py", "application", application_source),
-        ];
-        let facts = produce_document_facts(&documents).expect("syntax production must succeed");
-        let graph = build_graph(vec![FactSet::new(Language::Python, facts, Vec::new())], &[])
-            .expect("graph construction must succeed");
-        let import = graph
-            .edges
-            .iter()
-            .find(|edge| edge.kind == RelationKind::Imports)
-            .expect("the import edge must exist");
-
-        assert_eq!(import.weight, 2);
-        assert_eq!(import.provenance.evidence.observations.len(), 2);
-        assert_eq!(
-            import.provenance.evidence.observations[0].path,
-            "application.py"
+    fn records_import_sites_with_the_names_to_query() {
+        let source = concat!(
+            "import a . b . c as x, d\n",
+            "from m import n as y, o\n",
+            "from .pkg.rel import *\n",
+            "from . import sibling\n",
+            "def run():\n",
+            "    import pkg.match\n",
         );
+        let documents = vec![parsed_document("app.py", source)];
+
+        let facts = produce_document_facts(&documents).expect("syntax production must succeed");
+
         assert_eq!(
-            import
-                .provenance
-                .evidence
-                .observations
+            facts
+                .import_sites
                 .iter()
-                .map(|observation| range_text(application_source, observation.range))
+                .map(|site| (
+                    site.owner.as_str(),
+                    range_text(source, site.statement.range),
+                    site.names
+                        .iter()
+                        .map(|name| range_text(source, *name))
+                        .collect::<Vec<_>>(),
+                ))
                 .collect::<Vec<_>>(),
-            vec!["import library", "import library"]
+            vec![
+                ("app.py", "import a . b . c as x, d", vec!["c", "d"]),
+                ("app.py", "from m import n as y, o", vec!["n", "o"]),
+                ("app.py", "from .pkg.rel import *", vec!["rel"]),
+                ("app.py", "from . import sibling", vec!["sibling"]),
+                ("app.py::callable:run", "import pkg.match", vec!["match"]),
+            ]
+        );
+        assert!(
+            facts
+                .import_sites
+                .iter()
+                .all(|site| site.statement.path == "app.py")
+        );
+        assert!(
+            facts
+                .relations
+                .iter()
+                .all(|relation| relation.kind == RelationKind::Contains)
         );
     }
 
@@ -1127,11 +1114,9 @@ mod tests {
         );
     }
 
-    fn parsed_document<'a>(path: &str, module_name: &str, source: &'a str) -> ParsedDocument<'a> {
+    fn parsed_document<'a>(path: &str, source: &'a str) -> ParsedDocument<'a> {
         ParsedDocument {
             path: path.to_owned(),
-            module_name: module_name.to_owned(),
-            is_package_initializer: false,
             source,
             syntax_tree: ast::Suite::parse(source, path).expect("the fixture must parse"),
         }

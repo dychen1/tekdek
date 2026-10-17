@@ -17,12 +17,13 @@
 :root{
   --tn-bg:#1a1b26; --tn-pane:#16161e; --tn-raised:#1f2335;
   --tn-sel:#283457; --tn-sel-2:#2e3c64; --tn-border:#29354f; --tn-border-2:#3b4261;
-  --tn-fg:#c0caf5; --tn-fg-dark:#a9b1d6; --tn-dim:#8d95bc; --tn-comment:#565f89; --tn-black:#0c0e14;
+  --tn-fg:#c0caf5; --tn-fg-dark:#a9b1d6; --tn-dim:#8d95bc; --tn-comment:#565f89; --tn-comment-text:#8088af; --tn-black:#0c0e14;
   --tn-blue:#7aa2f7; --tn-cyan:#7dcfff; --tn-green:#9ece6a; --tn-yellow:#e0af68;
   --tn-orange:#ff9e64; --tn-red:#f7768e; --tn-magenta:#bb9af7; --tn-purple:#9d7cd8;
 
   --bg:var(--tn-bg);
   --ink:var(--tn-fg); --ink-2:var(--tn-fg-dark); --dim:var(--tn-dim);
+  --quiet:var(--tn-comment-text);  /* comments, line numbers, and notes in the code viewer: 4.5:1 or more on the code ground only */
   --dir:var(--tn-blue); --pick:var(--tn-blue);
   --line:color-mix(in srgb,var(--tn-comment) 72%,transparent);
   --line-strong:color-mix(in srgb,var(--tn-comment) 55%,var(--tn-border-2));
@@ -40,6 +41,8 @@
   --surface-panel:var(--tn-pane); --surface-pop:var(--tn-pane);
   --surface-hover:color-mix(in srgb,var(--tn-sel) 72%,transparent);
   --surface-press:var(--tn-sel-2);
+  --surface-raised:var(--tn-raised);
+  --surface-where:color-mix(in srgb,var(--tn-sel) 65%,var(--tn-bg));
   --deck-ground:color-mix(in srgb,var(--tn-pane) 90%,transparent);
   --card-face:linear-gradient(180deg,color-mix(in srgb,var(--tn-raised) 90%,var(--tn-fg-dark)) 0%,var(--tn-raised) 100%);
   --light:var(--tn-fg);
@@ -49,12 +52,13 @@
   --cl-cyan:var(--tn-cyan); --cl-red:var(--tn-red); --cl-yellow:var(--tn-yellow); --cl-magenta:var(--tn-magenta); --cl-lime:var(--tn-green);
   --cl-orange:var(--tn-orange); --cl-blue:var(--tn-blue); --cl-violet:var(--tn-purple);
   --cl-accent:var(--accent);  /* a cluster whose frozen color is unknown */
+  --ok:var(--tn-green);      /* a fresh flow */
   --warn:var(--tn-yellow);    /* a stale flow */
   --danger:var(--tn-red);     /* a load error */
   --cc:var(--pick);
   --font-code:"JetBrains Mono",ui-monospace,"SF Mono",SFMono-Regular,Menlo,monospace;
-  --fs-code-s:10.5px; --fs-code:11px; --fs-code-l:11.5px;
-  --fs-ui-s:10.5px; --fs-ui:12px; --fs-title:14px;
+  --fs-code:11px; --fs-code-l:11.5px; --fs-source:13px;
+  --fs-ui-s:11px; --fs-ui:12px; --fs-title:14px;
   --fw-bold:700;
   --r-xs:2px; --r-s:3px; --r-m:6px; --r-l:9px; --r-pill:999px;
   --face-light:inset 1px 1px 0 color-mix(in srgb,var(--tn-fg) 10%,transparent),inset -1px -1px 0 color-mix(in srgb,var(--tn-black) 40%,transparent);
@@ -72,18 +76,29 @@
   --blink:1060ms;
   /* layout: explorer at left, the code column at right, the canvas frame and the bottom bar between them */
   --sb:262px; --rc:clamp(440px,36vw,580px); --gap:12px; --lab:66px;
-  --bar-h:126px; --bar-bottom:34px; --top-band:112px;
+  --bar-h:126px; --bar-bottom:34px; --top-band:52px;  /* layoutTop() measures it; 52px is its value for the 28px map tools */
   --frame-l:calc(var(--sb) + 16px);
   --frame-r:calc(var(--rc) + var(--gap) + 16px);
 }
-:root[data-variant="storm"]{--tn-bg:#24283b; --tn-pane:#1f2335; --tn-raised:#292e42; --tn-dim:#979ec6}
-:root[data-variant="moon"]{--tn-bg:#222436; --tn-pane:#1e2030; --tn-raised:#2f334d; --tn-dim:#959ed0;
-  --tn-fg:#c8d3f5; --tn-blue:#82aaff; --tn-cyan:#86e1fc; --tn-red:#ff757f; --tn-yellow:#ffc777; --tn-magenta:#c099ff; --tn-green:#c3e88d; --tn-purple:#fca7ea}
-@media (max-width:1300px){:root{--sb:228px}}
+:root[data-variant="storm"]{--tn-bg:#24283b; --tn-pane:#1f2335; --tn-raised:#292e42; --tn-dim:#979ec6; --tn-comment-text:#8d95b8}
+/* Moon keeps the Night selection: its own #2d3f76 puts dim text on a hover row under 4.5:1. */
+:root[data-variant="moon"]{--tn-bg:#222436; --tn-pane:#1e2030; --tn-raised:#2f334d; --tn-dim:#959ed0; --tn-comment:#636da6; --tn-comment-text:#8890bb;
+  --tn-fg:#c8d3f5; --tn-blue:#82aaff; --tn-cyan:#86e1fc; --tn-red:#ff757f; --tn-yellow:#ffc777; --tn-orange:#ff966c; --tn-magenta:#c099ff; --tn-green:#c3e88d; --tn-purple:#fca7ea}
+/* a small window gives the map 40 px of the code column, so the widest decks start at 75% */
+@media (max-width:1300px){:root{--sb:228px; --rc:max(400px,calc(36vw - 40px))}}
 
 /* ============ base ============ */
 *{box-sizing:border-box}
-html,body{margin:0;height:100%;overflow:hidden;overscroll-behavior:none}
+/* The page keeps a minimum size and scrolls in a smaller window. The body contains the fixed panels, so they scroll with it. */
+html{height:100%;overflow:auto;overscroll-behavior:none}
+/* A styled page scrollbar always shows in Chromium and Safari, also where the system shows scrollbars only during a scroll.
+   Chromium ignores these rules when the element sets scrollbar-color, so only Firefox gets the color on the root. */
+html::-webkit-scrollbar{width:12px;height:12px}
+html::-webkit-scrollbar-track,html::-webkit-scrollbar-corner{background:var(--bg)}
+html::-webkit-scrollbar-thumb{border:2px solid var(--bg);border-radius:var(--r-pill);background:var(--quiet)}
+html::-webkit-scrollbar-thumb:hover{background:var(--dim)}
+@supports not selector(::-webkit-scrollbar){html{scrollbar-color:var(--quiet) var(--bg)}}
+body{margin:0;height:100%;min-width:1280px;min-height:720px;overflow:hidden;contain:layout}
 body{background:var(--bg);color:var(--ink);font:var(--fs-ui) var(--font-code);-webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums;
   caret-color:var(--accent);accent-color:var(--accent);scrollbar-color:var(--line-soft) transparent}
 button{font:inherit;color:inherit}
@@ -98,8 +113,13 @@ code{font:inherit;color:var(--keyword)}
 .frame{position:fixed;z-index:1;left:var(--frame-l);right:var(--frame-r);top:var(--top-band);bottom:calc(var(--bar-bottom) + var(--bar-h) + 10px);
   border:1px dashed var(--frame-line);border-radius:var(--r-l);pointer-events:none;
   background-image:radial-gradient(circle,var(--grid-dot) 0 .8px,transparent 1.2px);background-size:18px 18px;background-position:9px 9px}
+/* past the fit the map reaches out of the frame, and the frame takes the drag that pans it (tools.ts) */
+.frame.pan{pointer-events:auto;cursor:grab;touch-action:none;user-select:none}
+.frame.pan.dragging{cursor:grabbing}
 /* the canvas world: a zero-size layer in screen coordinates. Zoom scales it around the current slot. */
 .cv{position:fixed;z-index:2;left:0;top:0;width:0;height:0;pointer-events:none}
+/* the focus ring keeps its screen width at every zoom; place() sets --k */
+.cv :focus-visible{outline-width:calc(1.5px / var(--k, 1))}
 
 /* ============ file box and its rows ============ */
 /* the file box never moves on screen: each step sets its place and its rows at once, then the connectors are drawn */
@@ -107,7 +127,8 @@ code{font:inherit;color:var(--keyword)}
 .fileblk[hidden]{display:none}
 @keyframes swap{from{opacity:.15;transform:translateY(4px)}to{opacity:1;transform:none}}
 .row{position:absolute;left:0;top:0}
-.rowin{position:absolute;left:0;top:0;display:flex;align-items:center;gap:6px}
+/* with a deck up, place() sets --fb-room: a row ends before it (rows sit 26 px right of the box edge). A node shrinks to its inline min-width, and its name ends in an ellipsis. */
+.rowin{position:absolute;left:0;top:0;display:flex;align-items:center;gap:6px;width:max-content;max-width:calc(var(--fb-room) - 26px)}
 .row .node{position:relative;display:flex;align-items:center;height:100%;margin:0;white-space:nowrap;text-align:left;pointer-events:auto}
 .elbow{position:absolute;left:-17px;width:14px;border-left:1px solid var(--line);border-bottom:1px solid var(--line);border-bottom-left-radius:4px;pointer-events:none}
 .row.file .node{gap:2px;height:20px;padding:0 9px 0 2px;border:1px solid var(--line-strong);border-radius:var(--r-s);background:var(--surface-file);
@@ -117,9 +138,9 @@ code{font:inherit;color:var(--keyword)}
 .fold .ic{width:12px;height:12px}
 .fold:hover{background:var(--surface-hover);color:var(--ink)}
 .row.folded .fold{transform:rotate(-90deg)}
-.fnote{font:400 var(--fs-ui-s) var(--font-code);color:var(--dim);margin-left:8px}
+.fnote{font:400 var(--fs-code) var(--font-code);color:var(--dim);margin-left:8px}
 .fnote:empty{display:none}
-.row.fn .node{padding:0 7px;border:1px solid var(--line-soft);border-radius:var(--r-xs);background:var(--surface-fn);font:var(--fs-code-s) var(--font-code);color:var(--ink-2);cursor:default}
+.row.fn .node{padding:0 7px;border:1px solid var(--line-soft);border-radius:var(--r-xs);background:var(--surface-fn);font:var(--fs-code) var(--font-code);color:var(--ink-2);cursor:default}
 .row.fn button.node{cursor:pointer}
 .row.fn.m .node::before{content:"";flex:0 0 auto;width:6px;height:6px;margin-right:6px;border-radius:var(--r-xs);background:var(--c)}
 .nm{min-width:0;overflow:hidden;text-overflow:ellipsis}
@@ -132,8 +153,8 @@ code{font:inherit;color:var(--keyword)}
 .row.fn.ghost .node{padding:0 8px 0 10px;border:1px dashed color-mix(in srgb,var(--c) 85%,transparent);background:var(--surface-recess);box-shadow:var(--slot-recess);
   color:color-mix(in srgb,var(--c) 58%,var(--ink-2));font-size:var(--fs-code)}
 .row.fn.ghost.focus .node{border-color:var(--light);color:var(--ink)}
-.spill{min-width:22px;height:18px;padding:0 5px;border:1px solid color-mix(in srgb,var(--c) 70%,transparent);border-radius:var(--r-s);background:transparent;
-  font:var(--fs-ui-s)/16px var(--font-code);color:var(--ink);cursor:pointer;pointer-events:auto}
+.spill{flex:0 0 auto;min-width:22px;height:18px;padding:0 5px;border:1px solid color-mix(in srgb,var(--c) 70%,transparent);border-radius:var(--r-s);background:transparent;
+  font:var(--fs-code)/16px var(--font-code);color:var(--ink);cursor:pointer;pointer-events:auto}
 .spill:hover{border-color:var(--c);background:color-mix(in srgb,var(--c) 16%,transparent)}
 
 /* ============ deck (one per cluster) ============ */
@@ -151,7 +172,7 @@ code{font:inherit;color:var(--keyword)}
 .dfront{left:0;top:100%;width:100%;height:var(--deck-t);transform-origin:50% 0;transform:rotateX(-90deg);border-radius:0 0 var(--r-m) var(--r-m);
   background:color-mix(in srgb,var(--c) var(--front-mix),var(--tn-black))}
 .dlabel{position:absolute;left:9px;top:8px;max-width:calc(100% - 18px);height:20px;padding:0 8px;display:flex;align-items:center;gap:9px;
-  border-radius:var(--r-s);background:var(--c);white-space:nowrap;font:var(--fw-bold) var(--fs-ui) var(--font-code);color:var(--on-accent)}
+  border-radius:var(--r-s);background:var(--c);white-space:nowrap;font:var(--fw-bold) var(--fs-ui) var(--font-code);color:var(--on-accent);pointer-events:auto}
 .dlabel .dname{min-width:0;overflow:hidden;text-overflow:ellipsis}
 
 /* ============ lifted boxes: a lid and a front face ============ */
@@ -171,18 +192,19 @@ code{font:inherit;color:var(--keyword)}
 .tmain{flex:1 1 auto;min-width:0;height:100%;padding:0 4px 0 13px;display:flex;flex-direction:column;justify-content:center;align-items:flex-start;
   border:0;border-radius:var(--r-s);background:transparent;cursor:pointer;text-align:left}
 .tmain:focus-visible{outline-offset:-3px}
-.lp{display:none;max-width:100%;font:var(--fs-ui-s)/13px var(--font-code);color:var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* a long path cuts from its start and keeps its file name: the right-to-left box puts the ellipsis first, and <bdi> keeps the path in order */
+.lp{display:none;max-width:100%;font:var(--fs-code)/13px var(--font-code);color:var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;direction:rtl;text-align:left}
 .mbox.away .lp{display:block}
 .ln{max-width:100%;min-width:0;font:var(--fw-bold) var(--fs-code-l)/15px var(--font-code);color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.sn{flex:0 0 auto;font:var(--fs-ui-s)/16px var(--font-code);color:var(--dim)}
+.sn{flex:0 0 auto;font:var(--fs-code)/16px var(--font-code);color:var(--dim)}
 .mbox.focus .sn{visibility:hidden}
 .stepno{position:absolute;right:7px;top:50%;transform:translateY(-50%);display:none;height:16px;padding:0 5px;border-radius:var(--r-s);background:var(--step);color:var(--on-accent);
-  box-shadow:var(--badge-shadow);font:var(--fw-bold) var(--fs-code-s)/16px var(--font-code);white-space:nowrap}
+  box-shadow:var(--badge-shadow);font:var(--fw-bold) var(--fs-code)/16px var(--font-code);white-space:nowrap}
 .mbox.focus .stepno{display:block}
 .mbox.focus .lid{border-color:var(--light);box-shadow:var(--face-light-hot);outline:1px solid var(--c);outline-offset:2px}
 
 /* ============ connectors: three at most, in screen space, from the rects they join ============ */
-.links{position:fixed;inset:0;width:100vw;height:100vh;z-index:7;pointer-events:none;overflow:visible}
+.links{position:fixed;inset:0;width:100%;height:100%;z-index:7;pointer-events:none;overflow:visible}
 /* a connector that cannot be drawn carries .away */
 .links .away{display:none}
 /* (a) guide: the explorer row's tree guide, continued straight into the file box */
@@ -205,7 +227,7 @@ code{font:inherit;color:var(--keyword)}
 button.sb-title{cursor:pointer;transition:filter var(--dur-hover)}
 button.sb-title:hover{filter:brightness(1.12)}
 .sb-title .ic{width:12px;height:12px}
-.sb-tree{position:relative;overflow:auto;pointer-events:auto;max-height:calc(100vh - 60px);padding:2px 4px 4px 0;scrollbar-width:thin;scrollbar-color:var(--line-soft) transparent}
+.sb-tree{position:relative;overflow:hidden auto;pointer-events:auto;max-height:calc(100vh - 60px);padding:2px 4px 4px 0;scrollbar-width:thin;scrollbar-color:var(--line-soft) transparent}
 .sl{position:relative;display:flex;align-items:center;width:100%;height:18px;padding:0 4px 0 12px;border:0;border-radius:var(--r-xs);background:transparent;
   white-space:nowrap;text-align:left;font:var(--fs-code) var(--font-code);color:var(--dim);cursor:pointer}
 .sl[hidden]{display:none}
@@ -220,7 +242,10 @@ button.sb-title:hover{filter:brightness(1.12)}
 .gd.pipe::before,.gd.tee::before{top:0;bottom:0;border-left-width:1px}
 .gd.tee::after{top:50%;width:7px;border-top-width:1px}
 .gd.end::before{top:0;height:50%;width:7px;border-left-width:1px;border-bottom-width:1px;border-bottom-left-radius:4px}
-.snm{overflow:hidden;text-overflow:ellipsis;flex:0 0 auto;max-width:100%;margin-left:3px}
+.snm{display:flex;flex:0 1 auto;min-width:0;max-width:100%;margin-left:3px}
+/* a cut name ends in an ellipsis inside its head, and its last characters stay: siblings with one long prefix stay apart */
+.sh{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.st{flex:none}
 .sl:hover .snm{text-decoration:underline;text-decoration-color:var(--line-strong);text-underline-offset:3px}
 .meta{display:inline-flex;align-items:center;gap:6px;flex:0 0 auto;margin-left:6px}
 .dots{display:inline-flex;gap:3px}
@@ -268,15 +293,17 @@ button.pbadge:hover{filter:brightness(1.12)}
   border:1px solid var(--line-strong);border-radius:var(--r-m);background:var(--surface-pop);
   transition:opacity var(--dur-pop) var(--ease-out),visibility 0s linear var(--dur-pop)}
 .pop.show{opacity:1;visibility:visible;transition:opacity var(--dur-pop) var(--ease-out),visibility 0s}
-.keypop{position:absolute;top:calc(100% + 6px);left:-1px;width:352px;padding:10px 12px 12px;pointer-events:auto}
+/* a long legend scrolls inside the key, so the key never scrolls the page */
+.keypop{position:absolute;top:calc(100% + 6px);left:-1px;width:352px;max-height:calc(100vh - 64px);overflow-y:auto;padding:10px 12px 12px;pointer-events:auto;
+  scrollbar-width:thin;scrollbar-color:var(--line-soft) transparent}
 .kp-cl{margin:0 -6px;padding:0;list-style:none;display:grid;gap:1px}
 .kp-hd{display:flex;justify-content:space-between;margin:0 0 3px;padding:0 6px 0 26px;font:var(--fs-ui-s)/16px var(--font-code);color:var(--dim)}
-.kp-c{width:100%;height:22px;padding:0 6px;display:grid;grid-template-columns:12px minmax(0,1fr) auto;gap:8px;align-items:center;border:0;border-radius:var(--r-s);
+.kp-c{width:100%;min-height:22px;padding:3px 6px;display:grid;grid-template-columns:12px minmax(0,1fr) auto;gap:8px;align-items:center;border:0;border-radius:var(--r-s);
   background:transparent;text-align:left;font:var(--fs-ui-s) var(--font-code);color:var(--ink-2);cursor:pointer;transition:background-color var(--dur-hover),color var(--dur-hover)}
 .kp-c:hover{background:var(--surface-hover);color:var(--ink)}
 .kp-c.on{background:color-mix(in srgb,var(--c) 14%,transparent);color:var(--ink)}
 .kp-c .sw{width:9px;height:9px;border-radius:var(--r-xs);background:var(--c)}
-.kp-c .ll{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.kp-c .ll{overflow-wrap:anywhere}
 .kp-c.on .ll{color:var(--c);font-weight:var(--fw-bold)}
 .kp-c .rng{color:var(--dim)}
 .kp-c:hover .rng,.kp-c.on .rng{color:var(--ink-2)}
@@ -289,12 +316,15 @@ button.pbadge:hover{filter:brightness(1.12)}
 .kp-g .g1{stroke:var(--line);stroke-width:1;fill:none}
 .kp-g .g3{stroke:var(--accent);stroke-width:1.5;fill:none}
 .kp-g .h3{fill:var(--accent)}
-.kp-keys{margin:10px 0 0;padding:10px 0 0;border-top:1px solid var(--line-faint);display:grid;grid-template-columns:48px 1fr;gap:3px 10px;font:var(--fs-ui-s)/18px var(--font-code);color:var(--ink-2)}
-.kp-keys dt{display:flex;align-items:center;gap:1px}
+.kp-keys{margin:10px 0 0;padding:10px 0 0;border-top:1px solid var(--line-faint);display:grid;grid-template-columns:64px 1fr;gap:3px 10px;font:var(--fs-ui-s)/18px var(--font-code);color:var(--ink-2)}
+/* a key sits on the first line of its description */
+.kp-keys dt{display:flex;align-items:center;gap:.6ch;height:18px}
 .kp-keys dd{margin:0}
 kbd{display:inline-flex;align-items:center;gap:1px;height:16px;padding:0 4px;border-radius:var(--r-xs);background:var(--key-bg);font:var(--fw-bold) var(--fs-ui-s) var(--font-code);color:var(--accent)}
-.kp-theme{margin:10px 0 0;padding:10px 0 0;border-top:1px solid var(--line-faint);display:grid;grid-template-columns:48px 1fr;gap:0 10px;align-items:center;
+.kp-theme{margin:10px 0 0;padding:10px 0 0;border-top:1px solid var(--line-faint);display:grid;grid-template-columns:64px 1fr;gap:0 10px;align-items:center;
   font:var(--fs-ui-s)/18px var(--font-code);color:var(--ink-2)}
+/* the shortcut switch belongs to the key list above it */
+.kp-sw{margin-top:6px;padding-top:0;border-top:0}
 .seg{display:flex;gap:2px;width:max-content;padding:3px;border:1px solid var(--line-soft);border-radius:var(--r-m)}
 .seg-b{height:20px;padding:0 9px;border:0;border-radius:var(--r-s);background:transparent;font:var(--fs-ui-s) var(--font-code);color:var(--ink-2);cursor:pointer;
   transition:background-color var(--dur-hover),color var(--dur-hover)}
@@ -316,7 +346,7 @@ kbd{display:inline-flex;align-items:center;gap:1px;height:16px;padding:0 4px;bor
   font:var(--fs-ui-s)/16px var(--font-code);color:var(--ink)}
 .tip .sw{width:8px;height:8px;flex:0 0 auto;border-radius:var(--r-xs);background:var(--c)}
 .tip b{color:var(--step)}
-.tip span{overflow:hidden;text-overflow:ellipsis}
+.tip span{white-space:normal;overflow-wrap:anywhere}
 
 /* ============ top band: the flow picker and freshness beside the map tools ============ */
 .fh-top{position:fixed;z-index:8;top:var(--gap);left:var(--fh-l,560px);right:var(--frame-r);height:28px;display:flex;align-items:center;gap:12px;min-width:0}
@@ -325,21 +355,37 @@ kbd{display:inline-flex;align-items:center;gap:1px;height:16px;padding:0 4px;bor
 .fh-top #flowPick{flex:0 1 auto;min-width:0;display:flex}
 .fh-meta{flex:0 0 auto;font:var(--fs-ui-s) var(--font-code);color:var(--dim);white-space:nowrap}
 .fh-meta b{font-weight:400;color:var(--ink-2)}
-.fh-meta .fresh::before{content:"";display:inline-block;width:6px;height:6px;margin-right:6px;border-radius:var(--r-pill);background:var(--tn-green);vertical-align:1px}
+.fh-meta .fresh::before{content:"";display:inline-block;width:6px;height:6px;margin-right:6px;border-radius:var(--r-pill);background:var(--ok);vertical-align:1px}
 
 /* ============ code column: the step header over the code viewer ============ */
 .card{position:fixed;z-index:6;top:var(--gap);right:var(--gap);bottom:var(--gap);width:var(--rc);display:flex;flex-direction:column;overflow:hidden}
-.cd-head{flex:0 0 auto;display:flex;align-items:flex-start;gap:9px;padding:13px 16px 0}
+.cd-bar{flex:0 0 auto;display:flex;align-items:flex-start;padding-right:8px}
+.cd-head{flex:1 1 auto;min-width:0;display:flex;align-items:flex-start;gap:9px;padding:13px 16px 0}
+/* Long step details scroll inside the top half; the fold button hides them, so the code keeps at least half the column. */
+.foldbtn{margin-top:9px}
+.foldbtn[hidden]{display:none}
+.foldbtn .ic{transition:transform var(--dur-state) var(--ease-out)}
+.card.folded .foldbtn .ic{transform:rotate(-90deg)}
+.card.folded .cd-step{display:none}
 .cd-no{flex:0 0 auto;min-width:22px;height:20px;padding:0 6px;border-radius:var(--r-s);background:var(--step);color:var(--on-accent);box-shadow:var(--badge-shadow);
   font:var(--fw-bold) var(--fs-code)/20px var(--font-code);text-align:center}
-.cd-title{flex:1 1 auto;min-width:0;margin:0;display:flex;align-items:center;font:var(--fw-bold) var(--fs-title)/20px var(--font-code);color:var(--ink)}
-.cd-title .ctt{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.cursor{flex:0 0 auto;width:8px;height:15px;margin-left:3px;border-radius:1px;background:var(--accent);animation:blink var(--blink) steps(1,end) infinite}
+/* The step title is the step's identity: it wraps, and the cursor ends its last line. */
+.cd-title{flex:1 1 auto;min-width:0;margin:0;font:var(--fw-bold) var(--fs-title)/20px var(--font-code);color:var(--ink);overflow-wrap:anywhere}
+.cursor{flex:0 0 auto;display:inline-block;vertical-align:-3px;width:8px;height:15px;margin-left:3px;border-radius:1px;background:var(--accent);animation:blink var(--blink) steps(1,end) infinite}
 @keyframes blink{50%{opacity:0}}
-.cd-step{flex:0 0 auto;padding:8px 16px 12px}
+.cd-step{flex:0 1 auto;min-height:0;overflow:auto;padding:8px 16px 12px;scrollbar-width:thin;scrollbar-color:var(--line-soft) transparent}
 .cd-step.swap,.code.swap{animation:swap var(--dur-state) var(--ease-out)}
 .cd-ann{margin:0;font:var(--fs-ui)/1.6 var(--font-code);color:var(--ink)}
-.cd-facts{margin:10px 0 0;display:grid;grid-template-columns:var(--lab) minmax(0,1fr);gap:2px 0;font:var(--fs-ui-s)/1.6 var(--font-code);font-variant-ligatures:none}
+/* the fact rows fold under one summary line, closed at load (code.ts) */
+.cd-more{margin:8px 0 0}
+.cd-more summary{display:flex;align-items:center;gap:5px;width:fit-content;max-width:100%;padding:2px 6px 2px 2px;margin-left:-2px;border-radius:var(--r-s);
+  list-style:none;cursor:pointer;font:var(--fs-ui-s)/18px var(--font-code);color:var(--dim);transition:color var(--dur-hover)}
+.cd-more summary::-webkit-details-marker{display:none}
+.cd-more summary:hover{color:var(--ink-2)}
+.cd-more summary .ic{flex:0 0 auto;width:12px;height:12px;transform:rotate(-90deg);transition:transform var(--dur-state) var(--ease-out)}
+.cd-more[open] summary .ic{transform:none}
+.cd-keys{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cd-facts{margin:4px 0 0;display:grid;grid-template-columns:var(--lab) minmax(0,1fr);gap:2px 0;font:var(--fs-ui-s)/1.6 var(--font-code);font-variant-ligatures:none}
 .cd-facts dt{color:var(--dim)}
 .cd-facts dd{margin:0;min-width:0;color:var(--ink-2);overflow-wrap:anywhere}
 .ref{color:var(--ink-2)}
@@ -360,27 +406,32 @@ button.ref:hover{text-decoration:underline;text-underline-offset:3px}
 .status[hidden]{display:none}
 .status .st-line{display:flex;align-items:center;max-width:100%}
 .status .st-line span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* A notice: the link named a flow or a codebase that is missing. */
+.status .st-note{margin:0;color:var(--warn);overflow-wrap:anywhere}
 /* The code viewer: the header names path:line. The gutter stays put while long lines scroll sideways. */
-.reader-head{flex:0 0 auto;height:36px;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:0 6px 0 14px;background:var(--tn-raised);border-top:1px solid var(--line-faint);border-bottom:1px solid var(--line-faint)}
-.cw-path{min-width:0;font:13px var(--font-code);color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-variant-ligatures:none}
+.reader-head{flex:0 0 auto;height:36px;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:0 6px 0 14px;background:var(--surface-raised);border-top:1px solid var(--line-faint);border-bottom:1px solid var(--line-faint)}
+.reader-head[hidden]{display:none}
+.cw-path{min-width:0;font:var(--fs-source) var(--font-code);color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-variant-ligatures:none}
 .cw-path .dir{color:var(--dim)}
-.cw-path .at{color:var(--tn-orange)}
-.code{--where:color-mix(in srgb,var(--tn-sel) 65%,var(--bg));flex:1 1 auto;min-height:0;position:relative;overflow:auto;padding:10px 0 28px;background:var(--bg);
-  font:13px/1.6 var(--font-code);font-variant-ligatures:none;scrollbar-width:thin;scrollbar-color:var(--line-soft) transparent}
+.cw-path .at{color:var(--step)}
+.code{flex:1 0 50%;min-height:0;position:relative;overflow:auto;padding:10px 0 28px;background:var(--bg);
+  font:var(--fs-source)/1.6 var(--font-code);font-variant-ligatures:none;scrollbar-width:thin;scrollbar-color:var(--line-soft) transparent}
 .code-in{position:relative;min-width:max-content}
 .gut{position:sticky;left:0;width:0;height:0;z-index:2}
 .cl{display:grid;grid-template-columns:40px 18px auto;white-space:pre}
 .cl .no,.cl .mk{position:sticky;z-index:1;background:var(--bg)}
-.cl .no{left:0;color:var(--tn-comment);text-align:right;user-select:none}
+.cl .no{left:0;color:var(--quiet);text-align:right;user-select:none}
 .cl .mk{left:40px}
 .cl .tx{padding:0 12px 0 10px;color:var(--ink)}
-.cl.where,.cl.where .no,.cl.where .mk{background:var(--where)}
+.cl.where,.cl.where .no,.cl.where .mk{background:var(--surface-where)}
+/* the current line lifts its quiet text: --quiet is under 4.5:1 on the line highlight */
 .cl.where .no{color:var(--ink)}
-.cl.end .tx{color:var(--tn-comment);font-style:italic;font-size:12px}
-.mark{position:absolute;left:45px;width:4px;border:1px solid var(--tn-border-2);border-right:0;border-radius:3px 0 0 3px}
-.mark span{position:absolute;left:5px;top:50%;writing-mode:vertical-rl;transform:translateY(-50%) rotate(180deg);font-size:9.5px;line-height:1;color:var(--tn-comment);white-space:nowrap}
+.cl.where .t-com{color:var(--dim)}
+.cl.end .tx{color:var(--quiet);font-style:italic;font-size:var(--fs-ui)}
+.mark{position:absolute;left:45px;width:4px;border:1px solid var(--line-soft);border-right:0;border-radius:3px 0 0 3px}
+.mark span{position:absolute;left:5px;top:50%;writing-mode:vertical-rl;transform:translateY(-50%) rotate(180deg);font-size:var(--fs-ui-s);line-height:1;color:var(--quiet);white-space:nowrap}
 .t-kw{color:var(--tn-magenta)}.t-type{color:var(--tn-cyan)}.t-fn{color:var(--tn-blue)}
-.t-com{color:var(--tn-comment);font-style:italic}.t-str{color:var(--tn-green)}
+.t-com{color:var(--quiet);font-style:italic}.t-str{color:var(--tn-green)}
 .t-num,.t-const{color:var(--tn-orange)}.t-p,.t-attr{color:var(--dim)}
 
 /* ============ bottom bar: nav, the cluster explainer, and the strip (fixed size) ============ */
@@ -408,6 +459,11 @@ button.ref:hover{text-decoration:underline;text-underline-offset:3px}
 .help .hk{display:inline-flex;align-items:center;margin-right:.6ch;color:var(--keyword)}
 .help .hk .ic{width:11px;height:11px}
 .help .hsep{width:3px;height:3px;margin:0 1.2ch;border-radius:var(--r-pill);background:var(--line-strong)}
+.help .ck{display:inline-flex;align-items:center}
+/* no deck: the keys do nothing, so the help dims like the disabled controls */
+.help.idle{opacity:.42}
+/* the key popover turned off the one-character keys */
+:root[data-shortcuts="off"] .ck{display:none}
 
 /* ============ full screen code: the code column takes the canvas; the explorer, the top band, and the bar stay ============ */
 .fsbtn{flex:0 0 26px;width:26px;height:26px}

@@ -67,6 +67,32 @@ impl FakeServer {
         }
     }
 
+    /// Returns a command that answers requests from a script, as the program documentation states.
+    #[cfg_attr(
+        not(feature = "python"),
+        allow(dead_code, reason = "only the Python resolver tests script a server")
+    )]
+    pub(crate) fn scripted(&self, script: &str) -> ServerCommand {
+        let path = self.directory.path().join("script.txt");
+        fs::write(&path, script).expect("the fake server script should be written");
+        let mut command = self.command("script");
+        command.arguments.push(path.to_string_lossy().into_owned());
+        command
+    }
+
+    /// Returns the method of each request that a scripted server answered, in order.
+    #[cfg_attr(
+        not(feature = "python"),
+        allow(dead_code, reason = "only the Python resolver tests script a server")
+    )]
+    pub(crate) fn requests(&self) -> Vec<String> {
+        fs::read_to_string(self.directory.path().join("requests.log"))
+            .unwrap_or_default()
+            .lines()
+            .map(str::to_owned)
+            .collect()
+    }
+
     pub(crate) fn shutdown_marker(&self) -> PathBuf {
         self.directory.path().join("shutdown-requested")
     }

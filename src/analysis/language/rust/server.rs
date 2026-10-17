@@ -5,29 +5,19 @@ use std::path::Path;
 use lsp_types::SymbolKind;
 
 use crate::analysis::{
-    fact::{ResolutionFallback, SemanticFact},
+    fact::ResolutionFallback,
     language::{Language, LanguageProfile},
     lsp::{
-        LspError, ProtocolSymbolSite,
-        session::{self, ServerReadiness, SessionConfig},
+        ProtocolSymbolSite,
+        session::{ServerReadiness, SessionConfig},
     },
-    source::Sources,
 };
 
-/// Produces semantic facts from one rust-analyzer session.
-///
-/// # Errors
-///
-/// Returns an error if the shared session fails.
-pub(super) fn produce_semantic_facts(
-    root: &Path,
-    profile: &LanguageProfile,
-    sources: &Sources<'_>,
-) -> Result<Vec<SemanticFact>, LspError> {
-    session::produce_semantic_facts(&session_config(root, profile), sources)
-}
-
-fn session_config<'a>(root: &'a Path, profile: &'a LanguageProfile) -> SessionConfig<'a> {
+/// Returns the session configuration of one Rust profile.
+pub(crate) fn session_config<'a>(
+    root: &'a Path,
+    profile: &'a LanguageProfile,
+) -> SessionConfig<'a> {
     SessionConfig {
         root,
         language: Language::Rust,

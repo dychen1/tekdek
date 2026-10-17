@@ -2,14 +2,11 @@
 //!
 //! This module owns the adapter that reports syntax and semantic facts from Rust sources.
 
-mod server;
+pub(crate) mod server;
 mod syntax;
 
-use std::path::PathBuf;
-
 use crate::analysis::{
-    fact::{AnalysisError, SemanticFact, SyntaxFacts},
-    lsp::LspError,
+    fact::{AnalysisError, SyntaxFacts},
     source::{DocumentSnapshot, Sources},
 };
 
@@ -20,14 +17,13 @@ use super::{Language, LanguageAdapter, LanguageProfile};
 // -----------------------------------------------------------------------------
 
 pub struct RustAdapter {
-    root: PathBuf,
     profile: LanguageProfile,
 }
 
 impl RustAdapter {
     #[must_use]
-    pub fn new(root: PathBuf, profile: LanguageProfile) -> Self {
-        Self { root, profile }
+    pub fn new(profile: LanguageProfile) -> Self {
+        Self { profile }
     }
 }
 
@@ -56,26 +52,6 @@ impl LanguageAdapter for RustAdapter {
     fn produce_syntax_facts(&self, sources: &Sources<'_>) -> Result<SyntaxFacts, AnalysisError> {
         syntax::produce_syntax_facts(sources)
     }
-
-    /// Produces normalized semantic facts from rust-analyzer.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the configured language server fails.
-    fn produce_semantic_facts(
-        &mut self,
-        sources: &Sources<'_>,
-    ) -> Result<Vec<SemanticFact>, AnalysisError> {
-        server::produce_semantic_facts(&self.root, &self.profile, sources)
-            .map_err(language_server_error)
-    }
-}
-
-fn language_server_error(error: LspError) -> AnalysisError {
-    AnalysisError::new(format!(
-        "cannot analyze Rust with the language server: {}",
-        error.into_message()
-    ))
 }
 
 #[cfg(test)]
@@ -84,7 +60,7 @@ mod tests {
 
     use crate::analysis::{
         language::{Language, LanguageAdapter, builtin_profiles},
-        source::{DocumentSnapshot, Sources},
+        source::DocumentSnapshot,
     };
 
     use super::RustAdapter;
@@ -95,7 +71,7 @@ mod tests {
             .into_iter()
             .find(|profile| profile.language == Language::Rust)
             .expect("the Rust profile must exist");
-        let adapter = RustAdapter::new(PathBuf::from("/workspace"), profile);
+        let adapter = RustAdapter::new(profile);
         let documents = [DocumentSnapshot {
             path: PathBuf::from("lib.rs"),
             content: "pub struct Item;".to_owned(),
@@ -118,7 +94,7 @@ mod tests {
             .find(|profile| profile.language == Language::Rust)
             .expect("the Rust profile must exist");
         profile.extensions = vec!["rust".to_owned()];
-        let adapter = RustAdapter::new(PathBuf::from("/workspace"), profile);
+        let adapter = RustAdapter::new(profile);
         let documents = [DocumentSnapshot {
             path: PathBuf::from("lib.rust"),
             content: "pub struct Item;".to_owned(),
@@ -129,25 +105,5 @@ mod tests {
             .expect("the configured source should be valid");
 
         assert_eq!(sources.len(), 1);
-    }
-
-    #[test]
-    fn maps_rust_language_server_errors() {
-        let profile = builtin_profiles()
-            .into_iter()
-            .find(|profile| profile.language == Language::Rust)
-            .expect("the Rust profile must exist");
-        let mut adapter = RustAdapter::new(PathBuf::from("/missing-rust-root"), profile);
-        let sources = Sources::new(Vec::new());
-
-        let error = adapter
-            .produce_semantic_facts(&sources)
-            .expect_err("a missing Rust root must fail");
-
-        assert!(
-            error
-                .message
-                .starts_with("cannot analyze Rust with the language server: ")
-        );
     }
 }

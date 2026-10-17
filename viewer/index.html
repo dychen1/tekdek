@@ -12,8 +12,11 @@
   Run `tekdek serve` and open the URL that it prints.
 -->
 <script>
-// Apply the saved Tokyo Night variant before first paint.
-try { const v = localStorage.getItem('tekdek.deck.variant'); if (v === 'storm' || v === 'moon') document.documentElement.dataset.variant = v; } catch (err) { /* storage is blocked: keep Night */ }
+// Apply the saved Tokyo Night variant and shortcut switch before first paint.
+try {
+  const v = localStorage.getItem('tekdek.deck.variant'); if (v === 'storm' || v === 'moon') document.documentElement.dataset.variant = v;
+  if (localStorage.getItem('tekdek.deck.shortcuts') === 'off') document.documentElement.dataset.shortcuts = 'off';
+} catch (err) { /* storage is blocked: keep Night and the shortcuts */ }
 </script>
 <link rel="stylesheet" href="./dist/app.css">
 <script type="module" src="./dist/app.js"></script>
@@ -33,11 +36,12 @@ try { const v = localStorage.getItem('tekdek.deck.variant'); if (v === 'storm' |
   <symbol id="i-exit" viewBox="0 0 16 16"><path d="M6.5 3v3.5H3M13 6.5H9.5V3M9.5 13V9.5H13M3 9.5h3.5V13"/></symbol>
 </svg>
 
+<h1 class="vh" id="pageTitle">Code map</h1>
 <div class="frame" id="frame" aria-hidden="true"></div>
 
 <aside class="sidebar" aria-label="Code explorer">
   <div class="sb-head" id="sbHead"></div>
-  <nav class="sb-tree" id="sbTree" aria-label="Directories and files"></nav>
+  <div class="sb-tree" id="sbTree" role="tree" aria-label="Directories and files"></div>
 </aside>
 
 <div class="maptools" id="maptools">
@@ -56,8 +60,18 @@ try { const v = localStorage.getItem('tekdek.deck.variant'); if (v === 'storm' |
       <li><svg class="kp-g" width="28" height="8" viewBox="0 0 28 8" aria-hidden="true"><path class="g3" d="M1 4H21"/><path class="h3" d="M20 1 27 4 20 7z"/></svg><span>Arrow: the current box to its source in the code column.</span></li>
     </ul>
     <dl class="kp-keys" aria-label="More keys">
-      <dt><kbd>c</kbd></dt><dd>fold or name the functions off the flow path</dd>
+      <dt class="ck"><kbd>h</kbd> <kbd>l</kbd></dt><dd class="ck">previous or next section: the step where the cluster changes</dd>
+      <dt class="ck"><kbd>c</kbd></dt><dd class="ck">fold or name the functions off the flow path</dd>
+      <dt><kbd>⌘</kbd> scroll</dt><dd>zoom the map</dd>
+      <dt>drag</dt><dd>or scroll: move a map zoomed past the frame</dd>
     </dl>
+    <div class="kp-theme kp-sw" role="group" aria-label="Single-key shortcuts">
+      <span aria-hidden="true">shortcuts</span>
+      <div class="seg">
+        <button class="seg-b" type="button" data-shortcuts="on" aria-pressed="true">on</button>
+        <button class="seg-b" type="button" data-shortcuts="off" aria-pressed="false">off</button>
+      </div>
+    </div>
     <div class="kp-theme" role="group" aria-labelledby="kpThemeLbl">
       <span id="kpThemeLbl">theme</span>
       <div class="seg">
@@ -73,7 +87,8 @@ try { const v = localStorage.getItem('tekdek.deck.variant'); if (v === 'storm' |
 
 <section class="pane card" id="card" aria-label="Step and source">
   <div class="status" id="status" role="status" aria-live="polite" hidden></div>
-  <div class="cd-head" id="cdHead"></div>
+  <div class="cd-bar"><div class="cd-head" id="cdHead"></div>
+    <button class="cbtn quiet foldbtn" id="foldBtn" type="button" aria-controls="cdStep" aria-expanded="true" title="Hide the step details" aria-label="Hide the step details" hidden><svg class="ic" aria-hidden="true"><use href="#i-chev"/></svg></button></div>
   <div class="cd-step" id="cdStep"></div>
   <header class="reader-head" id="codeHead"><div class="cw-path" id="where" title="Where the current step lives"></div>
     <button class="cbtn quiet fsbtn" id="fullBtn" type="button" aria-pressed="false" title="Full screen (f)" aria-label="Full screen (f)"><svg class="ic" aria-hidden="true"><use href="#i-full"/></svg></button></header>
@@ -91,7 +106,8 @@ try { const v = localStorage.getItem('tekdek.deck.variant'); if (v === 'storm' |
   <p class="c-desc" id="cDesc"></p>
   <div class="ticks" id="ticks" role="group" aria-label="Steps"></div>
 </section>
-<p class="help" aria-label="Shortcuts"><span class="hk">j</span>back<i class="hsep" aria-hidden="true"></i><span class="hk">k</span>forward<i class="hsep" aria-hidden="true"></i><span class="hk"><svg class="ic" aria-hidden="true"><use href="#i-left"/></svg>/<svg class="ic" aria-hidden="true"><use href="#i-right"/></svg><span class="vh">Left or right arrow</span></span>step<i class="hsep" aria-hidden="true"></i><span class="hk">f</span>full screen<i class="hsep" aria-hidden="true"></i><span class="hk">esc</span>clear<i class="hsep" aria-hidden="true"></i><span class="hk">?</span>key</p>
+<!-- The .ck parts name the one-character keys; they hide while the key popover turns those keys off. -->
+<p class="help" id="help" aria-label="Shortcuts"><span class="hk"><span class="ck">j/<span class="vh"> or </span></span><svg class="ic" aria-hidden="true"><use href="#i-left"/></svg><span class="vh">left arrow</span></span>back<i class="hsep" aria-hidden="true"></i><span class="hk"><span class="ck">k/<span class="vh"> or </span></span><svg class="ic" aria-hidden="true"><use href="#i-right"/></svg><span class="vh">right arrow</span></span>forward<span class="ck"><i class="hsep" aria-hidden="true"></i><span class="hk">h/l</span>section</span><span class="ck"><i class="hsep" aria-hidden="true"></i><span class="hk">f</span>full screen</span><i class="hsep" aria-hidden="true"></i><span class="hk">esc</span>clear<span class="ck"><i class="hsep" aria-hidden="true"></i><span class="hk">?</span>key</span></p>
 
 <!-- The map follows the controls in DOM order, so Tab reaches the tree, the tools, the code column, and the controls first. -->
 <main class="cv" id="cv" aria-label="Map: the current file and the current cluster">

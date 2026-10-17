@@ -7,8 +7,8 @@ use super::{Graph, Node, Provenance, ProvenanceOrigin, build::build_graph};
 use crate::analysis::{
     fact::{
         AnalysisError, CallableData, CallableKind, EntityEvidence, EntityFact, EntityKey,
-        EntityKind, FactSet, FieldData, RelationEvidence, RelationFact, RelationKind,
-        ReportedLocation, ResolutionFallback, SymbolAnchor, SyntaxFacts, TypeData, TypeKind,
+        EntityKind, FactSet, FieldData, RelationFact, RelationKind, ReportedLocation,
+        ResolutionFallback, SymbolAnchor, SyntaxFacts, TypeData, TypeKind,
     },
     language::Language,
     source::{SourceRange, SourceSpan},
@@ -23,7 +23,7 @@ pub(super) fn to_syntax_graph(
     language: Language,
     facts: SyntaxFacts,
 ) -> Result<Graph, AnalysisError> {
-    build_graph(vec![FactSet::new(language, facts, Vec::new())], &[])
+    build_graph(vec![FactSet::new(language, facts)], &[])
 }
 
 pub(super) fn fixture_key(id: u32) -> EntityKey {
@@ -58,19 +58,11 @@ pub(super) fn entity(
     }
 }
 
-pub(super) fn relation(
-    source: u32,
-    target: u32,
-    kind: RelationKind,
-    observation: Option<SourceSpan>,
-) -> RelationFact {
+pub(super) fn relation(source: u32, target: u32, kind: RelationKind) -> RelationFact {
     RelationFact {
         source: fixture_key(source),
         target: fixture_key(target),
         kind,
-        evidence: RelationEvidence {
-            observations: observation.into_iter().collect(),
-        },
     }
 }
 

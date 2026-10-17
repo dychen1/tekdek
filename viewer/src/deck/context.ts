@@ -10,6 +10,12 @@ import type { DeckModel, DeckState } from "../layout/model.ts";
 
 export const $ = <T extends Element = HTMLElement>(selector: string) => document.querySelector(selector) as T;
 
+/** The screen position of the page origin. The fixed panels are placed from it, because the page scrolls in a small window. */
+export function pageOrigin(): { x: number; y: number } {
+  const r = document.body.getBoundingClientRect();
+  return { x: r.left, y: r.top };
+}
+
 // ============ parts ============
 
 /** Created by `explorer.ts`. */
@@ -61,7 +67,7 @@ export interface Bar { render(clusterChanged: boolean): void; destroy(): void }
 /** Declared here and created by `tools.ts`. */
 export interface Tools {
   sync(): void; layoutTop(): void; setFull(on: boolean): void; toggleCompact(): void;
-  keyOpen(): boolean; setKey(open: boolean, returnFocus?: boolean): void; destroy(): void;
+  keyOpen(): boolean; setKey(open: boolean, moveFocus?: boolean): void; destroy(): void;
 }
 /** The deck modules. `deck.ts` fills this object after it creates every module. */
 export interface DeckParts {

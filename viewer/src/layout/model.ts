@@ -4,7 +4,7 @@
    # Sections
    model, state */
 import type { ClusterColor, DeckCluster, DeckFlow, DeckFunction, DeckGraph, DeckStep, SourceView } from "../data/models.ts";
-import { deckSize as deckSizeOf } from "./deck-geometry.ts";
+import { deckSize as deckSizeOf, ZOOM_MAX } from "./deck-geometry.ts";
 import { buildExplorer, openTo, type ExplorerRow } from "./explorer.ts";
 import { fileBox } from "./file-box.ts";
 import { buildPlan, effectiveCluster, EMPTY_PLAN, memberOrder, type FlowPlan } from "./plan.ts";
@@ -31,8 +31,10 @@ export interface DeckModel {
   /** Member keys of each cluster, in first-visit order. */
   members: Map<string, string[]>;
   deckSize: { width: number; maxHeight: number };
-  /** The widest file box right edge over every flow file, compact on, for the starting zoom. */
+  /** The widest file box right edge over every flow file, compact on, for the zoom range. */
   fileRight: number;
+  /** The same edge when every name ends in an ellipsis: the zoom floor gives way below it. */
+  fileMin: number;
   sources: ReadonlyMap<string, SourceView>;
   /** The step at an index, or null at rest. */
   stepAt(index: number): DeckStep | null;
@@ -61,15 +63,16 @@ export function buildModel(sourceGraph: DeckGraph, flow: DeckFlow | null, source
   }
   const members = new Map(clusters.map(cluster => [cluster.id, memberOrder(plan, cluster)]));
   const deckSize = deckSizeOf([...members.values()].map(keys => keys.map(key => ({ name: FN.get(key)!.name, file: FN.get(key)!.file, steps: plan.visits.get(key) ?? [] }))));
-  const fileRight = Math.max(0, ...[...plan.flowFiles.keys()].map(file => fileBox({
+  const flowBoxes = [...plan.flowFiles.keys()].map(file => fileBox({
     fns: fnsByFile.get(file) ?? [], visits: plan.visits, currentCluster: "", currentKey: null, compact: true, folded: false,
-  }).right));
+  }));
+  const fileRight = Math.max(0, ...flowBoxes.map(box => box.right)), fileMin = Math.max(0, ...flowBoxes.map(box => box.min));
   const explorer = buildExplorer(graph.tree);
   const steps = flow?.steps ?? [];
   const stepAt = (index: number) => steps[index - 1] ?? null;
   return {
     flow, graph, clusters, CL, FN, steps, N: steps.length, plan, explorer,
-    rowByPath: new Map(explorer.map(row => [row.path, row])), fnsByFile, clustersByFile, members, deckSize, fileRight, sources,
+    rowByPath: new Map(explorer.map(row => [row.path, row])), fnsByFile, clustersByFile, members, deckSize, fileRight, fileMin, sources,
     stepAt,
     fnAt: index => { const step = stepAt(index); return step && !step.missing ? FN.get(step.node) ?? null : null; },
     stepCluster: index => (flow ? effectiveCluster(flow, CL, index) : null),
@@ -89,9 +92,19 @@ export function withMembership(graph: DeckGraph, flow: DeckFlow | null): DeckGra
 export interface DeckState {
   /** The current step; 0 is the rest state. */
   cur: number;
+  /** The step that the last clear left, or 0. Forward from the rest state continues there. */
+  resume: number;
   /** Compact starts on at every load. Only the compact button and `c` turn it off. */
   compact: boolean;
+  /** The user's zoom. Past the frame's fit the map leaves the frame, and the pan reaches the rest. */
   zoom: number;
+  /** The largest zoom at which the deck and the widest file box fit the frame side by side (`zoomFit`). place() sets it,
+   *  except in full screen, where the frame has no size. */
+  wide: number;
+  /** How far the map reaches past the frame's right and bottom edges. place() sets it. */
+  reach: { x: number; y: number };
+  /** The screen offset of the map, from -reach to 0 on each axis. */
+  pan: { x: number; y: number };
   full: boolean;
   /** Open directories. */
   open: Set<string>;
@@ -110,8 +123,11 @@ export function initialState(model: DeckModel): DeckState {
     const row = model.rowByPath.get(file);
     if (row) openTo(open, row);
   }
-  return { cur: 0, compact: true, zoom: 1, full: false, open, folded: new Set(), browseFile: null, anchor: null };
+  return { cur: 0, resume: 0, compact: true, zoom: 1, wide: ZOOM_MAX, reach: { x: 0, y: 0 }, pan: { x: 0, y: 0 }, full: false, open, folded: new Set(), browseFile: null, anchor: null };
 }
+
+/** Returns the step that forward goes to: the next step, or from the rest state the step that a clear left. */
+export const nextStep = (state: Pick<DeckState, "cur" | "resume">) => state.cur ? state.cur + 1 : state.resume || 1;
 
 /** Returns the file whose box shows, with the cluster and the function that the box marks as current.
  *  A browsed file wins over the step and marks neither. A step with no function in the graph shows no file. */
