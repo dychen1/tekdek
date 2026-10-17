@@ -9,7 +9,7 @@ import { highlight } from "../layout/highlight.ts";
 import { nearestStep } from "../layout/plan.ts";
 import { callRefs, calleesOf, callersOf, lineSpan, oneLineSignature, otherVisits, sourceNote, transitionFact, whole, type CallRef } from "../layout/step-facts.ts";
 import { clamp, esc, plural } from "../layout/util.ts";
-import { md } from "./markup.ts";
+import { icon, md } from "./markup.ts";
 import { $, type CodeColumn, type DeckContext } from "./context.ts";
 
 // ============ markup ============
@@ -49,6 +49,9 @@ export function createCode(ctx: DeckContext): CodeColumn {
 
   // ============ fold ============
   // The step details take at most the top half of the column and scroll there. The fold stays across steps.
+  // The fact rows start closed under the annotation; their open state also stays across steps.
+
+  let factsOpen = false;
 
   /** Shows the fold button when the step details overflow the top half, or are folded. */
   function fitFold() {
@@ -63,6 +66,13 @@ export function createCode(ctx: DeckContext): CodeColumn {
   }
   // the code header moves with the fold, so the arrow to it is drawn again
   foldBtn.addEventListener("click", () => { setFold(!card.classList.contains("folded")); ctx.place(); }, { signal });
+  // `toggle` does not bubble; it also fires when a step renders the facts open
+  stepEl.addEventListener("toggle", e => {
+    if (!(e.target as Element).matches(".cd-more")) return;
+    factsOpen = (e.target as HTMLDetailsElement).open;
+    fitFold();
+    ctx.place();
+  }, { capture: true, signal });
   addEventListener("resize", fitFold, { signal });
 
   // ============ empty states ============
@@ -181,7 +191,10 @@ export function createCode(ctx: DeckContext): CodeColumn {
       if (step.documentation && !marks.doc) facts.push(["doc", esc(step.documentation)]);
       if (step.signature && !marks.sig) facts.push(["signature", `<code>${esc(oneLineSignature(step.signature))}</code>`]);
     }
-    stepEl.innerHTML = `<p class="cd-ann">${md(step.annotation)}</p><dl class="cd-facts">${facts.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("")}</dl>`;
+    // the summary names the closed rows, so a reader knows what opens
+    const more = facts.length ? `<details class="cd-more"${factsOpen ? " open" : ""}><summary>${icon("chev")}<span class="cd-keys">${facts.map(([k]) => k).join(" · ")}</span></summary>` +
+      `<dl class="cd-facts">${facts.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("")}</dl></details>` : "";
+    stepEl.innerHTML = `<p class="cd-ann">${md(step.annotation)}</p>${more}`;
     stepEl.scrollTop = 0;
     fitFold();
     swap(prev);

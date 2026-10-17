@@ -376,7 +376,16 @@ kbd{display:inline-flex;align-items:center;gap:1px;height:16px;padding:0 4px;bor
 .cd-step{flex:0 1 auto;min-height:0;overflow:auto;padding:8px 16px 12px;scrollbar-width:thin;scrollbar-color:var(--line-soft) transparent}
 .cd-step.swap,.code.swap{animation:swap var(--dur-state) var(--ease-out)}
 .cd-ann{margin:0;font:var(--fs-ui)/1.6 var(--font-code);color:var(--ink)}
-.cd-facts{margin:10px 0 0;display:grid;grid-template-columns:var(--lab) minmax(0,1fr);gap:2px 0;font:var(--fs-ui-s)/1.6 var(--font-code);font-variant-ligatures:none}
+/* the fact rows fold under one summary line, closed at load (code.ts) */
+.cd-more{margin:8px 0 0}
+.cd-more summary{display:flex;align-items:center;gap:5px;width:fit-content;max-width:100%;padding:2px 6px 2px 2px;margin-left:-2px;border-radius:var(--r-s);
+  list-style:none;cursor:pointer;font:var(--fs-ui-s)/18px var(--font-code);color:var(--dim);transition:color var(--dur-hover)}
+.cd-more summary::-webkit-details-marker{display:none}
+.cd-more summary:hover{color:var(--ink-2)}
+.cd-more summary .ic{flex:0 0 auto;width:12px;height:12px;transform:rotate(-90deg);transition:transform var(--dur-state) var(--ease-out)}
+.cd-more[open] summary .ic{transform:none}
+.cd-keys{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cd-facts{margin:4px 0 0;display:grid;grid-template-columns:var(--lab) minmax(0,1fr);gap:2px 0;font:var(--fs-ui-s)/1.6 var(--font-code);font-variant-ligatures:none}
 .cd-facts dt{color:var(--dim)}
 .cd-facts dd{margin:0;min-width:0;color:var(--ink-2);overflow-wrap:anywhere}
 .ref{color:var(--ink-2)}
