@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { boxWidth, COS, DECK_Z, deckHeight, deckSize, deckSpot, deckTransform, fileBoxCenter, fileRoom, home, MIN_DECK_W, SHADOW, SIN, zoomFit, ZOOM_FLOOR } from "../src/layout/deck-geometry.ts";
+import { boxWidth, COS, DECK_Z, deckBelow, deckHeight, deckShift, deckSize, deckSpot, deckTransform, fileBoxCenter, fileRoom, home, MIN_DECK_W, SHADOW, SIN, zoomFit, ZOOM_FLOOR } from "../src/layout/deck-geometry.ts";
 
 const close = (actual: number, expected: number) => assert.ok(Math.abs(actual - expected) < 0.01, `${actual} != ${expected}`);
 const frame = { left: 290, top: 52, width: 700, height: 738 };
@@ -56,6 +56,9 @@ test("the file box stays level with its row unless it would leave the frame", ()
   assert.equal(fileBoxCenter(300, frame, 200, 1), 300);
   assert.equal(fileBoxCenter(10, frame, 200, 1), frame.top + 18);
   assert.equal(fileBoxCenter(760, frame, 400, 1), frame.top + frame.height - 8 - 400 + 10);
+  // at any zoom the moved box ends 8 px above the frame's bottom edge
+  const y = fileBoxCenter(760, frame, 400, 0.75);
+  close(y + (400 - 10) * 0.75, frame.top + frame.height - 8);
 });
 
 test("the zoom starts at the largest tenth that fits, from the floor to 100%", () => {
@@ -94,4 +97,22 @@ test("a short frame stops the zoom where the deck still fits its height", () => 
   const { start, max } = zoomFit(short, 1008, deck, 100, 100);
   close(max, (300 - 12) / (deckHeight(7) * COS + DECK_Z * SIN + SHADOW));
   assert.equal(start, max);
+});
+
+test("past the width fit the deck moves right, so the widest file box still ends 40 px before it", () => {
+  const deck = { width: 300, maxHeight: deckHeight(7) };
+  const { wide } = zoomFit(frame, 1008, deck, 300, 300);
+  assert.equal(deckShift(frame, 1008, wide, wide * 0.9), 0);
+  for (const k of [wide * 1.2, 1.5]) {
+    const spot = deckSpot(frame, 1008 + deckShift(frame, 1008, wide, k), deck.width, deck.maxHeight, k);
+    close(fileRoom(frame.left, spot.x, k), 300);
+  }
+});
+
+test("the deck reaches below the frame only where its height no longer fits", () => {
+  const depth = deckHeight(7) * COS + DECK_Z * SIN + SHADOW;
+  assert.equal(deckBelow(depth + 8, deckHeight(7), 1), 0);
+  close(deckBelow(300, deckHeight(7), 1.5), depth * 1.5 + 8 - 300);
+  const spot = deckSpot({ ...frame, height: 300 }, 1008, 300, deckHeight(7), 1.5);
+  close(spot.y - DECK_Z * SIN * 1.5 + depth * 1.5 - (frame.top + 300 - 4), deckBelow(300, deckHeight(7), 1.5));
 });

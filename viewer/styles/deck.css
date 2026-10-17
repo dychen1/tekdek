@@ -113,6 +113,9 @@ code{font:inherit;color:var(--keyword)}
 .frame{position:fixed;z-index:1;left:var(--frame-l);right:var(--frame-r);top:var(--top-band);bottom:calc(var(--bar-bottom) + var(--bar-h) + 10px);
   border:1px dashed var(--frame-line);border-radius:var(--r-l);pointer-events:none;
   background-image:radial-gradient(circle,var(--grid-dot) 0 .8px,transparent 1.2px);background-size:18px 18px;background-position:9px 9px}
+/* past the fit the map reaches out of the frame, and the frame takes the drag that pans it (tools.ts) */
+.frame.pan{pointer-events:auto;cursor:grab;touch-action:none;user-select:none}
+.frame.pan.dragging{cursor:grabbing}
 /* the canvas world: a zero-size layer in screen coordinates. Zoom scales it around the current slot. */
 .cv{position:fixed;z-index:2;left:0;top:0;width:0;height:0;pointer-events:none}
 /* the focus ring keeps its screen width at every zoom; place() sets --k */

@@ -7,7 +7,7 @@ import { deckFlow, deckGraph } from "../src/data/adapt.ts";
 import type { DeckFlow } from "../src/data/models.ts";
 import { isShown } from "../src/layout/explorer.ts";
 import { MIN_DECK_W } from "../src/layout/deck-geometry.ts";
-import { buildModel, initialState, nextStep, shownFile, shownZoom, withMembership } from "../src/layout/model.ts";
+import { buildModel, initialState, nextStep, shownFile, withMembership } from "../src/layout/model.ts";
 
 import { artifact, DIGEST, graphDocument, must } from "./fixtures.ts";
 
@@ -94,11 +94,3 @@ test("forward goes to the next step, and from the rest state continues at the st
   assert.equal(nextStep({ cur: 12, resume: 4 }), 13);
 });
 
-test("a small frame lowers the shown zoom but never the user's zoom, so a larger frame gives it back", () => {
-  const state = { zoom: 1, zoomMax: 1.5 };
-  state.zoomMax = 0.5;
-  assert.equal(shownZoom(state), 0.5);
-  assert.equal(state.zoom, 1);
-  state.zoomMax = 1.2;
-  assert.equal(shownZoom(state), 1);
-});

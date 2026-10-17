@@ -96,10 +96,15 @@ export interface DeckState {
   resume: number;
   /** Compact starts on at every load. Only the compact button and `c` turn it off. */
   compact: boolean;
-  /** The user's zoom. The map shows it lowered to `zoomMax` (see `shownZoom`), and gets it back in a larger frame. */
+  /** The user's zoom. Past the frame's fit the map leaves the frame, and the pan reaches the rest. */
   zoom: number;
-  /** The largest zoom that fits the frame. place() sets it, except in full screen, where the frame has no size. */
-  zoomMax: number;
+  /** The largest zoom at which the deck and the widest file box fit the frame side by side (`zoomFit`). place() sets it,
+   *  except in full screen, where the frame has no size. */
+  wide: number;
+  /** How far the map reaches past the frame's right and bottom edges. place() sets it. */
+  reach: { x: number; y: number };
+  /** The screen offset of the map, from -reach to 0 on each axis. */
+  pan: { x: number; y: number };
   full: boolean;
   /** Open directories. */
   open: Set<string>;
@@ -118,11 +123,8 @@ export function initialState(model: DeckModel): DeckState {
     const row = model.rowByPath.get(file);
     if (row) openTo(open, row);
   }
-  return { cur: 0, resume: 0, compact: true, zoom: 1, zoomMax: ZOOM_MAX, full: false, open, folded: new Set(), browseFile: null, anchor: null };
+  return { cur: 0, resume: 0, compact: true, zoom: 1, wide: ZOOM_MAX, reach: { x: 0, y: 0 }, pan: { x: 0, y: 0 }, full: false, open, folded: new Set(), browseFile: null, anchor: null };
 }
-
-/** The zoom that the map shows: the user's zoom, lowered to the largest zoom that fits the frame. It never changes the user's zoom. */
-export const shownZoom = (state: Pick<DeckState, "zoom" | "zoomMax">) => Math.min(state.zoom, state.zoomMax);
 
 /** Returns the step that forward goes to: the next step, or from the rest state the step that a clear left. */
 export const nextStep = (state: Pick<DeckState, "cur" | "resume">) => state.cur ? state.cur + 1 : state.resume || 1;

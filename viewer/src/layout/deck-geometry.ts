@@ -70,21 +70,34 @@ export const fileRoom = (frameLeft: number, deckLeft: number, k: number) => Math
 export const deckTransform = (spot: { x: number; y: number }, anchor: { x: number; y: number }, k: number) =>
   `translate(${f1(anchor.x + (spot.x - anchor.x) / k)}px,${f1(anchor.y + (spot.y - anchor.y) / k)}px) rotateX(${TILT}deg)`;
 
-/** The screen y of the file node's center: level with its explorer row, unless the box would leave the frame. */
+/** The screen y of the file node's center: level with its explorer row, unless the box would leave the frame.
+ *  The box top sits 10 box px above the node's center. */
 export function fileBoxCenter(rowY: number, frame: Frame, fileHeight: number, k: number): number {
-  const lo = frame.top + 18, hi = Math.max(lo, frame.top + frame.height - 8 - fileHeight * k + 10);
+  const lo = frame.top + 18, hi = Math.max(lo, frame.top + frame.height - 8 - (fileHeight - 10) * k);
   return clamp(rowY, lo, hi);
 }
 
-/** The zoom range of a frame. `max` is the largest zoom at which the deck fits the frame height and the widest flow
- *  file box (`fileRight`) ends CLEAR px before the deck, but not under the floor: there the names end in an ellipsis.
- *  The floor gives way where even the narrowest rows (`fileMin`) would reach the deck.
- *  `start` is that fit in 10% steps, from the floor to 100%. */
-export function zoomFit(frame: Frame, codeLeft: number, deck: { width: number; maxHeight: number }, fileRight: number, fileMin: number): { start: number; max: number } {
-  const room = codeLeft - ARROW_GAP - 12 - CLEAR - frame.left - FILE_X;
+/** The room for the file box and the deck at 100%, between the file box's left edge and the deck's pinned right edge. */
+const roomOf = (frame: Frame, codeLeft: number) => codeLeft - ARROW_GAP - 12 - CLEAR - frame.left - FILE_X;
+
+/** The zoom range of a frame. `wide` is the largest zoom at which the widest flow file box (`fileRight`) ends CLEAR px
+ *  before the deck, but not under the floor: there the names end in an ellipsis. The floor gives way where even the
+ *  narrowest rows (`fileMin`) would reach the deck. `max` is `wide` lowered to where the deck fits the frame height:
+ *  the largest zoom that shows the whole map. `start` is that fit in 10% steps, from the floor to 100%. */
+export function zoomFit(frame: Frame, codeLeft: number, deck: { width: number; maxHeight: number }, fileRight: number, fileMin: number): { start: number; max: number; wide: number } {
+  const room = roomOf(frame, codeLeft);
   const side = room / Math.max(1, fileRight + deck.width);
   const floor = Math.min(ZOOM_FLOOR, room / Math.max(1, fileMin + deck.width));
   const tall = (frame.height - 12) / deckDepth(deck.maxHeight);
-  const max = clamp(Math.min(tall, Math.max(floor, side)), ZOOM_MIN, ZOOM_MAX);
-  return { start: Math.min(max, 1, Math.max(floor, Math.floor(side * 10 + 1e-9) / 10)), max };
+  const wide = Math.max(floor, side);
+  const max = clamp(Math.min(tall, wide), ZOOM_MIN, ZOOM_MAX);
+  return { start: Math.min(max, 1, Math.max(floor, Math.floor(side * 10 + 1e-9) / 10)), max, wide };
 }
+
+/** How far the deck moves right of its pinned spot at zoom k. Past the width fit `wide` the map grows as it does at the fit,
+ *  so the rows keep their room before the deck, and the deck leaves the frame on the right. */
+export const deckShift = (frame: Frame, codeLeft: number, wide: number, k: number) =>
+  Math.max(0, roomOf(frame, codeLeft) * (k / Math.max(1e-3, wide) - 1));
+
+/** How far the deck reaches below the frame at zoom k, 4 px inside its edge, where the deck no longer fits its height. */
+export const deckBelow = (frameHeight: number, maxHeight: number, k: number) => Math.max(0, deckDepth(maxHeight) * k + 8 - frameHeight);

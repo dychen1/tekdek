@@ -1,9 +1,9 @@
 /* Deck tools. This module owns the map tools (compact, zoom, key), the key popover with its cluster legend, the
-   theme switch, full screen code, the shortcut switch, and the top band layout. `main.ts` owns the flow badge in the top band.
+   theme switch, the map pan, full screen code, the shortcut switch, and the top band layout. `main.ts` owns the flow
+   badge in the top band.
    # Sections
    key popover, theme variant, map tools, full screen, shortcuts, top band */
-import { ZOOM_MIN } from "../layout/deck-geometry.ts";
-import { shownZoom } from "../layout/model.ts";
+import { ZOOM_MAX, ZOOM_MIN } from "../layout/deck-geometry.ts";
 import { rangesOf } from "../layout/plan.ts";
 import { clamp, esc } from "../layout/util.ts";
 import { icon } from "./markup.ts";
@@ -82,19 +82,24 @@ export function createTools(ctx: DeckContext): Tools {
   /** Shows the compact state, the zoom level and its limits, and the current cluster in the key.
    *  Compact is off at rest. Compact and zoom are off in full screen, where the map does not show. */
   function sync() {
-    const k = shownZoom(state);
+    const k = state.zoom;
     compactBtn.disabled = !state.cur || state.full;
     compactBtn.setAttribute("aria-pressed", String(state.compact));
     zoomLbl.textContent = `${Math.round(k * 100)}%`;
     zoomOut.disabled = state.full || k <= ZOOM_MIN + 1e-3;
-    zoomIn.disabled = state.full || k >= state.zoomMax - 1e-3;
+    zoomIn.disabled = state.full || k >= ZOOM_MAX - 1e-3;
     const id = model.stepCluster(state.cur);
     kpClusters.querySelectorAll<HTMLElement>(".kp-c").forEach(b => b.classList.toggle("on", !!id && b.dataset.c === id));
   }
 
-  /** Sets the user's zoom, from 50% to the largest zoom at which the deck fits the frame. The canvas scales around the file node. */
-  function setZoom(k: number) {
-    state.zoom = clamp(k, ZOOM_MIN, state.zoomMax);
+  const frame = $("#frame");
+  /** Sets the user's zoom, from 50% to 150%. The map point at `at` (the frame's center by default) stays put on screen:
+   *  past the fit the map grows from the frame's top left corner, so the pan moves by the growth before that point. */
+  function setZoom(k: number, at?: { x: number; y: number }) {
+    const f = frame.getBoundingClientRect(), p = at ?? { x: f.left + f.width / 2, y: f.top + f.height / 2 };
+    const s = clamp(k, ZOOM_MIN, ZOOM_MAX) / state.zoom;
+    state.zoom = clamp(k, ZOOM_MIN, ZOOM_MAX);
+    state.pan = { x: p.x - f.left - (p.x - f.left - state.pan.x) * s, y: p.y - f.top - (p.y - f.top - state.pan.y) * s };
     ctx.place();
     sync();
   }
@@ -110,25 +115,62 @@ export function createTools(ctx: DeckContext): Tools {
 
   compactBtn.addEventListener("click", toggleCompact, { signal });
   // The buttons step to the next tenth, also after a wheel zoom left the level between tenths.
-  zoomOut.addEventListener("click", () => setZoom(Math.round(shownZoom(state) * 10 - 1) / 10), { signal });
-  zoomIn.addEventListener("click", () => setZoom(Math.round(shownZoom(state) * 10 + 1) / 10), { signal });
+  zoomOut.addEventListener("click", () => setZoom(Math.round(state.zoom * 10 - 1) / 10), { signal });
+  zoomIn.addEventListener("click", () => setZoom(Math.round(state.zoom * 10 + 1) / 10), { signal });
 
-  // Cmd + scroll over the canvas frame zooms continuously; a trackpad pinch sends the wheel with Ctrl.
-  // The scroll of one frame applies once, so a fast trackpad places the map at most once a frame.
-  const frame = $("#frame");
-  let wheel = 0, pending = 0;
+  // ============ map pan ============
+  // Past the fit the frame clips the map. Dragging the frame or scrolling over it moves the map, and a box that takes
+  // the focus outside the frame moves into it. place() keeps the pan inside the map's reach.
+
+  /** True when a move by a screen delta changes the pan; at its limit a scroll goes to the page instead. */
+  const pans = (dx: number, dy: number) =>
+    clamp(state.pan.x + dx, -state.reach.x, 0) !== state.pan.x || clamp(state.pan.y + dy, -state.reach.y, 0) !== state.pan.y;
+  function panBy(dx: number, dy: number) {
+    state.pan = { x: state.pan.x + dx, y: state.pan.y + dy };
+    ctx.place();
+  }
+
+  // Cmd + scroll over the canvas frame zooms continuously at the cursor; a trackpad pinch sends the wheel with Ctrl.
+  // A plain scroll and a drag pan. The input of one frame applies once, so a fast trackpad places the map at most once a frame.
+  let wheel = 0, at = { x: 0, y: 0 }, move = { x: 0, y: 0 }, pending = 0;
+  const flush = () => {
+    pending = 0;
+    if (wheel) setZoom(state.zoom * Math.exp(-wheel * 0.002), at);
+    if (move.x || move.y) panBy(move.x, move.y);
+    wheel = 0; move = { x: 0, y: 0 };
+  };
   document.addEventListener("wheel", e => {
-    if (!e.metaKey && !e.ctrlKey) return;
     const r = frame.getBoundingClientRect();
     if (state.full || e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) return;
+    const px = e.deltaMode === WheelEvent.DOM_DELTA_LINE ? 33 : 1;
+    if (e.metaKey || e.ctrlKey) { wheel += e.deltaY * px; at = { x: e.clientX, y: e.clientY }; }
+    else if (pans(move.x - e.deltaX * px, move.y - e.deltaY * px)) move = { x: move.x - e.deltaX * px, y: move.y - e.deltaY * px };
+    else return;
     e.preventDefault();
-    wheel += e.deltaMode === WheelEvent.DOM_DELTA_LINE ? e.deltaY * 33 : e.deltaY;
-    pending ||= requestAnimationFrame(() => {
-      pending = 0;
-      setZoom(shownZoom(state) * Math.exp(-wheel * 0.002));
-      wheel = 0;
-    });
+    pending ||= requestAnimationFrame(flush);
   }, { passive: false, signal });
+  // the frame takes the pointer only while the map reaches past it (`.frame.pan`); the boxes and rows above it keep their clicks
+  let drag: { id: number; x: number; y: number } | null = null;
+  frame.addEventListener("pointerdown", e => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    drag = { id: e.pointerId, x: e.clientX, y: e.clientY };
+    frame.setPointerCapture(e.pointerId);
+    frame.classList.add("dragging");
+  }, { signal });
+  frame.addEventListener("pointermove", e => {
+    if (drag?.id !== e.pointerId) return;
+    move = { x: move.x + e.clientX - drag.x, y: move.y + e.clientY - drag.y };
+    drag.x = e.clientX; drag.y = e.clientY;
+    pending ||= requestAnimationFrame(flush);
+  }, { signal });
+  frame.addEventListener("lostpointercapture", () => { drag = null; frame.classList.remove("dragging"); }, { signal });
+  $("#cv").addEventListener("focusin", e => {
+    const b = (e.target as Element).getBoundingClientRect(), f = frame.getBoundingClientRect();
+    const dx = b.left < f.left ? f.left + 12 - b.left : b.right > f.right ? f.right - 12 - b.right : 0;
+    const dy = b.top < f.top ? f.top + 12 - b.top : b.bottom > f.bottom ? f.bottom - 12 - b.bottom : 0;
+    if (dx || dy) panBy(dx, dy);
+  }, { signal });
   signal.addEventListener("abort", () => cancelAnimationFrame(pending));
 
   // ============ full screen ============
