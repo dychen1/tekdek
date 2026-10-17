@@ -60,6 +60,7 @@ try {
       <li><svg class="kp-g" width="28" height="8" viewBox="0 0 28 8" aria-hidden="true"><path class="g3" d="M1 4H21"/><path class="h3" d="M20 1 27 4 20 7z"/></svg><span>Arrow: the current box to its source in the code column.</span></li>
     </ul>
     <dl class="kp-keys" aria-label="More keys">
+      <dt class="ck"><kbd>h</kbd> <kbd>l</kbd></dt><dd class="ck">previous or next section: the step where the cluster changes</dd>
       <dt class="ck"><kbd>c</kbd></dt><dd class="ck">fold or name the functions off the flow path</dd>
       <dt><kbd>⌘</kbd> scroll</dt><dd>zoom the map</dd>
     </dl>
@@ -105,7 +106,7 @@ try {
   <div class="ticks" id="ticks" role="group" aria-label="Steps"></div>
 </section>
 <!-- The .ck parts name the one-character keys; they hide while the key popover turns those keys off. -->
-<p class="help" id="help" aria-label="Shortcuts"><span class="hk"><span class="ck">j/<span class="vh"> or </span></span><svg class="ic" aria-hidden="true"><use href="#i-left"/></svg><span class="vh">left arrow</span></span>back<i class="hsep" aria-hidden="true"></i><span class="hk"><span class="ck">k/<span class="vh"> or </span></span><svg class="ic" aria-hidden="true"><use href="#i-right"/></svg><span class="vh">right arrow</span></span>forward<span class="ck"><i class="hsep" aria-hidden="true"></i><span class="hk">f</span>full screen</span><i class="hsep" aria-hidden="true"></i><span class="hk">esc</span>clear<span class="ck"><i class="hsep" aria-hidden="true"></i><span class="hk">?</span>key</span></p>
+<p class="help" id="help" aria-label="Shortcuts"><span class="hk"><span class="ck">j/<span class="vh"> or </span></span><svg class="ic" aria-hidden="true"><use href="#i-left"/></svg><span class="vh">left arrow</span></span>back<i class="hsep" aria-hidden="true"></i><span class="hk"><span class="ck">k/<span class="vh"> or </span></span><svg class="ic" aria-hidden="true"><use href="#i-right"/></svg><span class="vh">right arrow</span></span>forward<span class="ck"><i class="hsep" aria-hidden="true"></i><span class="hk">h/l</span>section</span><span class="ck"><i class="hsep" aria-hidden="true"></i><span class="hk">f</span>full screen</span><i class="hsep" aria-hidden="true"></i><span class="hk">esc</span>clear<span class="ck"><i class="hsep" aria-hidden="true"></i><span class="hk">?</span>key</span></p>
 
 <!-- The map follows the controls in DOM order, so Tab reaches the tree, the tools, the code column, and the controls first. -->
 <main class="cv" id="cv" aria-label="Map: the current file and the current cluster">

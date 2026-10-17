@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { deckFlow, deckGraph } from "../src/data/adapt.ts";
-import { buildPlan, memberOrder, nextStepOfFile, rangesOf } from "../src/layout/plan.ts";
+import { buildPlan, memberOrder, nextRunStart, nextStepOfFile, prevRunStart, rangesOf } from "../src/layout/plan.ts";
 
 import { artifact, DIGEST, graphDocument, must } from "./fixtures.ts";
 
@@ -35,4 +35,17 @@ test("members follow their first visit, and a file click goes to its next step",
   const gap = s.findIndex((step, k) => k + 1 < s.length && s[k + 1] > step + 1);
   if (gap >= 0) assert.equal(nextStepOfFile(plan, file, s[gap] + 1), s[gap + 1]);
   assert.equal(nextStepOfFile(plan, "src/none.rs", 0), null);
+});
+
+test("h and l go to the first step of the previous and the next section", () => {
+  const starts = plan.runs.map(run => run.start);
+  assert.ok(starts.length >= 2, "a flow with two sections");
+  assert.equal(nextRunStart(plan, 0), starts[0]);
+  assert.equal(prevRunStart(plan, 0), null);
+  for (const [i, run] of plan.runs.entries()) {
+    for (const step of [run.start, run.end]) {
+      assert.equal(nextRunStart(plan, step), starts[i + 1] ?? null);
+      assert.equal(prevRunStart(plan, step), i ? starts[i - 1] : null);
+    }
+  }
 });

@@ -56,6 +56,16 @@ export function buildPlan(flow: DeckFlow, fileOf: (key: string) => string | unde
 /** Returns the run that holds a step, or null. */
 const runAt = (plan: FlowPlan, index: number) => plan.runs.find(run => index >= run.start && index <= run.end) ?? null;
 
+/** The first step of the section after the one that holds a step, or null in the last section. A section is a run.
+ *  From the rest state it is the first section. */
+export const nextRunStart = (plan: FlowPlan, current: number) => plan.runs.find(run => run.start > current)?.start ?? null;
+
+/** The first step of the section before the one that holds a step, or null in the first section and at rest. */
+export function prevRunStart(plan: FlowPlan, current: number): number | null {
+  const i = plan.runs.findIndex(run => current >= run.start && current <= run.end);
+  return i > 0 ? plan.runs[i - 1]!.start : null;
+}
+
 /** Returns the step ranges of a cluster, for example "1–4, 15–20, 37". */
 export const rangesOf = (plan: FlowPlan, cluster: string) => plan.runs.filter(run => run.cluster === cluster)
   .map(run => run.start === run.end ? `${run.start}` : `${run.start}–${run.end}`).join(", ");
