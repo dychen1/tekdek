@@ -1,7 +1,7 @@
 //! Rust syntax facts.
 //!
 //! This module selects Rust documents and extracts native syntax facts.
-//! It reports modules, types, fields, callables, containment, local imports,
+//! It reports modules, types, fields, callables, containment, import sites,
 //! and declared metadata.
 //!
 //! `paths` maps files to crate roots and module paths. `signature` reads
@@ -17,7 +17,7 @@
 mod paths;
 mod signature;
 
-use std::{collections::HashMap, path::Component};
+use std::collections::HashMap;
 
 use paths::{ModulePath, crate_roots, module_path, relative_module_path};
 use signature::{
@@ -27,8 +27,9 @@ use signature::{
 
 use proc_macro2::{LineColumn, Span};
 use syn::{
-    Attribute, Block, Fields, FnArg, ImplItem, Item, ItemImpl, ItemMod, ItemTrait, PathArguments,
-    Signature, TraitItem, Type, TypePath, UseTree, Visibility, spanned::Spanned,
+    Attribute, Block, Fields, FnArg, ImplItem, Item, ItemImpl, ItemMod, ItemTrait, ItemUse,
+    PathArguments, Signature, Stmt, TraitItem, Type, TypePath, UseTree, Visibility,
+    spanned::Spanned,
 };
 
 use crate::analysis::{
@@ -36,6 +37,7 @@ use crate::analysis::{
         AnalysisError, CallableData, CallableKind, EntityEvidence, EntityKey, EntityKind,
         FieldData, RelationKind, SyntaxFactBuilder, SyntaxFacts, TypeData, TypeKind,
     },
+    language::document_path,
     source::{DocumentSnapshot, SourceRange, SourceSpan, Sources, document_has_extension},
 };
 
@@ -91,7 +93,7 @@ fn parse_document(document: &DocumentSnapshot) -> Result<ParsedDocument<'_>, Ana
     let path = document_path(document)?.to_owned();
     let syntax = syn::parse_file(&document.content)
         .map_err(|error| AnalysisError::new(format!("cannot parse Rust source {path}: {error}")))?;
-    let lines = LineIndex::new(&document.content)?;
+    let lines = LineIndex::new(&document.content);
 
     Ok(ParsedDocument {
         path,
@@ -102,42 +104,9 @@ fn parse_document(document: &DocumentSnapshot) -> Result<ParsedDocument<'_>, Ana
     })
 }
 
-/// Returns one strict relative UTF-8 document path.
-fn document_path(document: &DocumentSnapshot) -> Result<&str, AnalysisError> {
-    if document.path.is_absolute() {
-        return Err(AnalysisError::new(format!(
-            "the document path must be relative: {}",
-            document.path.display()
-        )));
-    }
-    if document
-        .path
-        .components()
-        .any(|component| !matches!(component, Component::Normal(_)))
-    {
-        return Err(AnalysisError::new(format!(
-            "the document path must contain only normal components: {}",
-            document.path.display()
-        )));
-    }
-
-    document.path.to_str().ok_or_else(|| {
-        AnalysisError::new(format!(
-            "the document path is not valid UTF-8: {}",
-            document.path.display()
-        ))
-    })
-}
-
 // -----------------------------------------------------------------------------
 // Source Model
 // -----------------------------------------------------------------------------
-
-#[derive(Clone, Eq, Hash, PartialEq)]
-struct QualifiedTypeName {
-    module: ModulePath,
-    name: String,
-}
 
 #[derive(Eq, Hash, PartialEq)]
 struct DeclarationId {
@@ -165,20 +134,23 @@ struct LineIndex {
 }
 
 impl LineIndex {
-    fn new(source: &str) -> Result<Self, AnalysisError> {
-        u32::try_from(source.len())
-            .map_err(|_| AnalysisError::new("the Rust source is too large"))?;
-        let mut starts = vec![0];
+    fn new(source: &str) -> Self {
+        // The parser removes a byte order mark before it counts line-1 columns.
+        let mut starts = vec![if source.starts_with('\u{feff}') {
+            '\u{feff}'.len_utf8()
+        } else {
+            0
+        }];
         starts.extend(
             source
                 .bytes()
                 .enumerate()
                 .filter_map(|(offset, byte)| (byte == b'\n').then_some(offset + 1)),
         );
-        Ok(Self {
+        Self {
             starts,
             source_len: source.len(),
-        })
+        }
     }
 
     /// Converts a parser location to one UTF-8 byte offset.
@@ -213,12 +185,9 @@ impl LineIndex {
 struct RustSyntaxWalker {
     builder: SyntaxFactBuilder,
     modules: HashMap<ModulePath, Vec<EntityKey>>,
-    types: HashMap<QualifiedTypeName, Vec<EntityKey>>,
     types_by_owner: HashMap<EntityKey, HashMap<String, Vec<EntityKey>>>,
-    file_modules: HashMap<String, EntityKey>,
     declared_modules: HashMap<DeclarationId, EntityKey>,
     declared_types: HashMap<DeclarationId, EntityKey>,
-    containments: Vec<(EntityKey, EntityKey)>,
 }
 
 impl RustSyntaxWalker {
@@ -226,12 +195,9 @@ impl RustSyntaxWalker {
         Self {
             builder: SyntaxFactBuilder::new(),
             modules: HashMap::new(),
-            types: HashMap::new(),
             types_by_owner: HashMap::new(),
-            file_modules: HashMap::new(),
             declared_modules: HashMap::new(),
             declared_types: HashMap::new(),
-            containments: Vec::new(),
         }
     }
 }
@@ -243,7 +209,9 @@ impl RustSyntaxWalker {
 /// Produces facts with three ordered syntax passes.
 ///
 /// Pass one registers modules and types. Pass two registers fields and
-/// callables. Pass three adds containment and local import relations.
+/// callables, and the import sites in callable bodies. Both passes add the
+/// containment relation of each new entity. Pass three adds module import
+/// sites.
 fn produce_document_facts(documents: &[ParsedDocument<'_>]) -> Result<SyntaxFacts, AnalysisError> {
     let mut walker = RustSyntaxWalker::new();
 
@@ -251,7 +219,7 @@ fn produce_document_facts(documents: &[ParsedDocument<'_>]) -> Result<SyntaxFact
         walker.register_file_module(document)?;
     }
     for document in documents {
-        let module = walker.file_module(document)?;
+        let module = EntityKey::module(&document.path);
         walker.register_types(
             document,
             &document.syntax.items,
@@ -260,7 +228,7 @@ fn produce_document_facts(documents: &[ParsedDocument<'_>]) -> Result<SyntaxFact
         )?;
     }
     for document in documents {
-        let module = walker.file_module(document)?;
+        let module = EntityKey::module(&document.path);
         walker.register_members(
             document,
             &document.syntax.items,
@@ -269,54 +237,22 @@ fn produce_document_facts(documents: &[ParsedDocument<'_>]) -> Result<SyntaxFact
             &module,
         )?;
     }
-
-    walker.add_containment_relations();
     for document in documents {
-        let module = walker.file_module(document)?;
-        walker.add_import_relations(
-            document,
-            &document.syntax.items,
-            &document.module_path,
-            &module,
-        )?;
+        let module = EntityKey::module(&document.path);
+        walker.add_import_sites(document, &document.syntax.items, &module)?;
     }
 
     Ok(walker.builder.finish())
 }
 
 impl RustSyntaxWalker {
-    fn file_module(&self, document: &ParsedDocument<'_>) -> Result<EntityKey, AnalysisError> {
-        self.file_modules
-            .get(&document.path)
-            .cloned()
-            .ok_or_else(|| {
-                AnalysisError::new(format!(
-                    "the {} file module was not registered",
-                    document.path
-                ))
-            })
-    }
-
     /// Registers one file module before item traversal starts.
     fn register_file_module(&mut self, document: &ParsedDocument<'_>) -> Result<(), AnalysisError> {
-        let end = u32::try_from(document.source.len())
-            .map_err(|_| AnalysisError::new("the Rust source is too large"))?;
-        let module = self.builder.add_module(
-            &document.path,
-            EntityEvidence {
-                path: document.path.clone(),
-                declarations: Vec::new(),
-                scope: Some(SourceRange { start: 0, end }),
-                body: Some(SourceRange { start: 0, end }),
-                type_inputs: Vec::new(),
-                type_outputs: Vec::new(),
-            },
-        )?;
+        let module = self.builder.add_module(&document.path, document.source)?;
         self.modules
             .entry(document.module_path.clone())
             .or_default()
-            .push(module.clone());
-        self.file_modules.insert(document.path.clone(), module);
+            .push(module);
         Ok(())
     }
 
@@ -338,7 +274,6 @@ impl RustSyntaxWalker {
                 Item::Struct(item) => {
                     self.register_type(
                         document,
-                        module_path,
                         module,
                         &item.ident,
                         TypeKind::Struct,
@@ -352,7 +287,6 @@ impl RustSyntaxWalker {
                 Item::Enum(item) => {
                     self.register_type(
                         document,
-                        module_path,
                         module,
                         &item.ident,
                         TypeKind::Enum,
@@ -366,7 +300,6 @@ impl RustSyntaxWalker {
                 Item::Trait(item) => {
                     self.register_type(
                         document,
-                        module_path,
                         module,
                         &item.ident,
                         TypeKind::Trait,
@@ -400,10 +333,12 @@ impl RustSyntaxWalker {
             item.span(),
             Some((brace.span.open(), brace.span.close())),
         )?;
+        let declaration_start = evidence.declarations[0].start;
         let module =
             self.builder
                 .add_entity(owner, item.ident.to_string(), EntityKind::Module, evidence);
-        self.containments.push((owner.clone(), module.clone()));
+        self.builder
+            .add_relation(owner, &module, RelationKind::Contains);
 
         let mut nested_path = module_path.clone();
         nested_path.segments.push(item.ident.to_string());
@@ -411,11 +346,10 @@ impl RustSyntaxWalker {
             .entry(nested_path.clone())
             .or_default()
             .push(module.clone());
-        let declaration = source_range(document, item.ident.span())?;
         self.declared_modules.insert(
             DeclarationId {
                 path: document.path.clone(),
-                start: declaration.start,
+                start: declaration_start,
             },
             module.clone(),
         );
@@ -429,7 +363,6 @@ impl RustSyntaxWalker {
     fn register_type(
         &mut self,
         document: &ParsedDocument<'_>,
-        module_path: &ModulePath,
         owner: &EntityKey,
         ident: &syn::Ident,
         kind: TypeKind,
@@ -438,7 +371,8 @@ impl RustSyntaxWalker {
         end: Span,
         body: Option<(Span, Span)>,
     ) -> Result<(), AnalysisError> {
-        let declaration = source_range(document, ident.span())?;
+        let evidence = entity_evidence(document, ident.span(), start, end, body)?;
+        let declaration_start = evidence.declarations[0].start;
         let name = ident.to_string();
         let entity = self.builder.add_entity(
             owner,
@@ -447,27 +381,10 @@ impl RustSyntaxWalker {
                 kind,
                 documentation: documentation(attrs),
             }),
-            EntityEvidence {
-                path: document.path.clone(),
-                declarations: vec![declaration],
-                scope: Some(source_range_between(document, start, end)?),
-                body: body
-                    .map(|(body_start, body_end)| {
-                        source_range_between(document, body_start, body_end)
-                    })
-                    .transpose()?,
-                type_inputs: Vec::new(),
-                type_outputs: Vec::new(),
-            },
+            evidence,
         );
-        self.containments.push((owner.clone(), entity.clone()));
-        self.types
-            .entry(QualifiedTypeName {
-                module: module_path.clone(),
-                name: name.clone(),
-            })
-            .or_default()
-            .push(entity.clone());
+        self.builder
+            .add_relation(owner, &entity, RelationKind::Contains);
         self.types_by_owner
             .entry(owner.clone())
             .or_default()
@@ -477,7 +394,7 @@ impl RustSyntaxWalker {
         self.declared_types.insert(
             DeclarationId {
                 path: document.path.clone(),
-                start: declaration.start,
+                start: declaration_start,
             },
             entity,
         );
@@ -603,23 +520,18 @@ impl RustSyntaxWalker {
                     .map_or_else(|| index.to_string(), |variant| format!("{variant}.{index}"));
                 (name, field.ty.span())
             };
-            let declaration = source_range(document, declaration_span)?;
+            let evidence =
+                entity_evidence(document, declaration_span, field.span(), field.span(), None)?;
             let entity = self.builder.add_entity(
                 owner,
                 name,
                 EntityKind::Field(FieldData {
                     declared_type: Some(source_text(document, field.ty.span())?.trim().to_owned()),
                 }),
-                EntityEvidence {
-                    path: document.path.clone(),
-                    declarations: vec![declaration],
-                    scope: Some(source_range(document, field.span())?),
-                    body: None,
-                    type_inputs: Vec::new(),
-                    type_outputs: Vec::new(),
-                },
+                evidence,
             );
-            self.containments.push((owner.clone(), entity));
+            self.builder
+                .add_relation(owner, &entity, RelationKind::Contains);
         }
         Ok(())
     }
@@ -705,6 +617,20 @@ impl RustSyntaxWalker {
         let signature_text = source_text_between(document, start, signature.span())?
             .trim()
             .to_owned();
+        let mut evidence = entity_evidence(
+            document,
+            signature.ident.span(),
+            start,
+            end,
+            body.map(|block| {
+                (
+                    block.brace_token.span.open(),
+                    block.brace_token.span.close(),
+                )
+            }),
+        )?;
+        evidence.type_inputs = callable_type_inputs(document, signature)?;
+        evidence.type_outputs = callable_type_outputs(document, signature)?;
         let entity = self.builder.add_entity(
             owner,
             signature.ident.to_string(),
@@ -715,24 +641,15 @@ impl RustSyntaxWalker {
                 return_type: callable_return_type(document, signature)?,
                 documentation: documentation(attrs),
             }),
-            EntityEvidence {
-                path: document.path.clone(),
-                declarations: vec![source_range(document, signature.ident.span())?],
-                scope: Some(source_range_between(document, start, end)?),
-                body: body
-                    .map(|block| {
-                        source_range_between(
-                            document,
-                            block.brace_token.span.open(),
-                            block.brace_token.span.close(),
-                        )
-                    })
-                    .transpose()?,
-                type_inputs: callable_type_inputs(document, signature)?,
-                type_outputs: callable_type_outputs(document, signature)?,
-            },
+            evidence,
         );
-        self.containments.push((owner.clone(), entity));
+        self.builder
+            .add_relation(owner, &entity, RelationKind::Contains);
+        for statement in body.map_or(&[][..], |block| &block.stmts) {
+            if let Stmt::Item(Item::Use(item)) = statement {
+                self.add_use_site(document, &entity, item)?;
+            }
+        }
         Ok(())
     }
 
@@ -765,26 +682,7 @@ impl RustSyntaxWalker {
         let Some(path) = relative_module_path(current_path, path) else {
             return Lookup::Absent;
         };
-        self.lookup_module(&path)
-    }
-
-    fn resolve_module(
-        &self,
-        current_path: &ModulePath,
-        current_module: &EntityKey,
-        path: &[String],
-    ) -> Lookup<EntityKey> {
-        if path == ["self"] {
-            return Lookup::Unique(current_module.clone());
-        }
-        let Some(path) = relative_module_path(current_path, path) else {
-            return Lookup::Absent;
-        };
-        self.lookup_module(&path)
-    }
-
-    fn lookup_module(&self, path: &ModulePath) -> Lookup<EntityKey> {
-        unique_entity(self.modules.get(path))
+        unique_entity(self.modules.get(&path))
     }
 
     fn lookup_type(&self, owner: &EntityKey, name: &str) -> Lookup<EntityKey> {
@@ -795,18 +693,11 @@ impl RustSyntaxWalker {
         )
     }
 
-    fn add_containment_relations(&mut self) {
-        for (owner, child) in self.containments.drain(..) {
-            self.builder
-                .add_relation(&owner, &child, RelationKind::Contains);
-        }
-    }
-
-    fn add_import_relations(
+    /// Adds one import site for each `use` item in a module and its inline modules.
+    fn add_import_sites(
         &mut self,
         document: &ParsedDocument<'_>,
         items: &[Item],
-        module_path: &ModulePath,
         module: &EntityKey,
     ) -> Result<(), AnalysisError> {
         for item in items {
@@ -814,35 +705,12 @@ impl RustSyntaxWalker {
                 // Enter one inline module.
                 Item::Mod(item) => {
                     if let Some((_, nested_items)) = &item.content {
-                        let mut nested_path = module_path.clone();
-                        nested_path.segments.push(item.ident.to_string());
                         let nested = self.declared_module(document, &item.ident)?;
-                        self.add_import_relations(document, nested_items, &nested_path, &nested)?;
+                        self.add_import_sites(document, nested_items, &nested)?;
                     }
                 }
-                // Resolve direct local use paths.
-                Item::Use(item) => {
-                    let mut paths = Vec::new();
-                    flatten_use_tree(&item.tree, &mut Vec::new(), &mut paths);
-                    let observation = SourceSpan {
-                        path: document.path.clone(),
-                        range: source_range_between(
-                            document,
-                            item.use_token.span,
-                            item.semi_token.span,
-                        )?,
-                    };
-                    for path in paths {
-                        if let Some(target) = self.resolve_import(module_path, module, &path) {
-                            self.builder.add_observed_relation(
-                                module,
-                                &target,
-                                RelationKind::Imports,
-                                vec![observation.clone()],
-                            );
-                        }
-                    }
-                }
+                // Record one use statement.
+                Item::Use(item) => self.add_use_site(document, module, item)?,
                 // Ignore syntax without nested module imports.
                 _ => {}
             }
@@ -850,17 +718,25 @@ impl RustSyntaxWalker {
         Ok(())
     }
 
-    fn resolve_import(
-        &self,
-        current_path: &ModulePath,
-        current_module: &EntityKey,
-        path: &[String],
-    ) -> Option<EntityKey> {
-        match self.resolve_module(current_path, current_module, path) {
-            Lookup::Unique(module) => Some(module),
-            Lookup::Ambiguous => None,
-            Lookup::Absent => self.resolve_type(current_path, current_module, path),
-        }
+    /// Adds one import site for one `use` item and its leaf names.
+    fn add_use_site(
+        &mut self,
+        document: &ParsedDocument<'_>,
+        owner: &EntityKey,
+        item: &ItemUse,
+    ) -> Result<(), AnalysisError> {
+        let mut leaves = Vec::new();
+        use_tree_leaves(&item.tree, None, &mut leaves);
+        let names = leaves
+            .into_iter()
+            .map(|leaf| source_range(document, leaf))
+            .collect::<Result<_, _>>()?;
+        let statement = SourceSpan {
+            path: document.path.clone(),
+            range: source_range_between(document, item.use_token.span, item.semi_token.span)?,
+        };
+        self.builder.add_import_site(owner, statement, names);
+        Ok(())
     }
 }
 
@@ -917,34 +793,25 @@ fn unique_entity(entities: Option<&Vec<EntityKey>>) -> Lookup<EntityKey> {
     }
 }
 
-fn flatten_use_tree(tree: &UseTree, prefix: &mut Vec<String>, paths: &mut Vec<Vec<String>>) {
+/// Collects the spans of the names to query in one use tree.
+///
+/// A glob queries the last path segment before `::*`.
+fn use_tree_leaves(tree: &UseTree, last_segment: Option<Span>, leaves: &mut Vec<Span>) {
     match tree {
-        // Add one path prefix.
-        UseTree::Path(path) => {
-            prefix.push(path.ident.to_string());
-            flatten_use_tree(&path.tree, prefix, paths);
-            prefix.pop();
-        }
-        // Add one imported name.
-        UseTree::Name(name) => {
-            let mut path = prefix.clone();
-            path.push(name.ident.to_string());
-            paths.push(path);
-        }
-        // Add one renamed import by its source name.
-        UseTree::Rename(rename) => {
-            let mut path = prefix.clone();
-            path.push(rename.ident.to_string());
-            paths.push(path);
-        }
-        // Expand every import in one group.
+        // Descend one path segment.
+        UseTree::Path(path) => use_tree_leaves(&path.tree, Some(path.ident.span()), leaves),
+        // Query one imported name, including `self` in a group.
+        UseTree::Name(name) => leaves.push(name.ident.span()),
+        // Query the source name of one renamed import.
+        UseTree::Rename(rename) => leaves.push(rename.ident.span()),
+        // Query every import in one group.
         UseTree::Group(group) => {
             for tree in &group.items {
-                flatten_use_tree(tree, prefix, paths);
+                use_tree_leaves(tree, last_segment, leaves);
             }
         }
-        // Ignore glob imports because they have no unique target.
-        UseTree::Glob(_) => {}
+        // Query the module of one glob import.
+        UseTree::Glob(_) => leaves.extend(last_segment),
     }
 }
 
@@ -989,11 +856,7 @@ fn source_range_between(
 }
 
 fn source_text<'a>(document: &ParsedDocument<'a>, span: Span) -> Result<&'a str, AnalysisError> {
-    let range = source_range(document, span)?;
-    document
-        .source
-        .get(range.start as usize..range.end as usize)
-        .ok_or_else(invalid_source_range)
+    source_text_between(document, span, span)
 }
 
 fn source_text_between<'a>(
@@ -1236,6 +1099,20 @@ mod tests {
     }
 
     #[test]
+    fn keeps_line_one_ranges_exact_after_a_byte_order_mark() {
+        let source = "\u{feff}pub struct Alpha;\n";
+        let facts = facts_for("bom.rs", source).expect("the source must produce facts");
+
+        let alpha = typed_entity(&facts, "Alpha", &TypeKind::Struct);
+
+        assert_eq!(declaration_text(source, alpha), "Alpha");
+        assert_eq!(
+            range_text(source, alpha.evidence.scope.expect("the scope must exist")),
+            "pub struct Alpha;"
+        );
+    }
+
+    #[test]
     fn rejects_malformed_rust_source() {
         let Err(error) = facts_for("broken.rs", "pub struct Broken {") else {
             panic!("malformed Rust must fail");
@@ -1311,31 +1188,24 @@ mod tests {
 
     #[test]
     fn resolves_crate_paths_within_each_package() {
-        let source = "mod shared { pub struct Item; }\nuse crate::shared::Item;\n";
+        let source =
+            "mod shared { pub struct Item; }\nimpl crate::shared::Item { fn run(&self) {} }\n";
         let documents = [
             document("src/lib.rs", source),
             document("crates/api/src/lib.rs", source),
         ];
         let facts = facts_for_documents(&documents).expect("both packages must produce facts");
-        let root = entity_with_key(&facts, "src/lib.rs");
         let root_item = entity_with_key(&facts, "src/lib.rs::module:shared::type:Item");
-        let api = entity_with_key(&facts, "crates/api/src/lib.rs");
+        let root_run =
+            entity_with_key(&facts, "src/lib.rs::module:shared::type:Item::callable:run");
         let api_item = entity_with_key(&facts, "crates/api/src/lib.rs::module:shared::type:Item");
+        let api_run = entity_with_key(
+            &facts,
+            "crates/api/src/lib.rs::module:shared::type:Item::callable:run",
+        );
 
-        assert_imports(&facts, root, root_item);
-        assert_imports(&facts, api, api_item);
-        assert!(!has_relation(
-            &facts,
-            &root.key,
-            &api_item.key,
-            RelationKind::Imports
-        ));
-        assert!(!has_relation(
-            &facts,
-            &api.key,
-            &root_item.key,
-            RelationKind::Imports
-        ));
+        assert_contains(&facts, &root_item.key, &root_run.key);
+        assert_contains(&facts, &api_item.key, &api_run.key);
     }
 
     #[test]
@@ -1411,99 +1281,142 @@ mod tests {
         }
     }
 
+    const SERVICE_IMPL: &str = "impl crate::service::Service { fn run(&self) {} }\n";
+
     #[test]
     fn resolves_directory_form_binary_modules() {
         let documents = [
-            document("src/bin/tool/main.rs", "use crate::service;\n"),
+            document("src/bin/tool/main.rs", SERVICE_IMPL),
             document("src/bin/tool/service.rs", "pub struct Service;\n"),
         ];
         let facts = facts_for_documents(&documents).expect("the binary target must produce facts");
-        let root = entity_with_key(&facts, "src/bin/tool/main.rs");
-        let service = entity_with_key(&facts, "src/bin/tool/service.rs");
+        let service = entity_with_key(&facts, "src/bin/tool/service.rs::type:Service");
+        let run = entity_with_key(
+            &facts,
+            "src/bin/tool/service.rs::type:Service::callable:run",
+        );
 
-        assert_imports(&facts, root, service);
+        assert_contains(&facts, &service.key, &run.key);
     }
 
     #[test]
     fn resolves_directory_form_example_modules() {
         let documents = [
-            document("examples/demo/main.rs", "use crate::service;\n"),
+            document("examples/demo/main.rs", SERVICE_IMPL),
             document("examples/demo/service.rs", "pub struct Service;\n"),
         ];
         let facts = facts_for_documents(&documents).expect("the example target must produce facts");
-        let root = entity_with_key(&facts, "examples/demo/main.rs");
-        let service = entity_with_key(&facts, "examples/demo/service.rs");
+        let service = entity_with_key(&facts, "examples/demo/service.rs::type:Service");
+        let run = entity_with_key(
+            &facts,
+            "examples/demo/service.rs::type:Service::callable:run",
+        );
 
-        assert_imports(&facts, root, service);
+        assert_contains(&facts, &service.key, &run.key);
     }
 
     #[test]
     fn resolves_nested_crate_modules_from_their_source_root() {
         let documents = [
-            document("crates/api/src/lib.rs", "use crate::service;\n"),
+            document("crates/api/src/lib.rs", SERVICE_IMPL),
             document("crates/api/src/service.rs", "pub struct Service;\n"),
         ];
         let facts = facts_for_documents(&documents).expect("the nested crate must produce facts");
-        let root = entity_with_key(&facts, "crates/api/src/lib.rs");
-        let service = entity_with_key(&facts, "crates/api/src/service.rs");
+        let service = entity_with_key(&facts, "crates/api/src/service.rs::type:Service");
+        let run = entity_with_key(
+            &facts,
+            "crates/api/src/service.rs::type:Service::callable:run",
+        );
 
-        assert_imports(&facts, root, service);
+        assert_contains(&facts, &service.key, &run.key);
     }
 
     #[test]
     fn does_not_fall_back_to_root_for_unprefixed_nested_paths() {
-        let source = "mod target { pub struct Record; }\nmod nested {\n    impl target::Record { fn wrong(&self) {} }\n    use target;\n}\n";
+        let source = "mod target { pub struct Record; }\nmod nested {\n    impl target::Record { fn wrong(&self) {} }\n}\n";
         let facts = facts_for("lib.rs", source).expect("the source must produce facts");
         let root = entity(&facts, "lib.rs", |kind| matches!(kind, EntityKind::Module));
         let wrong = callable_entity(&facts, "wrong");
 
         assert_eq!(wrong.key.as_str(), "lib.rs::callable:wrong");
         assert_contains(&facts, &root.key, &wrong.key);
-        assert!(
-            facts
-                .relations
-                .iter()
-                .all(|relation| relation.kind != RelationKind::Imports)
-        );
     }
 
     #[test]
     fn stops_resolution_at_an_ambiguous_relative_namespace() {
-        let source = "struct Record;\nmod target {}\nmod nested {\n    #[cfg(first)] struct Record;\n    #[cfg(second)] struct Record;\n    #[cfg(first)] mod target {}\n    #[cfg(second)] mod target {}\n    impl Record { fn ambiguous(&self) {} }\n    use target;\n}\n";
+        let source = "struct Record;\nmod target {}\nmod nested {\n    #[cfg(first)] struct Record;\n    #[cfg(second)] struct Record;\n    #[cfg(first)] mod target {}\n    #[cfg(second)] mod target {}\n    impl Record { fn ambiguous(&self) {} }\n    impl target::Record { fn hidden(&self) {} }\n}\n";
         let facts = facts_for("lib.rs", source).expect("ambiguous syntax must still produce facts");
         let root = entity(&facts, "lib.rs", |kind| matches!(kind, EntityKind::Module));
         let ambiguous = callable_entity(&facts, "ambiguous");
+        let hidden = callable_entity(&facts, "hidden");
 
         assert_eq!(ambiguous.key.as_str(), "lib.rs::callable:ambiguous");
         assert_contains(&facts, &root.key, &ambiguous.key);
+        assert_eq!(hidden.key.as_str(), "lib.rs::callable:hidden");
+        assert_contains(&facts, &root.key, &hidden.key);
+    }
+
+    #[test]
+    fn records_use_sites_with_the_leaves_to_query() {
+        let source = "use crate::alpha::{self, Beta as B, gamma::*};\nmod nested {\n    pub use super::*;\n}\n";
+        let facts = facts_for("lib.rs", source).expect("the source must produce facts");
+
+        assert_eq!(
+            facts
+                .import_sites
+                .iter()
+                .map(|site| (
+                    site.owner.as_str(),
+                    range_text(source, site.statement.range),
+                    site.names
+                        .iter()
+                        .map(|name| range_text(source, *name))
+                        .collect::<Vec<_>>(),
+                ))
+                .collect::<Vec<_>>(),
+            vec![
+                (
+                    "lib.rs",
+                    "use crate::alpha::{self, Beta as B, gamma::*};",
+                    vec!["self", "Beta", "gamma"],
+                ),
+                ("lib.rs::module:nested", "use super::*;", vec!["super"]),
+            ]
+        );
         assert!(
             facts
                 .relations
                 .iter()
-                .all(|relation| relation.kind != RelationKind::Imports)
+                .all(|relation| relation.kind == RelationKind::Contains)
         );
     }
 
     #[test]
-    fn records_unambiguous_local_use_relations() {
-        let source = "mod alpha {}\nuse crate::alpha;\n";
+    fn records_use_sites_in_callable_bodies() {
+        let source = "fn main() {\n    use crate::cli::run;\n    run();\n}\nstruct App;\nimpl App {\n    fn start(&self) {\n        use super::Config as C;\n    }\n}\n";
         let facts = facts_for("lib.rs", source).expect("the source must produce facts");
-        let root = entity(&facts, "lib.rs", |kind| matches!(kind, EntityKind::Module));
-        let alpha = entity(&facts, "alpha", |kind| matches!(kind, EntityKind::Module));
-        let import = facts
-            .relations
-            .iter()
-            .find(|relation| {
-                relation.source == root.key
-                    && relation.target == alpha.key
-                    && relation.kind == RelationKind::Imports
-            })
-            .expect("the local use must produce an import relation");
 
-        assert_eq!(import.evidence.observations.len(), 1);
         assert_eq!(
-            range_text(source, import.evidence.observations[0].range),
-            "use crate::alpha;"
+            facts
+                .import_sites
+                .iter()
+                .map(|site| (
+                    site.owner.as_str(),
+                    range_text(source, site.statement.range),
+                    site.names
+                        .iter()
+                        .map(|name| range_text(source, *name))
+                        .collect::<Vec<_>>(),
+                ))
+                .collect::<Vec<_>>(),
+            vec![
+                ("lib.rs::callable:main", "use crate::cli::run;", vec!["run"]),
+                (
+                    "lib.rs::type:App::callable:start",
+                    "use super::Config as C;",
+                    vec!["Config"],
+                ),
+            ]
         );
     }
 
@@ -1576,7 +1489,7 @@ mod tests {
         entity(
             facts,
             name,
-            |kind| matches!(kind, EntityKind::Type(data) if same_type_kind(&data.kind, expected)),
+            |kind| matches!(kind, EntityKind::Type(data) if data.kind == *expected),
         )
     }
 
@@ -1609,17 +1522,6 @@ mod tests {
         data
     }
 
-    fn same_type_kind(left: &TypeKind, right: &TypeKind) -> bool {
-        matches!(
-            (left, right),
-            (TypeKind::Class, TypeKind::Class)
-                | (TypeKind::Struct, TypeKind::Struct)
-                | (TypeKind::Enum, TypeKind::Enum)
-                | (TypeKind::Interface, TypeKind::Interface)
-                | (TypeKind::Trait, TypeKind::Trait)
-        )
-    }
-
     fn assert_contains(
         facts: &SyntaxFacts,
         owner: &crate::analysis::fact::EntityKey,
@@ -1630,15 +1532,6 @@ mod tests {
                 && relation.target == *child
                 && relation.kind == RelationKind::Contains
         }));
-    }
-
-    fn assert_imports(facts: &SyntaxFacts, source: &EntityFact, target: &EntityFact) {
-        assert!(has_relation(
-            facts,
-            &source.key,
-            &target.key,
-            RelationKind::Imports
-        ));
     }
 
     fn has_relation(

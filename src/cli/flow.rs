@@ -2,7 +2,8 @@
 //!
 //! This module owns the arguments and the output of `flow` commands. It calls
 //! the flow backend. Command arguments and standard input are the inputs. One exit code and one output
-//! document are the output.
+//! document are the output. `import` and `verify` first resolve the semantic
+//! edges of the flow nodes into the semantic cache of the graph.
 //!
 //! # Sections
 //!
@@ -13,19 +14,22 @@
 use std::{
     error::Error,
     fs,
-    io::Read,
+    io::{self, Read},
     path::{Path, PathBuf},
 };
 
-use tekdek::flow::{
-    AGENT_OUTPUT_SCHEMA, FlowError,
-    import::{self, ImportOutcome, ImportRequest},
-    lineage,
-    models::{Author, FlowArtifact, FlowId, FlowIssue, IssueCode, wire_name},
-    verify,
+use tekdek::{
+    catalog,
+    flow::{
+        AGENT_OUTPUT_SCHEMA, current_flow,
+        import::{self, ImportOutcome, ImportRequest},
+        models::{Author, FlowArtifact, FlowIssue, wire_name},
+        verify,
+    },
+    store::graph::read_graph,
 };
 
-use super::{failure, render, required, split_arguments, store_directory};
+use super::{Ensure, failure, render, required, split_arguments, store_directory};
 
 // -----------------------------------------------------------------------------
 // Commands
@@ -34,12 +38,16 @@ use super::{failure, render, required, split_arguments, store_directory};
 pub(super) const USAGE: &str = "usage: tekdek flow <command> [--store <directory>] [--json]
   list [--graph <file>]
   show <name>
-  import <name> --graph <file> --input <path or -> [--check]
+  import <name> --graph <file> --input <path or -> [--check] [--config <path>]
     [--author agent|human|system] [--author-name <name>] [--model-id <id>]
-  verify <name>
+  verify <name> [--config <path>]
   agent-contract
 import freezes one agent output as a new generation; --check runs the complete
-import and writes nothing. verify recomputes the current generation. agent-contract prints the agent output JSON Schema.
+import and writes no flow. verify recomputes the current generation. Both get
+the semantic edges of the flow nodes from the language servers first, as graph
+show does, and add them to <graph>.semantic.json; --config selects the servers.
+When verify cannot get them, it warns and uses the cache as it is.
+agent-contract prints the agent output JSON Schema.
 The default store is the nearest .tekdek folder. Common options can appear anywhere after flow.
 Use --option=value for values that start with a hyphen.";
 
@@ -50,6 +58,7 @@ const VALUE_OPTIONS: &[&str] = &[
     "--author",
     "--author-name",
     "--model-id",
+    "--config",
 ];
 
 struct Command {
@@ -59,10 +68,17 @@ struct Command {
 }
 
 enum Action {
-    List { graph: Option<String> },
-    Show { name: String },
+    List {
+        graph: Option<String>,
+    },
+    Show {
+        name: String,
+    },
     Import(ImportCommand),
-    Verify { name: String },
+    Verify {
+        name: String,
+        config: Option<PathBuf>,
+    },
     AgentContract,
 }
 
@@ -72,6 +88,7 @@ struct ImportCommand {
     input: PathBuf,
     author: AuthorOptions,
     check: bool,
+    config: Option<PathBuf>,
 }
 
 struct AuthorOptions {
@@ -111,10 +128,12 @@ impl Command {
                     model_id: options.remove("--model-id"),
                 },
                 check: options.remove("--check").is_some(),
+                config: options.remove("--config").map(PathBuf::from),
             }),
             // Verify the current generation.
             ["verify", name] => Action::Verify {
                 name: (*name).to_owned(),
+                config: options.remove("--config").map(PathBuf::from),
             },
             // Print the agent output contract.
             ["agent-contract"] => Action::AgentContract,
@@ -164,17 +183,24 @@ impl AuthorOptions {
 // -----------------------------------------------------------------------------
 
 /// Returns the exit code and one output document for a flow command.
-pub(super) fn run(arguments: Vec<String>, input: &mut impl Read) -> (u8, String) {
-    // Detect JSON mode before parsing so invalid commands also return JSON.
-    let json = arguments.iter().any(|argument| argument == "--json");
+pub(super) fn run(
+    arguments: Vec<String>,
+    json: bool,
+    input: &mut impl Read,
+    ensure: &Ensure<'_>,
+) -> (u8, String) {
     let result = Command::parse(arguments.into_iter())
         .map_err(|message| format!("{message}\n{USAGE}"))
-        .and_then(|command| execute(command, input).map_err(|error| error.to_string()));
+        .and_then(|command| execute(command, input, ensure).map_err(|error| error.to_string()));
     result.unwrap_or_else(|message| failure(json, &message))
 }
 
 /// Executes one validated command through the flow backend.
-fn execute(command: Command, input: &mut impl Read) -> Result<(u8, String), Box<dyn Error>> {
+fn execute(
+    command: Command,
+    input: &mut impl Read,
+    ensure: &Ensure<'_>,
+) -> Result<(u8, String), Box<dyn Error>> {
     let store = store_directory(command.store)?;
     let directory = store.as_path();
     let json = command.json;
@@ -184,9 +210,11 @@ fn execute(command: Command, input: &mut impl Read) -> Result<(u8, String), Box<
         // Return the current generation and readable step details.
         Action::Show { name } => show(directory, json, &name),
         // Freeze one agent output and report every issue of a rejection.
-        Action::Import(import_command) => import(directory, json, import_command, input),
+        Action::Import(import_command) => import(directory, json, import_command, input, ensure),
         // Recompute the current generation without writes.
-        Action::Verify { name } => verify(directory, json, &name),
+        Action::Verify { name, config } => {
+            verify(directory, json, &name, config.as_deref(), ensure)
+        }
         // Print the embedded contract as it is.
         Action::AgentContract => Ok((0, AGENT_OUTPUT_SCHEMA.trim_end().to_owned())),
     }
@@ -194,7 +222,7 @@ fn execute(command: Command, input: &mut impl Read) -> Result<(u8, String), Box<
 
 /// Lists flows with their freshness.
 fn list(directory: &Path, json: bool, graph: Option<&str>) -> Result<(u8, String), Box<dyn Error>> {
-    let listings = lineage::list_flows(directory, graph)?;
+    let listings = catalog::list_flows(directory, graph)?;
     let lines: Vec<_> = listings
         .iter()
         .map(|item| {
@@ -219,16 +247,7 @@ fn list(directory: &Path, json: bool, graph: Option<&str>) -> Result<(u8, String
 
 /// Shows the current generation of one flow. JSON output is the frozen artifact.
 fn show(directory: &Path, json: bool, name: &str) -> Result<(u8, String), Box<dyn Error>> {
-    let flow_id = FlowId::try_from(name).map_err(|error| {
-        FlowError::Rejected(vec![FlowIssue::error(
-            IssueCode::InvalidKey,
-            error.to_string(),
-        )])
-    })?;
-    let current =
-        lineage::read_current(directory, &flow_id)?.ok_or_else(|| FlowError::NoLineage {
-            name: name.to_owned(),
-        })?;
+    let current = current_flow(directory, name)?;
     let artifact = &current.artifact;
     Ok((
         0,
@@ -288,6 +307,7 @@ fn import(
     json: bool,
     command: ImportCommand,
     input: &mut impl Read,
+    ensure: &Ensure<'_>,
 ) -> Result<(u8, String), Box<dyn Error>> {
     let ImportCommand {
         name,
@@ -295,6 +315,7 @@ fn import(
         input: path,
         author,
         check,
+        config,
     } = command;
     let author = author.resolve()?;
     let bytes = if path.as_os_str() == "-" {
@@ -309,6 +330,14 @@ fn import(
             )
         })?
     };
+    ensure_flow_keys(
+        directory,
+        &graph,
+        None,
+        step_keys(&bytes),
+        config.as_deref(),
+        ensure,
+    )?;
     let request = ImportRequest {
         name: &name,
         graph_file: &graph,
@@ -359,7 +388,30 @@ fn import(
 }
 
 /// Verifies the current generation. Issues give exit code 1.
-fn verify(directory: &Path, json: bool, name: &str) -> Result<(u8, String), Box<dyn Error>> {
+///
+/// When the semantic edges of the steps cannot be resolved, for example in CI
+/// without a language server, a warning goes to standard error and the
+/// verification uses the graph and its cache as they are.
+fn verify(
+    directory: &Path,
+    json: bool,
+    name: &str,
+    config: Option<&Path>,
+    ensure: &Ensure<'_>,
+) -> Result<(u8, String), Box<dyn Error>> {
+    let facts = current_flow(directory, name)?.artifact.facts;
+    if let Err(error) = ensure_flow_keys(
+        directory,
+        &facts.binding.graph_artifact,
+        Some(facts.binding.graph_digest.as_str()),
+        facts.nodes.iter().map(|node| node.key.as_str().to_owned()),
+        config,
+        ensure,
+    ) {
+        eprintln!(
+            "warning: cannot resolve the semantic edges of the steps, so verify uses the semantic cache as it is: {error}"
+        );
+    }
     let report = verify::verify_flow(directory, name)?;
     let code = u8::from(report.issues.iter().any(FlowIssue::is_error));
     let status = match (code != 0, report.stale) {
@@ -375,27 +427,80 @@ fn verify(directory: &Path, json: bool, name: &str) -> Result<(u8, String), Box<
     Ok((code, render(json, &report, lines.join("\n"))?))
 }
 
+/// Resolves the semantic edges of the flow keys that one graph holds, before the fact layer reads them.
+///
+/// Call it before the import takes the store lock, because the cache write
+/// takes that lock. A graph that cannot be read, or whose digest is not
+/// `digest`, resolves nothing: the flow command reports it, or the flow is stale.
+fn ensure_flow_keys(
+    directory: &Path,
+    graph_file: &str,
+    digest: Option<&str>,
+    keys: impl IntoIterator<Item = String>,
+    config: Option<&Path>,
+    ensure: &Ensure<'_>,
+) -> io::Result<()> {
+    let Ok((graph, current)) = read_graph(directory, graph_file) else {
+        return Ok(());
+    };
+    if digest.is_some_and(|digest| digest != current) {
+        return Ok(());
+    }
+    let keys = keys
+        .into_iter()
+        .filter(|key| graph.nodes.iter().any(|node| node.key == *key))
+        .collect::<Vec<_>>();
+    ensure(directory, graph_file, &keys, config)
+}
+
+/// Returns the node keys of the steps of one agent output. Output that is not valid has none.
+fn step_keys(output: &[u8]) -> Vec<String> {
+    let output = serde_json::from_slice::<serde_json::Value>(output).unwrap_or_default();
+    output["flow"]["steps"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|step| step["nodeKey"].as_str().map(str::to_owned))
+        .collect()
+}
+
 // -----------------------------------------------------------------------------
 // Tests
 // -----------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
-    use std::{fs, io::Cursor, path::Path};
+    use std::{
+        cell::RefCell,
+        fs,
+        io::Cursor,
+        path::{Path, PathBuf},
+    };
 
     use serde_json::Value;
+    use tekdek::store::{
+        digest_of,
+        graph::RelationKind,
+        semantic::{SemanticCache, SemanticEdge, write_cache},
+    };
 
-    use super::{Command, run};
+    use super::{Command, Ensure, run};
+
+    const ENTRY: &str = "src/main.rs::callable:entry";
+    const START: &str = "src/main.rs::callable:start";
 
     fn fixture(directory: &Path) {
+        let node = |id: u32, key: &str, name: &str| {
+            serde_json::json!({
+                "id": id, "language": "rust", "key": key, "name": name,
+                "kind": "callable", "path": "src/main.rs", "origin": "syntax", "declarations": []
+            })
+        };
         let graph = serde_json::json!({
             "schemaVersion": 1,
             "graph": {
                 "languages": ["rust"],
-                "nodes": [{
-                    "id": 0, "language": "rust", "key": "src/main.rs::callable:entry", "name": "entry",
-                    "kind": "callable", "path": "src/main.rs", "origin": "syntax", "declarations": []
-                }],
+                "nodes": [node(0, ENTRY, "entry"), node(1, START, "start")],
                 "edges": []
             }
         });
@@ -407,11 +512,23 @@ mod tests {
     }
 
     fn execute(directory: &Path, arguments: &[&str], input: &str, expected_code: u8) -> Value {
+        execute_with(directory, arguments, input, expected_code, &|_, _, _, _| {
+            Ok(())
+        })
+    }
+
+    fn execute_with(
+        directory: &Path,
+        arguments: &[&str],
+        input: &str,
+        expected_code: u8,
+        ensure: &Ensure<'_>,
+    ) -> Value {
         let mut raw = vec!["--store".to_owned(), directory.display().to_string()];
         raw.extend(arguments.iter().map(|value| (*value).to_owned()));
         // A missing option value must not consume the JSON flag.
         raw.push("--json".to_owned());
-        let (code, output) = run(raw, &mut Cursor::new(input));
+        let (code, output) = run(raw, true, &mut Cursor::new(input), ensure);
         assert_eq!(code, expected_code, "{arguments:?}: {output}");
         serde_json::from_str(&output).expect("one JSON document")
     }
@@ -509,6 +626,104 @@ mod tests {
     }
 
     #[test]
+    fn resolves_the_flow_keys_before_import_and_verify_and_freezes_their_cached_edges() {
+        let directory = tempfile::tempdir().expect("temporary store");
+        let path = directory.path();
+        fixture(path);
+        let asked = RefCell::new(Vec::new());
+        // `entry` calls `start` only in the semantic cache. The cache write takes the store lock.
+        let ensure = |store: &Path, file: &str, keys: &[String], config: Option<&Path>| {
+            asked
+                .borrow_mut()
+                .push((keys.to_vec(), config.map(Path::to_path_buf)));
+            let digest = digest_of(&fs::read(store.join(file))?);
+            let edge = SemanticEdge {
+                source: ENTRY.to_owned(),
+                target: START.to_owned(),
+                kind: RelationKind::Calls,
+                weight: 1,
+            };
+            let cache = SemanticCache {
+                resolved: keys.iter().cloned().collect(),
+                edges: vec![edge],
+                ..SemanticCache::new(digest)
+            };
+            write_cache(store, file, &cache)
+        };
+        let mut two = output();
+        let mut step = two["flow"]["steps"][0].clone();
+        step["nodeKey"] = START.into();
+        step["title"] = "Start the work".into();
+        two["flow"]["steps"]
+            .as_array_mut()
+            .expect("steps")
+            .push(step.clone());
+        let mut gone = two.clone();
+        step["nodeKey"] = "src/main.rs::callable:gone".into();
+        gone["flow"]["steps"]
+            .as_array_mut()
+            .expect("steps")
+            .push(step);
+        let mut config = IMPORT.to_vec();
+        config.extend(["--config", "custom.toml"]);
+
+        execute_with(path, &config, &gone.to_string(), 2, &ensure);
+        execute_with(path, &config, &two.to_string(), 0, &ensure);
+        let verified = execute_with(path, &["verify", "entry-flow"], "", 0, &ensure);
+
+        let both = vec![ENTRY.to_owned(), START.to_owned()];
+        assert_eq!(
+            asked.into_inner(),
+            [
+                (both.clone(), Some(PathBuf::from("custom.toml"))),
+                (both.clone(), Some(PathBuf::from("custom.toml"))),
+                (both, None),
+            ]
+        );
+        assert_eq!(verified["issues"], serde_json::json!([]));
+        let shown = execute(path, &["show", "entry-flow"], "", 0);
+        assert_eq!(
+            shown["facts"]["edges"],
+            serde_json::json!([{"source": ENTRY, "target": START, "kind": "calls"}])
+        );
+    }
+
+    #[test]
+    fn verifies_against_the_cache_as_it_is_when_the_keys_cannot_be_resolved() {
+        let directory = tempfile::tempdir().expect("temporary store");
+        let path = directory.path();
+        fixture(path);
+        execute(path, &IMPORT, &output().to_string(), 0);
+
+        let report = execute_with(path, &["verify", "entry-flow"], "", 0, &|_, _, _, _| {
+            Err(std::io::Error::other("no language server"))
+        });
+
+        assert_eq!(report["issues"], serde_json::json!([]));
+        assert_eq!(report["stale"], false);
+    }
+
+    #[test]
+    fn verifies_a_stale_flow_without_resolving_keys() {
+        let directory = tempfile::tempdir().expect("temporary store");
+        let path = directory.path();
+        fixture(path);
+        execute(path, &IMPORT, &output().to_string(), 0);
+        let graph = fs::read_to_string(path.join("graph.json")).expect("graph");
+        fs::write(
+            path.join("graph.json"),
+            graph.replace("\"start\"", "\"begin\""),
+        )
+        .expect("changed graph");
+
+        let report = execute_with(path, &["verify", "entry-flow"], "", 0, &|_, _, _, _| {
+            panic!("a stale flow resolves nothing")
+        });
+
+        assert_eq!(report["stale"], true);
+    }
+
+    #[test]
     fn rejects_invalid_commands_and_options_with_json_errors() {
         let directory = tempfile::tempdir().expect("temporary store");
         let path = directory.path();
@@ -523,6 +738,7 @@ mod tests {
             vec!["verify", "demo", "extra"],
             vec!["show", "missing-flow"],
             vec!["list", "--json=true"],
+            vec!["list", "--config", "custom.toml"],
         ] {
             assert!(
                 execute(path, &arguments, "", 2)["error"].is_string(),

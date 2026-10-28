@@ -1,14 +1,16 @@
 //! Fact Models
 //!
-//! `FactSet` contains codebase facts.
+//! `FactSet` contains the syntax facts of one language, as the index makes them.
 //!
-//! `SyntaxFacts` come from parsing source. They define entities and
-//! syntax relations with source evidence.
+//! `SyntaxFacts` come from parsing source. They define entities, syntax
+//! relations with source evidence, and import sites.
 //!
 //! `SemanticFact` values come from an LSP server. They report calls,
-//! references, and type definitions with symbol anchors and source locations.
+//! references, type definitions, and import definitions with symbol anchors
+//! and source locations.
 //!
-//! The `graph` module builds the codebase graph from these facts.
+//! The `graph` module builds the syntax graph from syntax facts, and the
+//! resolver adds the edges of semantic facts.
 //!
 //! # Sections
 //!
@@ -39,17 +41,12 @@ pub use syntax::SyntaxFactBuilder;
 pub struct FactSet {
     pub language: Language,
     pub syntax: SyntaxFacts,
-    pub semantic: Vec<SemanticFact>,
 }
 
 impl FactSet {
     #[must_use]
-    pub fn new(language: Language, syntax: SyntaxFacts, semantic: Vec<SemanticFact>) -> Self {
-        Self {
-            language,
-            syntax,
-            semantic,
-        }
+    pub fn new(language: Language, syntax: SyntaxFacts) -> Self {
+        Self { language, syntax }
     }
 }
 
@@ -61,6 +58,7 @@ impl FactSet {
 pub struct SyntaxFacts {
     pub entities: Vec<EntityFact>,
     pub relations: Vec<RelationFact>,
+    pub import_sites: Vec<ImportSite>,
 }
 
 pub struct EntityFact {
@@ -74,7 +72,16 @@ pub struct RelationFact {
     pub source: EntityKey,
     pub target: EntityKey,
     pub kind: RelationKind,
-    pub evidence: RelationEvidence,
+}
+
+/// One import statement and the imported names that capture queries.
+///
+/// `owner` is the module or callable whose scope holds the statement. Each
+/// name range holds bytes in the statement path.
+pub struct ImportSite {
+    pub owner: EntityKey,
+    pub statement: SourceSpan,
+    pub names: Vec<SourceRange>,
 }
 
 /// One fact from an LSP server.
@@ -93,6 +100,11 @@ pub enum SemanticFact {
         queried_symbol: SymbolAnchor,
         targets: Vec<ReportedLocation>,
     },
+    /// The definitions of the imported name at `query`.
+    Definition {
+        query: SourceSpan,
+        targets: Vec<ReportedLocation>,
+    },
 }
 
 // -----------------------------------------------------------------------------
@@ -108,7 +120,7 @@ pub enum EntityKind {
 }
 
 impl EntityKind {
-    /// Returns the kind name used in keys and artifacts.
+    /// Returns the kind name used in entity keys.
     #[must_use]
     pub fn tag(&self) -> &'static str {
         match self {
@@ -131,7 +143,6 @@ pub enum TypeKind {
     Class,
     Struct,
     Enum,
-    Interface,
     Trait,
 }
 

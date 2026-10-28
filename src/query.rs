@@ -15,14 +15,11 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::Serialize;
 
-use crate::store::graph::{ArtifactGraph, ArtifactNode};
+use crate::store::graph::{ArtifactGraph, ArtifactNode, NodeKind, RelationKind};
 
 // -----------------------------------------------------------------------------
 // Models
 // -----------------------------------------------------------------------------
-
-/// The node kinds that a search can filter on.
-pub const NODE_KINDS: [&str; 4] = ["module", "type", "callable", "field"];
 
 /// One node in a search result.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -30,7 +27,7 @@ pub const NODE_KINDS: [&str; 4] = ["module", "type", "callable", "field"];
 pub struct NodeSummary {
     pub key: String,
     pub name: String,
-    pub kind: String,
+    pub kind: NodeKind,
     pub path: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub signature: Option<String>,
@@ -47,7 +44,7 @@ pub struct SearchResult {
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct NodeRef {
     pub key: String,
-    pub kind: String,
+    pub kind: NodeKind,
 }
 
 /// One node with its declaration facts and its static neighbors.
@@ -59,7 +56,7 @@ pub struct NodeRef {
 pub struct NodeDetail {
     pub key: String,
     pub name: String,
-    pub kind: String,
+    pub kind: NodeKind,
     pub language: String,
     pub path: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -90,7 +87,12 @@ pub struct NodeDetail {
 /// tests come after all other nodes. In each rank, callables come before
 /// types, modules, and fields; the key breaks ties.
 #[must_use]
-pub fn search(graph: &ArtifactGraph, text: &str, kind: Option<&str>, limit: usize) -> SearchResult {
+pub fn search(
+    graph: &ArtifactGraph,
+    text: &str,
+    kind: Option<NodeKind>,
+    limit: usize,
+) -> SearchResult {
     let needle = text.trim().to_lowercase();
     let words: Vec<&str> = needle
         .split(|character: char| character.is_whitespace() || matches!(character, ':' | '.' | '/'))
@@ -127,7 +129,7 @@ pub fn search(graph: &ArtifactGraph, text: &str, kind: Option<&str>, limit: usiz
             } else {
                 4
             };
-            Some(((is_test(&key), rank, kind_order(&node.kind)), node))
+            Some(((is_test(&key), rank, kind_order(node.kind)), node))
         })
         .collect();
     matches.sort_by(|left, right| (left.0, &left.1.key).cmp(&(right.0, &right.1.key)));
@@ -139,7 +141,7 @@ pub fn search(graph: &ArtifactGraph, text: &str, kind: Option<&str>, limit: usiz
             .map(|(_, node)| NodeSummary {
                 key: node.key.clone(),
                 name: node.name.clone(),
-                kind: node.kind.clone(),
+                kind: node.kind,
                 path: node.path.clone(),
                 signature: node.signature.as_deref().map(one_line),
             })
@@ -152,7 +154,7 @@ pub fn search(graph: &ArtifactGraph, text: &str, kind: Option<&str>, limit: usiz
 /// A file module has its path as its name, so it ranks by its file stem, or by
 /// its folder for `mod.rs` and `__init__.py`.
 fn rank_name(node: &ArtifactNode) -> &str {
-    if node.kind != "module" || node.name != node.path {
+    if node.kind != NodeKind::Module || node.name != node.path {
         return &node.name;
     }
     let mut parts = node.path.rsplit('/');
@@ -169,7 +171,8 @@ fn rank_name(node: &ArtifactNode) -> &str {
 ///
 /// A test module is an inline `tests` or `test` module. A test file is in a
 /// `tests`, `test`, or `__tests__` folder, or its stem is `conftest`, `test`,
-/// or `tests`, starts with `test_`, or ends with `_test` or `_tests`.
+/// or `tests`, starts with `test_`, or ends with `_test`, `_tests`, `.test`, or
+/// `.spec`.
 fn is_test(key: &str) -> bool {
     let mut parts: Vec<&str> = key.split("::").next().unwrap_or(key).split('/').collect();
     let file = parts.pop().unwrap_or_default();
@@ -184,20 +187,25 @@ fn is_test(key: &str) -> bool {
         || stem.starts_with("test_")
         || stem.ends_with("_test")
         || stem.ends_with("_tests")
+        || matches!(stem.rsplit_once('.'), Some((_, "test" | "spec")))
 }
 
-fn kind_order(kind: &str) -> u8 {
+fn kind_order(kind: NodeKind) -> u8 {
     match kind {
-        "callable" => 0,
-        "type" => 1,
-        "module" => 2,
-        _ => 3,
+        // Rank callables first.
+        NodeKind::Callable => 0,
+        // Rank types after callables.
+        NodeKind::Type => 1,
+        // Rank modules after types.
+        NodeKind::Module => 2,
+        // Rank fields last.
+        NodeKind::Field => 3,
     }
 }
 
 /// Joins a multi-line signature into one line.
 #[must_use]
-pub fn one_line(signature: &str) -> String {
+fn one_line(signature: &str) -> String {
     signature
         .lines()
         .map(str::trim)
@@ -222,7 +230,7 @@ pub fn show(graph: &ArtifactGraph, key: &str) -> Option<NodeDetail> {
     let reference = |id: u32| {
         by_id.get(&id).map(|node| NodeRef {
             key: node.key.clone(),
-            kind: node.kind.clone(),
+            kind: node.kind,
         })
     };
     let mut container = None;
@@ -230,18 +238,25 @@ pub fn show(graph: &ArtifactGraph, key: &str) -> Option<NodeDetail> {
     let mut calling = BTreeSet::new();
     let mut called = BTreeSet::new();
     for edge in &graph.edges {
-        match edge.kind.as_str() {
-            "contains" if edge.target == node.id => container = reference(edge.source),
-            "contains" if edge.source == node.id => members.extend(reference(edge.target)),
-            "calls" if edge.target == node.id => calling.extend(reference(edge.source)),
-            "calls" if edge.source == node.id => called.extend(reference(edge.target)),
+        match edge.kind {
+            // Record the node that contains this node.
+            RelationKind::Contains if edge.target == node.id => container = reference(edge.source),
+            // Record a node that this node contains.
+            RelationKind::Contains if edge.source == node.id => {
+                members.extend(reference(edge.target));
+            }
+            // Record a caller of this node.
+            RelationKind::Calls if edge.target == node.id => calling.extend(reference(edge.source)),
+            // Record a node that this node calls.
+            RelationKind::Calls if edge.source == node.id => called.extend(reference(edge.target)),
+            // Skip every other edge.
             _ => {}
         }
     }
     Some(NodeDetail {
         key: node.key.clone(),
         name: node.name.clone(),
-        kind: node.kind.clone(),
+        kind: node.kind,
         language: node.language.clone(),
         path: node.path.clone(),
         signature: node.signature.as_deref().map(one_line),
@@ -261,7 +276,7 @@ pub fn show(graph: &ArtifactGraph, key: &str) -> Option<NodeDetail> {
 #[cfg(test)]
 mod tests {
     use super::{is_test, one_line, search, show};
-    use crate::store::graph::{ArtifactGraph, GraphArtifact};
+    use crate::store::graph::{ArtifactGraph, GraphArtifact, NodeKind};
 
     fn graph() -> ArtifactGraph {
         let node = |id: u32, key: &str, name: &str, kind: &str| {
@@ -321,7 +336,7 @@ mod tests {
             Some("pub fn import_flow(directory: &Path) -> Result<(), Error>")
         );
 
-        let limited = search(&graph, "import", Some("callable"), 1);
+        let limited = search(&graph, "import", Some(NodeKind::Callable), 1);
         assert_eq!(limited.total, 2);
         assert_eq!(limited.nodes.len(), 1);
         assert_eq!(
@@ -363,6 +378,8 @@ mod tests {
             "pkg/api_test.py::callable:test_get",
             "pkg/test_api.py",
             "pkg/conftest.py::callable:client",
+            "web/app.test.ts::callable:renders",
+            "web/app.spec.tsx",
         ] {
             assert!(is_test(key), "{key}");
         }
@@ -370,6 +387,7 @@ mod tests {
             "src/testing.rs::callable:helper",
             "src/contest.rs",
             "src/attest/mod.rs::callable:sign",
+            "web/spec.ts",
         ] {
             assert!(!is_test(key), "{key}");
         }

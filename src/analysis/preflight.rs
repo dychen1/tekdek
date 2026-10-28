@@ -2,7 +2,7 @@
 //!
 //! This module selects the languages that one analysis runs and checks that
 //! their language server programs exist. Language profiles and loaded
-//! documents are the inputs. Detected languages or a setup error are the output.
+//! documents are the inputs. Detected profiles or a setup error are the output.
 //!
 //! # Sections
 //!
@@ -10,21 +10,19 @@
 //! `Server programs` finds each server program on the search path.
 
 use super::{
-    PipelineError,
-    language::{Language, LanguageProfile},
-    program::find_program,
-    source::{self, DocumentSnapshot},
+    PipelineError, language::LanguageProfile, pipeline, program::find_program,
+    source::DocumentSnapshot,
 };
 
 // -----------------------------------------------------------------------------
 // Detection
 // -----------------------------------------------------------------------------
 
-/// Returns the sorted, distinct extensions of enabled profiles with a compiled adapter.
+/// Returns the sorted, distinct extensions of enabled profiles.
 pub(super) fn enabled_extensions(profiles: &[LanguageProfile]) -> Vec<String> {
     let mut extensions = profiles
         .iter()
-        .filter(|profile| profile.enabled && language_is_compiled(profile.language))
+        .filter(|profile| profile.enabled)
         .flat_map(|profile| profile.extensions.iter().cloned())
         .collect::<Vec<_>>();
     extensions.sort();
@@ -32,92 +30,67 @@ pub(super) fn enabled_extensions(profiles: &[LanguageProfile]) -> Vec<String> {
     extensions
 }
 
-/// Returns the detected languages in stable order.
+/// Returns the detected profiles in language order.
 ///
 /// # Errors
 ///
 /// Returns a setup error when no enabled language has a source file.
-pub(super) fn detect_required_languages(
+pub(super) fn detect_required_languages<'a>(
     documents: &[DocumentSnapshot],
-    profiles: &[LanguageProfile],
-) -> Result<Vec<Language>, PipelineError> {
-    let languages = detect_languages(documents, profiles);
-    if languages.is_empty() {
+    profiles: &'a [LanguageProfile],
+) -> Result<Vec<&'a LanguageProfile>, PipelineError> {
+    let detected = detect_languages(documents, profiles);
+    if detected.is_empty() {
         return Err(PipelineError::Setup(
             "the codebase has no enabled supported source files".to_owned(),
         ));
     }
-    Ok(languages)
+    Ok(detected)
 }
 
-/// Returns the profile of one detected language.
-///
-/// # Errors
-///
-/// Returns a setup error when no profile names the language.
-pub(super) fn profile(
-    profiles: &[LanguageProfile],
-    language: Language,
-) -> Result<&LanguageProfile, PipelineError> {
-    profiles
-        .iter()
-        .find(|profile| profile.language == language)
-        .ok_or_else(|| {
-            PipelineError::Setup(format!("the detected language has no profile: {language}"))
-        })
-}
-
-pub(super) fn detect_languages(
+/// Returns the enabled profiles that have a source file, one for each language,
+/// in language order.
+pub(super) fn detect_languages<'a>(
     documents: &[DocumentSnapshot],
-    profiles: &[LanguageProfile],
-) -> Vec<Language> {
-    let mut languages = profiles
+    profiles: &'a [LanguageProfile],
+) -> Vec<&'a LanguageProfile> {
+    let mut detected = profiles
         .iter()
         .filter(|profile| {
+            // The adapter's own selection, so skipped files (`.d.ts`, `dist/`) detect nothing.
+            // A selection error counts as detected so that the index reports it.
             profile.enabled
-                && language_is_compiled(profile.language)
-                && documents
-                    .iter()
-                    .any(|document| source::document_has_extension(document, &profile.extensions))
+                && pipeline::adapter(profile)
+                    .and_then(|adapter| adapter.select_sources(documents))
+                    .map_or(true, |sources| !sources.is_empty())
         })
-        .map(|profile| profile.language)
         .collect::<Vec<_>>();
-    languages.sort();
-    languages.dedup();
-    languages
-}
-
-fn language_is_compiled(language: Language) -> bool {
-    match language {
-        Language::Python => cfg!(feature = "python"),
-        Language::Rust => cfg!(feature = "rust"),
-    }
+    detected.sort_by_key(|profile| profile.language);
+    detected.dedup_by_key(|profile| profile.language);
+    detected
 }
 
 // -----------------------------------------------------------------------------
 // Server programs
 // -----------------------------------------------------------------------------
 
-/// Checks that every detected language has an executable server program.
+/// Checks that every detected profile has an executable server program.
 ///
 /// # Errors
 ///
-/// Returns one setup error that lists every missing program.
+/// Returns one `MissingServer` error that lists every missing program.
 pub(super) fn preflight_server_programs(
-    profiles: &[LanguageProfile],
-    languages: &[Language],
+    detected: &[&LanguageProfile],
 ) -> Result<(), PipelineError> {
-    preflight_server_programs_with(profiles, languages, program_is_available)
+    preflight_server_programs_with(detected, program_is_available)
 }
 
 fn preflight_server_programs_with(
-    profiles: &[LanguageProfile],
-    languages: &[Language],
+    detected: &[&LanguageProfile],
     mut is_available: impl FnMut(&str) -> bool,
 ) -> Result<(), PipelineError> {
     let mut missing = Vec::new();
-    for language in languages {
-        let profile = profile(profiles, *language)?;
+    for profile in detected {
         if !is_available(&profile.server.program) {
             missing.push(format!(
                 "{} needs {}",
@@ -128,7 +101,7 @@ fn preflight_server_programs_with(
     if missing.is_empty() {
         Ok(())
     } else {
-        Err(PipelineError::Setup(format!(
+        Err(PipelineError::MissingServer(format!(
             "cannot start language servers: {}. Run `tekdek doctor` for the install commands",
             missing.join("; ")
         )))
@@ -147,17 +120,16 @@ fn program_is_available(program: &str) -> bool {
 mod tests {
     use std::path::PathBuf;
 
-    #[cfg(any(all(feature = "python", feature = "rust"), not(feature = "rust")))]
+    #[cfg(feature = "rust")]
+    use super::detect_languages;
+    use super::detect_required_languages;
+    #[cfg(all(feature = "python", feature = "rust", feature = "typescript"))]
     use super::enabled_extensions;
     #[cfg(all(feature = "python", feature = "rust"))]
     use super::preflight_server_programs_with;
-    use super::{detect_languages, detect_required_languages};
-    #[cfg(all(feature = "python", feature = "rust"))]
-    use crate::analysis::language::LanguageProfile;
-    use crate::analysis::{
-        language::{Language, builtin_profiles},
-        source::DocumentSnapshot,
-    };
+    #[cfg(feature = "rust")]
+    use crate::analysis::language::{Language, LanguageProfile};
+    use crate::analysis::{language::builtin_profiles, source::DocumentSnapshot};
 
     #[cfg(all(feature = "python", feature = "rust"))]
     #[test]
@@ -171,7 +143,7 @@ mod tests {
 
         let detected = detect_languages(&documents, &profiles);
 
-        assert_eq!(detected, vec![Language::Python, Language::Rust]);
+        assert_eq!(languages(&detected), [Language::Python, Language::Rust]);
     }
 
     #[cfg(all(feature = "python", feature = "rust"))]
@@ -186,40 +158,33 @@ mod tests {
 
         let detected = detect_languages(&documents, &profiles);
 
-        assert_eq!(detected, vec![Language::Python]);
+        assert_eq!(languages(&detected), [Language::Python]);
+    }
+
+    #[cfg(all(feature = "python", feature = "rust", feature = "typescript"))]
+    #[test]
+    fn ignores_files_that_the_adapter_skips() {
+        let documents = vec![
+            snapshot("app.py", "def run():\n    pass\n"),
+            snapshot("dist/bundle.js", "function run() {}\n"),
+            snapshot("types/env.d.ts", "declare function run(): void;\n"),
+        ];
+
+        let profiles = builtin_profiles();
+
+        let detected = detect_languages(&documents, &profiles);
+
+        assert_eq!(languages(&detected), [Language::Python]);
     }
 
     #[cfg(all(feature = "rust", not(feature = "python")))]
     #[test]
     fn detects_rust_in_a_rust_only_build() {
-        let detected = detect_languages(
-            &[snapshot("src/lib.rs", "pub fn run() {}")],
-            &builtin_profiles(),
-        );
+        let profiles = builtin_profiles();
 
-        assert_eq!(detected, vec![Language::Rust]);
-    }
+        let detected = detect_languages(&[snapshot("src/lib.rs", "pub fn run() {}")], &profiles);
 
-    #[cfg(not(feature = "rust"))]
-    #[test]
-    fn ignores_a_profile_without_a_compiled_adapter() {
-        let mut profile = builtin_profiles()
-            .into_iter()
-            .next()
-            .expect("the Python profile should exist");
-        profile.language = Language::Rust;
-        profile.extensions = vec!["rs".to_owned()];
-
-        let detected = detect_languages(
-            &[snapshot("src/lib.rs", "pub fn run() {}")],
-            std::slice::from_ref(&profile),
-        );
-
-        assert_eq!(detected, Vec::new());
-        assert_eq!(
-            enabled_extensions(std::slice::from_ref(&profile)),
-            Vec::<String>::new()
-        );
+        assert_eq!(languages(&detected), [Language::Rust]);
     }
 
     #[test]
@@ -234,7 +199,7 @@ mod tests {
         );
     }
 
-    #[cfg(all(feature = "python", feature = "rust"))]
+    #[cfg(all(feature = "python", feature = "rust", feature = "typescript"))]
     #[test]
     fn collects_enabled_extensions_in_stable_order() {
         let mut profiles = builtin_profiles();
@@ -245,21 +210,26 @@ mod tests {
 
         let extensions = enabled_extensions(&profiles);
 
-        assert_eq!(extensions, ["py", "pyi", "rs"]);
+        assert_eq!(
+            extensions,
+            [
+                "cjs", "cts", "js", "jsx", "mjs", "mts", "py", "pyi", "rs", "ts", "tsx"
+            ]
+        );
     }
 
-    #[cfg(all(feature = "python", feature = "rust"))]
+    #[cfg(all(feature = "python", feature = "rust", feature = "typescript"))]
     #[test]
     fn reports_every_missing_detected_server() {
         let profiles = builtin_profiles();
-        let detected = vec![Language::Python, Language::Rust];
+        let detected = profiles.iter().collect::<Vec<_>>();
 
-        let error = preflight_server_programs_with(&profiles, &detected, |_| false)
-            .expect_err("both language servers should be missing");
+        let error = preflight_server_programs_with(&detected, |_| false)
+            .expect_err("every language server should be missing");
 
         assert_eq!(
             error.to_string(),
-            "cannot start language servers: python needs pyright-langserver; rust needs rust-analyzer. Run `tekdek doctor` for the install commands"
+            "cannot start language servers: python needs pyright-langserver; rust needs rust-analyzer; typescript needs tsc. Run `tekdek doctor` for the install commands"
         );
     }
 
@@ -267,9 +237,13 @@ mod tests {
     #[test]
     fn preflights_only_detected_languages() {
         let profiles = builtin_profiles();
+        let detected = profiles
+            .iter()
+            .filter(|profile| profile.language == Language::Python)
+            .collect::<Vec<_>>();
         let mut checked = Vec::new();
 
-        preflight_server_programs_with(&profiles, &[Language::Python], |program| {
+        preflight_server_programs_with(&detected, |program| {
             checked.push(program.to_owned());
             true
         })
@@ -283,6 +257,11 @@ mod tests {
             path: PathBuf::from(path),
             content: content.to_owned(),
         }
+    }
+
+    #[cfg(feature = "rust")]
+    fn languages(detected: &[&LanguageProfile]) -> Vec<Language> {
+        detected.iter().map(|profile| profile.language).collect()
     }
 
     #[cfg(all(feature = "python", feature = "rust"))]

@@ -19,7 +19,13 @@ mod graph;
 mod index;
 mod serve;
 
-use std::{collections::BTreeMap, env, io::Read, path::PathBuf, process::ExitCode};
+use std::{
+    collections::BTreeMap,
+    env, io,
+    io::Read,
+    path::{Path, PathBuf},
+    process::ExitCode,
+};
 
 use serde::Serialize;
 use tekdek::store::{PROJECT_STORE, find_project_store};
@@ -46,27 +52,22 @@ const ERROR_CODE: u8 = 2;
 /// Runs one command line and returns its exit code.
 pub fn run(arguments: Vec<String>, input: &mut impl Read) -> ExitCode {
     let mut arguments = arguments.into_iter();
-    match arguments.next().as_deref() {
+    let command = arguments.next();
+    let arguments: Vec<String> = arguments.collect();
+    // Detect JSON mode before parsing so invalid commands also return JSON.
+    let json = arguments.iter().any(|argument| argument == "--json");
+    let report = |(code, output): (u8, String)| emit(json, code, &output);
+    match command.as_deref() {
         // Index one codebase.
-        Some("index") => index::run(arguments),
+        Some("index") => finish(index::run(arguments.into_iter())),
         // Run one graph query; its output is one document on standard output.
-        Some("graph") => {
-            let arguments: Vec<String> = arguments.collect();
-            let json = arguments.iter().any(|argument| argument == "--json");
-            let (code, output) = graph::run(arguments);
-            emit(json, code, &output)
-        }
+        Some("graph") => report(graph::run(arguments, json, &tekdek::semantic::ensure)),
         // Run one flow command; its output is one document on standard output.
-        Some("flow") => {
-            let arguments: Vec<String> = arguments.collect();
-            let json = arguments.iter().any(|argument| argument == "--json");
-            let (code, output) = flow::run(arguments, input);
-            emit(json, code, &output)
-        }
+        Some("flow") => report(flow::run(arguments, json, input, &tekdek::semantic::ensure)),
         // Serve the viewer until the process ends.
-        Some("serve") => serve::run(arguments),
-        // Check the language servers.
-        Some("doctor") => doctor::run(arguments.collect()),
+        Some("serve") => finish(serve::run(arguments.into_iter())),
+        // Check the language servers; the report is one document on standard output.
+        Some("doctor") => report(doctor::run(arguments, json)),
         // Print every usage.
         Some("help" | "--help" | "-h") => {
             println!(
@@ -79,6 +80,9 @@ pub fn run(arguments: Vec<String>, input: &mut impl Read) -> ExitCode {
             );
             ExitCode::SUCCESS
         }
+        // Serve the semantic requests of one store; clients start it, so the summary does not list it.
+        #[cfg(unix)]
+        Some("daemon") => finish(daemon(arguments)),
         // Print the version.
         Some("version" | "--version" | "-V") => {
             println!("tekdek {}", env!("CARGO_PKG_VERSION"));
@@ -100,17 +104,20 @@ pub fn run(arguments: Vec<String>, input: &mut impl Read) -> ExitCode {
 // -----------------------------------------------------------------------------
 
 /// The options that take no value. Each command removes the flags it accepts.
-const FLAGS: [&str; 3] = ["--json", "--check", "--open"];
+const FLAGS: [&str; 4] = ["--json", "--check", "--open", "--no-index"];
+
+/// The operands and the options of one command line.
+type SplitArguments = (Vec<String>, BTreeMap<String, String>);
 
 /// Separates options from command operands.
 ///
-/// Each option in `FLAGS` takes no value. Each option in `value_options` takes one value, as
-/// `--option value` or `--option=value`. A separate value cannot start with a
-/// hyphen, except `-` itself.
+/// Each option in `FLAGS` takes no value. Each option in `value_options` takes
+/// one value, as `--option value` or `--option=value`. A separate value cannot
+/// start with a hyphen, except `-` itself. An option cannot repeat.
 fn split_arguments(
     mut arguments: impl Iterator<Item = String>,
     value_options: &[&str],
-) -> Result<(Vec<String>, BTreeMap<String, String>), String> {
+) -> Result<SplitArguments, String> {
     let mut operands = Vec::new();
     let mut options = BTreeMap::new();
     while let Some(argument) = arguments.next() {
@@ -175,6 +182,23 @@ fn store_directory(explicit: Option<PathBuf>) -> Result<PathBuf, String> {
     })
 }
 
+/// Runs the semantic daemon of the `--store` folder until it is idle.
+#[cfg(unix)]
+fn daemon(arguments: Vec<String>) -> Result<(), String> {
+    let (operands, mut options) = split_arguments(arguments.into_iter(), &["--store"])?;
+    let store = required(&mut options, "--store")?;
+    if !operands.is_empty() {
+        return Err("usage: tekdek daemon --store <directory>".to_owned());
+    }
+    tekdek::semantic::daemon::serve(store.as_ref(), |config| {
+        tekdek::analysis::config::configured_profiles(config).map_err(std::io::Error::other)
+    })
+    .map_err(|error| error.to_string())
+}
+
+/// Resolves the semantic edges of node keys into the cache of one graph, as `tekdek::semantic::ensure` does.
+type Ensure<'a> = dyn Fn(&Path, &str, &[String], Option<&Path>) -> io::Result<()> + 'a;
+
 /// Removes one required option value.
 fn required(options: &mut BTreeMap<String, String>, key: &str) -> Result<String, String> {
     options
@@ -202,6 +226,14 @@ fn emit(json: bool, code: u8, output: &str) -> ExitCode {
         println!("{output}");
     }
     ExitCode::from(code)
+}
+
+/// Prints the error of a failed `index` or `serve` command and returns its exit code.
+fn finish(result: Result<(), String>) -> ExitCode {
+    match result {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(message) => emit(false, ERROR_CODE, &format!("error: {message}")),
+    }
 }
 
 /// Formats one failed command with exit code 2. JSON mode returns `{"error": message}`.

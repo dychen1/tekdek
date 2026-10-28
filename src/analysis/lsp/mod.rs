@@ -1,8 +1,10 @@
 //! Language Server Protocol integration.
 //!
 //! This module owns shared capture models, the resolution policy, and LSP
-//! errors. `client` transports messages and converts coordinates. `capture`
-//! requests and normalizes semantic facts.
+//! errors. `client` runs the server process and transports messages.
+//! `session` starts one server and waits until it is ready. `capture` builds
+//! and sends the requests of the resolver. `normalize` checks the captured
+//! facts and converts them into semantic facts.
 //!
 //! # Sections
 //!
@@ -10,30 +12,26 @@
 //! `Policy` defines resolution fallback selection.
 //! `Errors` defines transport and protocol errors.
 
-#[cfg(any(feature = "python", feature = "rust"))]
 pub(crate) mod capture;
 mod client;
-#[cfg(any(feature = "python", feature = "rust"))]
+#[cfg(test)]
+pub(crate) mod fake_server;
+pub(crate) mod normalize;
 pub(crate) mod session;
 
 use std::{error::Error, fmt, io};
 
-#[cfg(any(feature = "python", feature = "rust"))]
 use lsp_types::{DocumentSymbol, Location, Range, SymbolKind, Uri};
 
-#[cfg(any(feature = "python", feature = "rust"))]
-use crate::analysis::fact::ResolutionFallback;
+use crate::analysis::{fact::ResolutionFallback, source::SourceSpan};
 
-#[cfg(any(feature = "python", feature = "rust"))]
-pub(crate) use client::position_to_byte_offset;
-pub use client::{LspClient, file_uri, uri_path};
+pub(crate) use client::{LspClient, file_uri, uri_path};
 
 // -----------------------------------------------------------------------------
 // Captured Facts
 // -----------------------------------------------------------------------------
 
 /// Preserves protocol values, response grouping, and fact order until normalization.
-#[cfg(any(feature = "python", feature = "rust"))]
 pub(crate) struct SemanticCapture {
     pub(crate) documents: Vec<CapturedDocument>,
     pub(crate) facts: Vec<CapturedSemanticFact>,
@@ -41,7 +39,6 @@ pub(crate) struct SemanticCapture {
 
 /// The relative path identifies the document, exactly as it does in a source
 /// snapshot. Normalization joins the two on that path.
-#[cfg(any(feature = "python", feature = "rust"))]
 pub(crate) struct CapturedDocument {
     pub(crate) path: String,
     pub(crate) uri: Uri,
@@ -51,7 +48,6 @@ pub(crate) struct CapturedDocument {
 /// A protocol symbol site that later becomes a `SymbolAnchor`.
 ///
 /// The selection covers the declared name.
-#[cfg(any(feature = "python", feature = "rust"))]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct ProtocolSymbolSite {
     pub(crate) uri: Uri,
@@ -61,7 +57,6 @@ pub(crate) struct ProtocolSymbolSite {
 }
 
 /// The vectors preserve each grouped protocol response.
-#[cfg(any(feature = "python", feature = "rust"))]
 #[derive(Debug, PartialEq)]
 pub(crate) enum CapturedSemanticFact {
     Call {
@@ -77,6 +72,11 @@ pub(crate) enum CapturedSemanticFact {
         queried_symbol: ProtocolSymbolSite,
         targets: Vec<Location>,
     },
+    /// The query is the source span of one imported name.
+    Definition {
+        query: SourceSpan,
+        targets: Vec<Location>,
+    },
 }
 
 // -----------------------------------------------------------------------------
@@ -84,7 +84,6 @@ pub(crate) enum CapturedSemanticFact {
 // -----------------------------------------------------------------------------
 
 /// Returns the resolution fallback for one captured protocol symbol.
-#[cfg(any(feature = "python", feature = "rust"))]
 pub(crate) type FallbackPolicy = fn(&ProtocolSymbolSite) -> ResolutionFallback;
 
 // -----------------------------------------------------------------------------
@@ -94,16 +93,30 @@ pub(crate) type FallbackPolicy = fn(&ProtocolSymbolSite) -> ResolutionFallback;
 #[derive(Debug)]
 pub struct LspError {
     message: String,
+    /// True when a request to the server or its transport failed, so the server can be broken.
+    server_failure: bool,
 }
 
 impl LspError {
     pub(crate) fn new(message: impl Into<String>) -> Self {
         Self {
             message: message.into(),
+            server_failure: false,
         }
     }
 
-    #[cfg(any(feature = "python", feature = "rust"))]
+    /// Marks the error as a failed request to the server or a failed transport.
+    pub(crate) fn server_failure(self) -> Self {
+        Self {
+            server_failure: true,
+            ..self
+        }
+    }
+
+    pub(crate) fn is_server_failure(&self) -> bool {
+        self.server_failure
+    }
+
     pub(crate) fn into_message(self) -> String {
         self.message
     }

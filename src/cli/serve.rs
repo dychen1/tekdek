@@ -6,18 +6,26 @@
 
 use std::{
     path::{Path, PathBuf},
-    process::{Command, ExitCode, Stdio},
+    process::{Command, Stdio},
 };
 
-use tekdek::{catalog::build_catalog, serve::ViewerServer};
+use tekdek::{
+    flow::{lineage::read_current, models::FlowId},
+    serve::ViewerServer,
+};
+use url::Url;
 
-use super::{ERROR_CODE, split_arguments, store_directory};
+use super::{index::refresh_project_graph, split_arguments, store_directory};
 
 pub(super) const USAGE: &str =
-    "usage: tekdek serve [--store <directory>] [--port <n>] [--flow <name>] [--open]
+    "usage: tekdek serve [--store <directory>] [--port <n>] [--flow <name>] [--open] [--no-index]
 serve starts the Lift Deck on 127.0.0.1 and prints its URL. The default store
 is the nearest .tekdek folder. The default port is 8000; port 0 selects a free
-port. --flow prints the URL that opens one flow. --open opens the URL in a browser.";
+port. --flow prints the URL that opens one flow. --open opens the URL in a browser.
+Before it serves a .tekdek store, serve reindexes the project graph if the source
+changed after the last index, as tekdek index does. --no-index skips that step.
+serve sends each graph with the semantic edges in its cache, and starts no
+language server.";
 
 const DEFAULT_PORT: u16 = 8000;
 
@@ -26,39 +34,27 @@ struct Arguments {
     port: u16,
     flow: Option<String>,
     open: bool,
+    index: bool,
 }
 
 /// Serves the viewer for one store until the process ends.
-pub(super) fn run(raw: impl Iterator<Item = String>) -> ExitCode {
-    let arguments = match parse(raw) {
-        Ok(arguments) => arguments,
-        Err(message) => {
-            eprintln!("error: {message}\n{USAGE}");
-            return ExitCode::from(ERROR_CODE);
-        }
-    };
-    let store = match store_directory(arguments.store) {
-        Ok(store) => store,
-        Err(message) => {
-            eprintln!("error: {message}");
-            return ExitCode::from(ERROR_CODE);
-        }
-    };
-    let server = match ViewerServer::bind(&store, arguments.port) {
-        Ok(server) => server,
-        Err(error) => {
-            eprintln!("error: {error}");
-            return ExitCode::from(ERROR_CODE);
-        }
-    };
-    let url = match &arguments.flow {
-        Some(flow) => match flow_url(&server.url(), &store, flow) {
-            Ok(url) => url,
-            Err(message) => {
-                eprintln!("error: {message}");
-                return ExitCode::from(ERROR_CODE);
+pub(super) fn run(raw: impl Iterator<Item = String>) -> Result<(), String> {
+    let arguments = parse(raw).map_err(|message| format!("{message}\n{USAGE}"))?;
+    let store = store_directory(arguments.store)?;
+    let server = ViewerServer::bind(&store, arguments.port).map_err(|error| error.to_string())?;
+    if arguments.index {
+        match refresh_project_graph(&store, None) {
+            Ok(Some(summary)) => eprintln!("{summary}"),
+            Ok(None) => {}
+            Err(error) => {
+                eprintln!(
+                    "warning: cannot reindex the project, so the viewer shows the last index: {error}"
+                );
             }
-        },
+        }
+    }
+    let url = match &arguments.flow {
+        Some(flow) => flow_url(&server.url(), &store, flow)?,
         None => server.url(),
     };
     println!("{url}");
@@ -69,7 +65,7 @@ pub(super) fn run(raw: impl Iterator<Item = String>) -> ExitCode {
         eprintln!("warning: cannot open a browser: {error}");
     }
     server.run();
-    ExitCode::SUCCESS
+    Ok(())
 }
 
 /// Parses the arguments after `serve`.
@@ -89,6 +85,7 @@ fn parse(raw: impl Iterator<Item = String>) -> Result<Arguments, String> {
         .unwrap_or(DEFAULT_PORT);
     let flow = options.remove("--flow");
     let open = options.remove("--open").is_some();
+    let index = options.remove("--no-index").is_none();
     if let Some(option) = options.keys().next() {
         return Err(format!("unexpected option: {option}"));
     }
@@ -97,35 +94,28 @@ fn parse(raw: impl Iterator<Item = String>) -> Result<Arguments, String> {
         port,
         flow,
         open,
+        index,
     })
 }
 
-/// Returns the viewer URL that opens one flow under the graph that the store catalog lists it with.
+/// Returns the viewer URL that opens one flow under the graph that its current generation binds.
 fn flow_url(base: &str, store: &Path, flow: &str) -> Result<String, String> {
-    let catalog =
-        build_catalog(store).map_err(|error| format!("cannot read the store catalog: {error}"))?;
-    let artifact = catalog
-        .graph_of_flow(flow)
-        .ok_or_else(|| format!("the store lists no flow named {flow}: run `tekdek flow list`"))?;
-    Ok(viewer_url(base, artifact, flow))
+    let unlisted = || format!("the store lists no flow named {flow}: run `tekdek flow list`");
+    let flow_id = FlowId::try_from(flow).map_err(|_| unlisted())?;
+    let current = read_current(store, &flow_id)
+        .map_err(|error| format!("cannot read the flow {flow}: {error}"))?
+        .ok_or_else(unlisted)?;
+    viewer_url(base, &current.artifact.facts.binding.graph_artifact, flow)
 }
 
 /// Returns the viewer URL of one flow under one graph file.
-fn viewer_url(base: &str, artifact: &str, flow: &str) -> String {
-    format!("{base}?artifact={}&flow={}", encode(artifact), encode(flow))
-}
-
-/// Percent-encodes every byte except the unreserved URL characters.
-fn encode(text: &str) -> String {
-    text.bytes()
-        .map(|byte| {
-            if byte.is_ascii_alphanumeric() || b"-._~".contains(&byte) {
-                char::from(byte).to_string()
-            } else {
-                format!("%{byte:02X}")
-            }
-        })
-        .collect()
+fn viewer_url(base: &str, artifact: &str, flow: &str) -> Result<String, String> {
+    let mut url =
+        Url::parse(base).map_err(|error| format!("invalid viewer URL {base}: {error}"))?;
+    url.query_pairs_mut()
+        .append_pair("artifact", artifact)
+        .append_pair("flow", flow);
+    Ok(url.into())
 }
 
 /// Opens the URL with the browser of the operating system.
@@ -165,24 +155,48 @@ mod tests {
         assert_eq!(parsed.store, Some(std::path::PathBuf::from("demo")));
         assert_eq!(parsed.port, 0);
         assert!(parsed.open);
+        assert!(parsed.index);
         let defaults = arguments(&[]).expect("defaults");
         assert_eq!(
             (defaults.store, defaults.port, defaults.open),
             (None, 8000, false)
         );
+        assert!(!arguments(&["--no-index"]).expect("no index").index);
     }
 
     #[test]
     fn builds_the_url_of_a_flow_and_rejects_an_unlisted_flow() {
         assert_eq!(
             viewer_url("http://127.0.0.1:1/viewer/", "my app.json", "request-flow"),
-            "http://127.0.0.1:1/viewer/?artifact=my%20app.json&flow=request-flow"
+            Ok("http://127.0.0.1:1/viewer/?artifact=my+app.json&flow=request-flow".to_owned())
         );
         let store = tempfile::tempdir().expect("store");
         std::fs::write(store.path().join("app.json"), "{}").expect("graph");
         let error = flow_url("http://127.0.0.1:1/viewer/", store.path(), "missing")
             .expect_err("unlisted flow");
         assert!(error.contains("no flow named missing"), "{error}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_a_flow_whose_pointer_is_a_folder_or_a_pipe() {
+        let store = tempfile::tempdir().expect("store");
+        let pointer = store.path().join("flows/demo-flow/current.json");
+        let assert_unlisted = || {
+            let error = flow_url("http://127.0.0.1:1/viewer/", store.path(), "demo-flow")
+                .expect_err("unlisted flow");
+            assert!(error.contains("no flow named demo-flow"), "{error}");
+        };
+        std::fs::create_dir_all(&pointer).expect("pointer folder");
+        assert_unlisted();
+
+        std::fs::remove_dir(&pointer).expect("remove folder");
+        let made = std::process::Command::new("mkfifo")
+            .arg(&pointer)
+            .status()
+            .expect("mkfifo");
+        assert!(made.success(), "mkfifo must create the pipe");
+        assert_unlisted();
     }
 
     #[test]

@@ -1,26 +1,29 @@
 //! Artifact store.
 //!
-//! This module owns the store folder on disk: its location, its lock, its atomic
-//! writes, its link checks, and the content digest of stored bytes. The `graph`
-//! submodule owns the graph artifact. The flow modules write through these
+//! This module owns the store folder on disk: its location, its lock, its
+//! reads, its atomic writes, its link checks, and the content digest of stored
+//! bytes. The `graph` submodule owns the graph artifact, and `semantic` owns the
+//! semantic cache of a graph. The flow modules read and write through these
 //! helpers.
 //!
 //! # Sections
 //!
 //! `Project store` finds and creates the `.tekdek` folder of a project.
+//! `Reads` opens and reads one regular file without following a link.
 //! `Writes` replaces files atomically.
 //! `Locks and links` guards one store operation.
 //! `Digests` names stored bytes.
 
 pub mod graph;
+pub mod semantic;
 
 use std::{
     fmt::Write as _,
-    fs, io,
+    fs::{self, File, Metadata},
+    io::{self, Read},
     path::{Path, PathBuf},
 };
 
-use serde::Serialize;
 use sha2::{Digest, Sha256};
 
 // -----------------------------------------------------------------------------
@@ -32,10 +35,10 @@ pub const PROJECT_STORE: &str = ".tekdek";
 
 /// The ignore file of a new project store.
 ///
-/// The lock and interrupted writes stay local. An older tekdek wrote the catalog
-/// to `index.json`; tekdek now builds it in memory, so the file stays out of Git.
-const PROJECT_IGNORE: &str =
-    "# Local files of tekdek. Commit the rest of this folder.\n.store.lock\n*.tmp\nindex.json\n";
+/// The locks, the daemon files, and interrupted writes stay local. An older
+/// tekdek wrote the catalog to `index.json`; tekdek now builds it in memory, so
+/// the file stays out of Git.
+const PROJECT_IGNORE: &str = "# Local files of tekdek. Commit the rest of this folder.\n.store.lock\n*.tmp\nindex.json\ndaemon.lock\ndaemon.log\ndaemon.sock\n";
 
 /// Returns the nearest project store in `start` or one of its parents.
 ///
@@ -85,27 +88,148 @@ pub fn create_project_store(store: &Path) -> io::Result<()> {
     write_bytes(&store.join(".gitignore"), PROJECT_IGNORE.as_bytes())
 }
 
+/// Adds the daemon lines of a new ignore file that the ignore file of a store lacks.
+///
+/// A store from an older tekdek has no daemon lines. A store without an ignore
+/// file stays as it is.
+///
+/// # Errors
+///
+/// Returns an error if the ignore file cannot be read or written.
+pub fn update_project_ignore(store: &Path) -> io::Result<()> {
+    let path = store.join(".gitignore");
+    let mut bytes = match read_bytes(&path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error),
+    };
+    let text = String::from_utf8_lossy(&bytes);
+    let missing = PROJECT_IGNORE
+        .lines()
+        .filter(|line| line.starts_with("daemon.") && !text.lines().any(|old| old.trim() == *line))
+        .collect::<Vec<_>>();
+    if missing.is_empty() {
+        return Ok(());
+    }
+    if bytes.last().is_some_and(|byte| *byte != b'\n') {
+        bytes.push(b'\n');
+    }
+    bytes.extend(format!("{}\n", missing.join("\n")).bytes());
+    write_bytes(&path, &bytes)
+}
+
+// -----------------------------------------------------------------------------
+// Reads
+// -----------------------------------------------------------------------------
+
+/// Why `open_regular` cannot open a file.
+pub(crate) enum OpenFailure {
+    Link,
+    Missing(io::Error),
+    NotFile,
+    Other(io::Error),
+}
+
+/// Opens one regular file at `base` joined with `parts`.
+///
+/// No component of the path, `base` included, can be a symbolic link. The open
+/// uses `O_NOFOLLOW` and `O_NONBLOCK`: a link that appears after the walk fails
+/// with `ELOOP`, and a pipe does not block the open.
+pub(crate) fn open_regular(base: &Path, parts: &[&str]) -> Result<(File, Metadata), OpenFailure> {
+    let check = |path: &Path| match fs::symlink_metadata(path) {
+        // Refuse a symbolic link at any component.
+        Ok(metadata) if metadata.file_type().is_symlink() => Err(OpenFailure::Link),
+        // Keep walking when the component exists.
+        Ok(_) => Ok(()),
+        // Report a component that does not exist.
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Err(OpenFailure::Missing(error)),
+        // Report any other failure.
+        Err(error) => Err(OpenFailure::Other(error)),
+    };
+    let mut path = base.to_path_buf();
+    check(&path)?;
+    for part in parts {
+        path.push(part);
+        check(&path)?;
+    }
+    let mut options = fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+    }
+    let file = options.open(&path).map_err(|error| {
+        #[cfg(unix)]
+        if error.raw_os_error() == Some(libc::ELOOP) {
+            return OpenFailure::Link;
+        }
+        OpenFailure::Other(error)
+    })?;
+    let metadata = file.metadata().map_err(OpenFailure::Other)?;
+    if !metadata.is_file() {
+        return Err(OpenFailure::NotFile);
+    }
+    Ok((file, metadata))
+}
+
+/// Reads one regular store file. The error names the path.
+///
+/// A path that is not a regular file, such as a folder or a pipe, counts as a
+/// missing file: its error kind is `NotFound`. A symbolic link is
+/// `InvalidInput`. A pipe never blocks the read.
+pub(crate) fn read_bytes(path: &Path) -> io::Result<Vec<u8>> {
+    let cannot = |kind: io::ErrorKind, reason: &dyn std::fmt::Display| {
+        io::Error::new(kind, format!("cannot read {}: {reason}", path.display()))
+    };
+    let (mut file, _) = open_regular(path, &[]).map_err(|failure| match failure {
+        // Refuse a link with the message of the link check.
+        OpenFailure::Link => io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("the store path is a symbolic link: {}", path.display()),
+        ),
+        // Report a folder or a pipe as a missing file.
+        OpenFailure::NotFile => cannot(io::ErrorKind::NotFound, &"the path is not a regular file"),
+        // Keep the kind and the text of any other failure.
+        OpenFailure::Missing(error) | OpenFailure::Other(error) => cannot(error.kind(), &error),
+    })?;
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes)
+        .map_err(|error| cannot(error.kind(), &error))?;
+    Ok(bytes)
+}
+
 // -----------------------------------------------------------------------------
 // Writes
 // -----------------------------------------------------------------------------
 
-/// Writes compact JSON followed by one newline, atomically.
-pub(crate) fn write_json(path: &Path, value: &impl Serialize) -> io::Result<()> {
-    let mut document = serde_json::to_vec(value).map_err(io::Error::other)?;
-    document.push(b'\n');
-    write_bytes(path, &document)
-}
-
-/// Replaces one file atomically through a synced temporary file in the same directory.
+/// Replaces one store file atomically. The file and its folder must not be symbolic links.
 pub(crate) fn write_bytes(path: &Path, document: &[u8]) -> io::Result<()> {
     if let Some(directory) = path
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
     {
         reject_symlink(directory)?;
-        fs::create_dir_all(directory)?;
     }
     reject_symlink(path)?;
+    atomic_write(path, document)
+}
+
+/// Replaces one file atomically through a synced temporary file in the same folder.
+///
+/// This write takes no store lock and checks no link. It creates a missing folder.
+///
+/// # Errors
+///
+/// Returns an error if the folder, the temporary file, or the rename fails.
+pub fn atomic_write(path: &Path, document: &[u8]) -> io::Result<()> {
+    if let Some(directory) = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
+        fs::create_dir_all(directory)?;
+    }
     let temporary = path.with_extension(format!("{}.tmp", temporary_suffix()));
     let mut file = fs::OpenOptions::new()
         .write(true)
@@ -198,8 +322,28 @@ mod tests {
 
     use super::{
         PROJECT_STORE, create_project_store, digest_of, find_project_store, find_store_below,
-        write_bytes,
+        update_project_ignore, write_bytes,
     };
+
+    #[test]
+    fn adds_the_missing_daemon_lines_to_the_ignore_file_of_an_older_store() {
+        let store = tempfile::tempdir().expect("store");
+        let ignore = store.path().join(".gitignore");
+        update_project_ignore(store.path()).expect("no ignore file");
+        assert!(
+            !ignore.exists(),
+            "a store without an ignore file stays as it is"
+        );
+
+        fs::write(&ignore, "kept\ndaemon.log").expect("older ignore file");
+        update_project_ignore(store.path()).expect("update");
+        update_project_ignore(store.path()).expect("second update");
+
+        assert_eq!(
+            fs::read_to_string(&ignore).expect("ignore file"),
+            "kept\ndaemon.log\ndaemon.lock\ndaemon.sock\n"
+        );
+    }
 
     #[test]
     fn finds_the_nearest_project_store_and_creates_one_with_an_ignore_file() {

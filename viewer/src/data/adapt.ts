@@ -3,7 +3,7 @@
    The adapters read data only; they never fetch.
    # Sections
    graph, flow, shared rules */
-import type { ClusterColor, DeckCall, DeckCluster, DeckFlow, DeckFunction, DeckGraph, DeckStep, DeckTree, FlowArtifact, FlowEntry, GraphDocument } from "./models.ts";
+import type { ArtifactEntry, ArtifactIndex, ClusterColor, DeckCall, DeckCluster, DeckFlow, DeckFunction, DeckGraph, DeckStep, DeckTree, FlowArtifact, FlowEntry, GraphDocument } from "./models.ts";
 
 // ============ graph ============
 
@@ -16,7 +16,7 @@ export function displayName(key: string, fallback: string): string {
 /** Builds the deck graph from a verified graph document.
  *  Files come from module nodes and callable paths. Functions keep source order in each file.
  *  Calls are the distinct `calls` edges between two different callables. */
-export function deckGraph(document: GraphDocument, repo: string): DeckGraph {
+export function deckGraph(document: GraphDocument): DeckGraph {
   const nodes = document.graph.nodes;
   const byId = new Map(nodes.map(node => [node.id, node]));
   const files = new Set<string>();
@@ -36,8 +36,7 @@ export function deckGraph(document: GraphDocument, repo: string): DeckGraph {
     seen.add(id);
     calls.push({ source: source.key, target: target.key });
   }
-  const sorted = [...files].sort();
-  return { repo, files: sorted, tree: fileTree(sorted), functions, calls };
+  return { tree: fileTree([...files].sort()), functions, calls };
 }
 
 /** Builds the directory tree. In each directory, files come first, then subdirectories, each in name order. */
@@ -85,12 +84,17 @@ export function deckFlow(artifact: FlowArtifact, graph: DeckGraph, graphDigest: 
         .map(member => member.nodeKey),
     };
   });
+  const transitions = new Map((artifact.view.steps ?? []).map(view => [view.stepId, view.transition]));
+  const facts = new Map((artifact.facts.nodes ?? []).map(node => [node.key, node]));
   const steps: DeckStep[] = artifact.intent.steps.map((step, i) => ({
     index: i + 1, id: step.id, title: step.title, node: step.nodeKey, cluster: step.clusterKey ?? "",
     annotation: step.annotation, missing: !present.has(step.nodeKey),
+    transition: transitions.get(step.id) ?? null,
+    signature: facts.get(step.nodeKey)?.signature ?? null,
+    documentation: facts.get(step.nodeKey)?.documentation ?? null,
   }));
   return {
-    name: artifact.flowId, behavior: artifact.intent.behavior,
+    name: artifact.flowId, generation: artifact.generation?.ordinal ?? 1,
     stale: Boolean(entry?.stale) || artifact.facts.binding.graphDigest !== graphDigest,
     steps, clusters,
   };
@@ -98,17 +102,40 @@ export function deckFlow(artifact: FlowArtifact, graph: DeckGraph, graphDigest: 
 
 // ============ shared rules ============
 
-/** Returns a copy of the graph where each function carries the flow cluster that holds it. */
-export function withMembership(graph: DeckGraph, flow: DeckFlow | null): DeckGraph {
-  const clusterOf = new Map<string, string>();
-  for (const cluster of flow?.clusters ?? []) for (const id of cluster.members) if (!clusterOf.has(id)) clusterOf.set(id, cluster.id);
-  return { ...graph, functions: graph.functions.map(fn => ({ ...fn, cluster: clusterOf.get(fn.id) ?? null })) };
-}
-
 /** Returns the flows that the viewer shows: the frozen schema 3 entries of a codebase, in index order. */
 export const frozenFlows = (flows: readonly FlowEntry[] | undefined) => (flows ?? []).filter(flow => flow.schemaVersion === 3);
 
 /** Picks the flow to open: the requested name, else the first flow. */
 export function pickFlow(flows: readonly FlowEntry[], requested: string | null): FlowEntry | null {
   return flows.find(flow => flow.name === requested) ?? flows[0] ?? null;
+}
+
+/** Returns the graph file digest that flows of a codebase bind. A server without `graphDigest` serves the file as it is. */
+export const bindingDigest = (entry: Pick<ArtifactEntry, "digest" | "graphDigest">) => entry.graphDigest ?? entry.digest;
+
+/** Picks the codebase to open: the requested file, else the index default, else the first codebase. */
+export function pickArtifact(index: ArtifactIndex, requested: string | null): ArtifactEntry | null {
+  const find = (file: string | null | undefined) => index.artifacts.find(item => item.file === file);
+  return find(requested) ?? find(index.defaultArtifact) ?? index.artifacts[0] ?? null;
+}
+
+/** Resolves the codebase, flow, and step of a page link. A missing name opens the fallback at step 0 with a notice.
+ *  A missing codebase also drops the flow of the link, because that flow belongs to the missing codebase.
+ *  A step past the end of the flow opens its last step with a notice. */
+export function resolveLink(index: ArtifactIndex, want: { artifact: string | null; flow: string | null; step: number }):
+  { file: string; flow: string | null; step: number; notice: string | null } | null {
+  const entry = pickArtifact(index, want.artifact);
+  if (!entry) return null;
+  const name = entry.label ?? entry.file;
+  if (want.artifact && entry.file !== want.artifact) {
+    return { file: entry.file, flow: null, step: 0, notice: `No codebase named ${want.artifact}. This page shows ${name}.` };
+  }
+  const flow = pickFlow(frozenFlows(entry.flows), want.flow);
+  if (want.flow && flow?.name !== want.flow) {
+    return { file: entry.file, flow: null, step: 0, notice: `No flow named ${want.flow} in ${name}.${flow ? ` This page shows ${flow.name}.` : ""}` };
+  }
+  if (flow?.stepCount && want.step > flow.stepCount) {
+    return { file: entry.file, flow: want.flow, step: flow.stepCount, notice: `No step ${want.step} in ${flow.name}. This page shows its last step, ${flow.stepCount}.` };
+  }
+  return { file: entry.file, flow: want.flow, step: want.step, notice: null };
 }

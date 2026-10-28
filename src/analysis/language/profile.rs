@@ -12,6 +12,7 @@ use serde_json::json;
 pub enum Language {
     Python,
     Rust,
+    TypeScript,
 }
 
 impl Language {
@@ -20,6 +21,7 @@ impl Language {
         match self {
             Self::Python => "python",
             Self::Rust => "rust",
+            Self::TypeScript => "typescript",
         }
     }
 
@@ -29,6 +31,7 @@ impl Language {
         match self {
             Self::Python => "npm install -g pyright",
             Self::Rust => "rustup component add rust-analyzer",
+            Self::TypeScript => "npm install -g typescript",
         }
     }
 
@@ -41,6 +44,7 @@ impl Language {
         match value {
             "python" => Ok(Self::Python),
             "rust" => Ok(Self::Rust),
+            "typescript" => Ok(Self::TypeScript),
             _ => Err(format!("unsupported language: {value}")),
         }
     }
@@ -59,40 +63,6 @@ pub struct ServerCommand {
     pub initialization_options: Value,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum RequiredCapability {
-    DocumentSymbols,
-    CallHierarchy,
-    References,
-    TypeDefinitions,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct CapabilityPolicy {
-    required: &'static [RequiredCapability],
-}
-
-impl CapabilityPolicy {
-    pub const NONE: Self = Self::new(&[]);
-
-    pub const SEMANTIC_GRAPH: Self = Self::new(&[
-        RequiredCapability::DocumentSymbols,
-        RequiredCapability::CallHierarchy,
-        RequiredCapability::References,
-        RequiredCapability::TypeDefinitions,
-    ]);
-
-    #[must_use]
-    pub const fn new(required: &'static [RequiredCapability]) -> Self {
-        Self { required }
-    }
-
-    #[must_use]
-    pub fn requires(self, capability: RequiredCapability) -> bool {
-        self.required.contains(&capability)
-    }
-}
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LanguageProfile {
     pub language: Language,
@@ -100,7 +70,6 @@ pub struct LanguageProfile {
     pub extensions: Vec<String>,
     pub language_id: String,
     pub server: ServerCommand,
-    pub required_capabilities: CapabilityPolicy,
 }
 
 /// Returns profiles for the adapters in this build.
@@ -124,7 +93,6 @@ pub fn builtin_profiles() -> Vec<LanguageProfile> {
             arguments: vec!["--stdio".to_owned()],
             initialization_options: Value::Null,
         },
-        required_capabilities: CapabilityPolicy::SEMANTIC_GRAPH,
     });
 
     #[cfg(feature = "rust")]
@@ -143,7 +111,22 @@ pub fn builtin_profiles() -> Vec<LanguageProfile> {
                 "cachePriming": {"enable": false},
             }),
         },
-        required_capabilities: CapabilityPolicy::SEMANTIC_GRAPH,
+    });
+
+    // One profile reads JavaScript too: the same parser and server handle both.
+    #[cfg(feature = "typescript")]
+    profiles.push(LanguageProfile {
+        language: Language::TypeScript,
+        enabled: true,
+        extensions: ["ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs"]
+            .map(str::to_owned)
+            .to_vec(),
+        language_id: "typescript".to_owned(),
+        server: ServerCommand {
+            program: "tsc".to_owned(),
+            arguments: vec!["--lsp".to_owned(), "--stdio".to_owned()],
+            initialization_options: Value::Null,
+        },
     });
 
     profiles
@@ -151,7 +134,7 @@ pub fn builtin_profiles() -> Vec<LanguageProfile> {
 
 #[cfg(test)]
 mod tests {
-    use super::{CapabilityPolicy, Language, builtin_profiles};
+    use super::{Language, builtin_profiles};
 
     #[test]
     fn includes_only_profiles_for_compiled_adapters() {
@@ -162,6 +145,7 @@ mod tests {
         let expected = [
             cfg!(feature = "python").then_some(Language::Python),
             cfg!(feature = "rust").then_some(Language::Rust),
+            cfg!(feature = "typescript").then_some(Language::TypeScript),
         ]
         .into_iter()
         .flatten()
@@ -170,16 +154,7 @@ mod tests {
         assert_eq!(languages, expected);
     }
 
-    #[test]
-    fn requires_semantic_graph_capabilities_for_each_profile() {
-        assert!(
-            builtin_profiles()
-                .iter()
-                .all(|profile| profile.required_capabilities == CapabilityPolicy::SEMANTIC_GRAPH)
-        );
-    }
-
-    #[cfg(all(feature = "python", feature = "rust"))]
+    #[cfg(all(feature = "python", feature = "rust", feature = "typescript"))]
     #[test]
     fn orders_profiles_by_language_name() {
         let mut profiles = builtin_profiles();
@@ -188,6 +163,14 @@ mod tests {
 
         assert_eq!(profiles[0].language, Language::Python);
         assert_eq!(profiles[1].language, Language::Rust);
+        assert_eq!(profiles[2].language, Language::TypeScript);
+    }
+
+    #[test]
+    fn parses_every_language_name() {
+        for language in [Language::Python, Language::Rust, Language::TypeScript] {
+            assert_eq!(Language::parse(language.as_str()), Ok(language));
+        }
     }
 
     #[cfg(feature = "rust")]

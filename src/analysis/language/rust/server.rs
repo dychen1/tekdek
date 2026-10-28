@@ -5,35 +5,24 @@ use std::path::Path;
 use lsp_types::SymbolKind;
 
 use crate::analysis::{
-    fact::{ResolutionFallback, SemanticFact},
+    fact::ResolutionFallback,
     language::{Language, LanguageProfile},
     lsp::{
-        LspError, ProtocolSymbolSite,
-        session::{self, ServerReadiness, SessionConfig},
+        ProtocolSymbolSite,
+        session::{ServerReadiness, SessionConfig},
     },
-    source::Sources,
 };
 
-/// Produces semantic facts from one rust-analyzer session.
-///
-/// # Errors
-///
-/// Returns an error if the shared session fails.
-pub(super) fn produce_semantic_facts(
-    root: &Path,
-    profile: &LanguageProfile,
-    sources: &Sources<'_>,
-) -> Result<Vec<SemanticFact>, LspError> {
-    session::produce_semantic_facts(&session_config(root, profile), sources)
-}
-
-fn session_config<'a>(root: &'a Path, profile: &'a LanguageProfile) -> SessionConfig<'a> {
+/// Returns the session configuration of one Rust profile.
+pub(crate) fn session_config<'a>(
+    root: &'a Path,
+    profile: &'a LanguageProfile,
+) -> SessionConfig<'a> {
     SessionConfig {
         root,
         language: Language::Rust,
         language_id: &profile.language_id,
         server: &profile.server,
-        required_capabilities: profile.required_capabilities,
         fallback: resolution_fallback,
         // rust-analyzer answers semantic requests with empty results until
         // the workspace loads, so the session waits for a quiescent status.
@@ -67,7 +56,7 @@ mod tests {
     use super::{resolution_fallback, session_config};
     use crate::analysis::{
         fact::ResolutionFallback,
-        language::{CapabilityPolicy, Language, LanguageProfile, ServerCommand},
+        language::{Language, LanguageProfile, ServerCommand},
         lsp::ProtocolSymbolSite,
     };
 
@@ -84,7 +73,6 @@ mod tests {
                 arguments: Vec::new(),
                 initialization_options: Value::Null,
             },
-            required_capabilities: CapabilityPolicy::SEMANTIC_GRAPH,
         };
 
         let config = session_config(root, &profile);

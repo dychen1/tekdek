@@ -1,6 +1,6 @@
 //! User configuration.
 //!
-//! This module loads strict language overrides and applies command-line overrides.
+//! This module loads strict language overrides from one configuration file.
 
 use std::{
     collections::BTreeMap,
@@ -37,42 +37,6 @@ pub fn configured_profiles(path: Option<&Path>) -> Result<Vec<LanguageProfile>, 
     };
 
     profiles_from_toml(&document)
-}
-
-/// Applies language server command-line overrides.
-///
-/// Server program overrides are applied in input order. The last program for
-/// one language wins. Argument overrides then replace configured arguments.
-///
-/// # Errors
-///
-/// Returns an error if an override names an adapter that is not in this build.
-pub fn apply_cli_overrides(
-    profiles: &mut [LanguageProfile],
-    servers: &[(Language, String)],
-    arguments: &BTreeMap<Language, Vec<String>>,
-) -> Result<(), ConfigError> {
-    for (language, _) in servers {
-        require_profile(profiles, *language)?;
-    }
-    for language in arguments.keys() {
-        require_profile(profiles, *language)?;
-    }
-
-    for (language, program) in servers {
-        profile_mut(profiles, *language)?
-            .server
-            .program
-            .clone_from(program);
-    }
-    for (language, values) in arguments {
-        profile_mut(profiles, *language)?
-            .server
-            .arguments
-            .clone_from(values);
-    }
-
-    Ok(())
 }
 
 #[derive(Debug)]
@@ -186,24 +150,6 @@ fn default_config_path() -> Option<PathBuf> {
     dirs::config_dir().map(|path| path.join("tekdek/config.toml"))
 }
 
-fn require_profile(profiles: &[LanguageProfile], language: Language) -> Result<(), ConfigError> {
-    profiles
-        .iter()
-        .any(|profile| profile.language == language)
-        .then_some(())
-        .ok_or_else(|| unavailable_language(language))
-}
-
-fn profile_mut(
-    profiles: &mut [LanguageProfile],
-    language: Language,
-) -> Result<&mut LanguageProfile, ConfigError> {
-    profiles
-        .iter_mut()
-        .find(|profile| profile.language == language)
-        .ok_or_else(|| unavailable_language(language))
-}
-
 fn unavailable_language(language: Language) -> ConfigError {
     ConfigError::Invalid(format!(
         "language is not available in this build: {language}"
@@ -212,20 +158,9 @@ fn unavailable_language(language: Language) -> ConfigError {
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        path::PathBuf,
-        sync::atomic::{AtomicUsize, Ordering},
-    };
-
-    #[cfg(any(feature = "python", feature = "rust"))]
-    use std::collections::BTreeMap;
-    #[cfg(any(feature = "python", feature = "rust"))]
     use std::fs;
 
-    #[cfg(any(feature = "python", feature = "rust"))]
-    use super::apply_cli_overrides;
     use super::{configured_profiles, profiles_from_toml};
-    #[cfg(any(feature = "python", feature = "rust"))]
     use crate::analysis::language::builtin_profiles;
 
     #[cfg(feature = "rust")]
@@ -264,7 +199,8 @@ mod tests {
 
     #[test]
     fn reports_a_missing_explicit_file() {
-        let path = test_path("missing");
+        let directory = tempfile::tempdir().expect("the test folder should be created");
+        let path = directory.path().join("missing.toml");
         let error =
             configured_profiles(Some(&path)).expect_err("the explicit file should be required");
 
@@ -272,10 +208,10 @@ mod tests {
         assert!(error.to_string().contains(&path.display().to_string()));
     }
 
-    #[cfg(any(feature = "python", feature = "rust"))]
     #[test]
     fn loads_an_explicit_file() {
-        let path = test_path("configured");
+        let directory = tempfile::tempdir().expect("the test folder should be created");
+        let path = directory.path().join("config.toml");
         let language = builtin_profiles()
             .first()
             .expect("this test requires a compiled adapter")
@@ -288,7 +224,6 @@ mod tests {
 
         let profiles =
             configured_profiles(Some(&path)).expect("the explicit configuration should load");
-        fs::remove_file(&path).expect("the test configuration should be removed");
 
         assert_eq!(
             profile(&profiles, language).server.program,
@@ -314,33 +249,6 @@ mod tests {
         assert_eq!(options["diagnostics"]["enable"], true);
     }
 
-    #[cfg(any(feature = "python", feature = "rust"))]
-    #[test]
-    fn applies_cli_overrides_after_configured_values() {
-        let mut profiles = builtin_profiles();
-        let language = profiles
-            .first()
-            .expect("this test requires a compiled adapter")
-            .language;
-        let mut arguments = BTreeMap::new();
-        arguments.insert(language, vec!["cli-argument".to_owned()]);
-
-        apply_cli_overrides(
-            &mut profiles,
-            &[
-                (language, "first-server".to_owned()),
-                (language, "last-server".to_owned()),
-            ],
-            &arguments,
-        )
-        .expect("the compiled language should accept overrides");
-        let profile = profile(&profiles, language);
-
-        assert_eq!(profile.server.program, "last-server");
-        assert_eq!(profile.server.arguments, ["cli-argument"]);
-    }
-
-    #[cfg(any(feature = "python", feature = "rust"))]
     fn profile(
         profiles: &[crate::analysis::language::LanguageProfile],
         language: crate::analysis::language::Language,
@@ -349,15 +257,5 @@ mod tests {
             .iter()
             .find(|profile| profile.language == language)
             .expect("the language profile should exist")
-    }
-
-    fn test_path(label: &str) -> PathBuf {
-        static NEXT_PATH: AtomicUsize = AtomicUsize::new(0);
-
-        std::env::temp_dir().join(format!(
-            "tekdek-{label}-{}-{}",
-            std::process::id(),
-            NEXT_PATH.fetch_add(1, Ordering::Relaxed)
-        ))
     }
 }

@@ -2,9 +2,13 @@
 //!
 //! This module serves the Lift Deck on the loopback address. The viewer page,
 //! its script, its stylesheet, and its fonts come from the binary. Store files
-//! come from one store directory, and only when its catalog lists them. The
-//! server builds the catalog from the store for each request and never writes. A store directory and a port are the inputs. HTTP
-//! responses are the output.
+//! come from one store directory, and only when its catalog lists them. A graph
+//! file comes with the edges of its semantic cache, as the catalog digest
+//! states. The `/source` route also reads the source files of the step
+//! functions of a flow.
+//! It reads them inside the project folder that holds the store. The server
+//! builds the catalog from the store for each request and never writes. A store
+//! directory and a port are the inputs. HTTP responses are the output.
 //!
 //! # Sections
 //!
@@ -12,19 +16,33 @@
 //! `Requests` checks the headers and the method of one request.
 //! `Routes` maps a request path onto an embedded asset or a store file.
 //! `Catalog allowlist` decides which store files the viewer can read.
-//! `Safe reads` reads one store file without following a link.
+//! `Source route` serves the function source of one flow.
+//! `Read failures` maps link and file errors onto replies.
+//!
+//! The `files` module reads one store file or one project file without
+//! following a link.
+
+mod files;
 
 use std::{
     borrow::Cow,
     fs, io,
-    io::Read,
     path::{Path, PathBuf},
 };
 
+use self::files::{read_project, read_store};
 use crate::{
     catalog::{build_catalog, readable_files},
-    flow::models::is_flow_id,
-    store::{graph::check_graph_name, reject_symlink},
+    flow::{
+        lineage::{LineageError, read_current},
+        models::{FlowId, is_flow_id},
+    },
+    source_view::{SourceDocument, flow_sources},
+    store::{
+        graph::{check_graph_name, read_graph},
+        reject_symlink,
+        semantic::merged_graph_bytes,
+    },
 };
 
 // -----------------------------------------------------------------------------
@@ -152,6 +170,15 @@ impl Reply {
         }
     }
 
+    fn json(body: Vec<u8>) -> Self {
+        Self {
+            status: 200,
+            content_type: JSON,
+            body: Cow::Owned(body),
+            location: None,
+        }
+    }
+
     fn failure(status: u16, message: &str) -> Self {
         Self {
             status,
@@ -219,7 +246,8 @@ fn answer(
     if method != "GET" && method != "HEAD" {
         return Reply::failure(405, "Use GET or HEAD.");
     }
-    match route_parts(url).and_then(|parts| route(store, &parts)) {
+    let query = url.split_once('?').map(|(_, query)| query);
+    match route_parts(url).and_then(|parts| route(store, &parts, query)) {
         Ok(reply) | Err(reply) => reply,
     }
 }
@@ -231,7 +259,7 @@ fn answer(
 const JSON: &str = "application/json; charset=utf-8";
 
 /// Returns the embedded asset or the store file of an allowed path. Any other path is a 404.
-fn route(store: &Path, parts: &[String]) -> Result<Reply, Reply> {
+fn route(store: &Path, parts: &[String], query: Option<&str>) -> Result<Reply, Reply> {
     let words: Vec<&str> = parts.iter().map(String::as_str).collect();
     match words.as_slice() {
         // Send the root to the viewer page.
@@ -254,26 +282,23 @@ fn route(store: &Path, parts: &[String]) -> Result<Reply, Reply> {
             .map(|(_, bytes)| Reply::asset("font/woff2", bytes))
             .ok_or_else(not_found),
         // Serve the catalog that the server builds from the store.
-        ["artifacts", "index.json"] => Ok(Reply {
-            status: 200,
-            content_type: JSON,
-            body: Cow::Owned(catalog_document(store)?),
-            location: None,
-        }),
+        ["artifacts", "index.json"] => Ok(Reply::json(catalog_document(store)?)),
         // Serve the store files that the catalog lists.
         ["artifacts", rest @ ..] if !rest.is_empty() => {
-            let file = rest.join("/");
-            if !listed(&catalog_files(store)?, &file) {
+            if !catalog_files(store)?.contains(&rest.join("/")) {
                 return Err(not_found());
             }
-            let bytes = read_safe(store, rest)?;
-            Ok(Reply {
-                status: 200,
-                content_type: JSON,
-                body: Cow::Owned(bytes),
-                location: None,
-            })
+            match rest {
+                [file] => Ok(Reply::json(
+                    merged_graph_bytes(store, file)
+                        .map_err(|error| read_failure(&error))?
+                        .0,
+                )),
+                _ => Ok(Reply::json(read_store(store, rest)?)),
+            }
         }
+        // Serve the source of every step function of one flow.
+        ["source"] => Ok(Reply::json(source_document(store, query)?)),
         // Reject every other path.
         _ => Err(not_found()),
     }
@@ -350,75 +375,92 @@ fn catalog_failure(error: &io::Error) -> Reply {
     }
 }
 
-/// True when the catalog lists the file: a graph file, or a current flow generation under `flows/`.
-fn listed(files: &[String], file: &str) -> bool {
-    let named = match file.strip_prefix("flows/") {
-        Some(path) => generation_file(path),
-        None => graph_name(file),
-    };
-    named && files.iter().any(|listed| listed == file)
+// -----------------------------------------------------------------------------
+// Source route
+// -----------------------------------------------------------------------------
+
+/// Returns the source JSON of every step function of one flow.
+///
+/// The current generation of the flow must bind the named graph. A missing,
+/// linked, or non-regular lineage or graph file is a 404, and so is a lineage
+/// folder that holds another flow. A lineage that cannot be read for any other
+/// reason is a 500. File paths come from the graph, never from the query, and
+/// stay inside the project folder that holds the store.
+fn source_document(store: &Path, query: Option<&str>) -> Result<Vec<u8>, Reply> {
+    let (artifact, flow) = source_query(query)?;
+    check_link(store)?;
+    let flow_id = FlowId::try_from(flow.as_str()).map_err(|_| not_found())?;
+    let current = match read_current(store, &flow_id) {
+        // Keep the current generation, or none for a flow without a lineage.
+        Ok(current) => current,
+        // Treat a missing, linked, or non-regular lineage file as no flow.
+        Err(LineageError::Io(error))
+            if matches!(
+                error.kind(),
+                io::ErrorKind::NotFound | io::ErrorKind::InvalidInput
+            ) =>
+        {
+            None
+        }
+        // Treat a lineage folder that holds another flow as no flow.
+        Err(LineageError::FlowMismatch { .. }) => None,
+        // Fail for any other lineage error.
+        Err(_) => return Err(Reply::failure(500, "Cannot read the flow.")),
+    }
+    .filter(|current| current.artifact.facts.binding.graph_artifact == artifact)
+    .ok_or_else(not_found)?;
+    let (graph, _) = read_graph(store, &artifact).map_err(|error| {
+        if error.kind() == io::ErrorKind::InvalidInput {
+            not_found()
+        } else {
+            read_failure(&error)
+        }
+    })?;
+    let store = fs::canonicalize(store).map_err(|error| read_failure(&error))?;
+    let root = store
+        .parent()
+        .ok_or_else(|| Reply::failure(500, "The store has no project folder."))?;
+    let functions = flow_sources(&graph, &current.artifact, |path| read_project(root, path));
+    serde_json::to_vec(&SourceDocument {
+        artifact,
+        flow,
+        functions,
+    })
+    .map_err(|_| Reply::failure(500, "Cannot build the source document."))
 }
 
-/// Accepts a graph file name: one store entry that ends in `.json`, does not start with a dot, and is not the index.
-fn graph_name(name: &str) -> bool {
-    !name.starts_with('.') && check_graph_name(name).is_ok()
-}
-
-/// Accepts a generation path: `<flow ID>/generations/<ordinal>-<digest12>.json`.
-fn generation_file(path: &str) -> bool {
-    let parts: Vec<&str> = path.split('/').collect();
-    let [id, "generations", name] = parts.as_slice() else {
-        return false;
+/// Reads `artifact` and `flow`, each exactly once. Any other parameter is a 400.
+fn source_query(query: Option<&str>) -> Result<(String, String), Reply> {
+    let invalid = || Reply::failure(400, "Use /source?artifact=<graph file>&flow=<flow name>.");
+    let (mut artifact, mut flow) = (None, None);
+    for pair in query
+        .unwrap_or_default()
+        .split('&')
+        .filter(|pair| !pair.is_empty())
+    {
+        let (name, value) = pair.split_once('=').ok_or_else(invalid)?;
+        let value = percent_decode(value).ok_or_else(invalid)?;
+        let slot = match name {
+            "artifact" => &mut artifact,
+            "flow" => &mut flow,
+            _ => return Err(invalid()),
+        };
+        if slot.replace(value).is_some() {
+            return Err(invalid());
+        }
+    }
+    let (Some(artifact), Some(flow)) = (artifact, flow) else {
+        return Err(invalid());
     };
-    let Some((ordinal, digest)) = name
-        .strip_suffix(".json")
-        .and_then(|stem| stem.split_once('-'))
-    else {
-        return false;
-    };
-    is_flow_id(id)
-        && (1..=9).contains(&ordinal.len())
-        && !ordinal.starts_with('0')
-        && ordinal.bytes().all(|byte| byte.is_ascii_digit())
-        && digest.len() == 12
-        && digest
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    if check_graph_name(&artifact).is_err() || !is_flow_id(&flow) {
+        return Err(not_found());
+    }
+    Ok((artifact, flow))
 }
 
 // -----------------------------------------------------------------------------
-// Safe reads
+// Read failures
 // -----------------------------------------------------------------------------
-
-/// Reads one regular store file. No component of the path can be a symbolic link.
-fn read_safe(store: &Path, parts: &[&str]) -> Result<Vec<u8>, Reply> {
-    let mut path = store.to_path_buf();
-    check_link(&path)?;
-    for part in parts {
-        path.push(part);
-        check_link(&path)?;
-    }
-    let mut options = fs::OpenOptions::new();
-    options.read(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-
-        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
-    }
-    let mut file = options.open(&path).map_err(|error| read_failure(&error))?;
-    if !file
-        .metadata()
-        .map_err(|error| read_failure(&error))?
-        .is_file()
-    {
-        return Err(Reply::failure(403, "The path must be a regular file."));
-    }
-    let mut bytes = Vec::new();
-    file.read_to_end(&mut bytes)
-        .map_err(|error| read_failure(&error))?;
-    Ok(bytes)
-}
 
 fn check_link(path: &Path) -> Result<(), Reply> {
     match reject_symlink(path) {
@@ -456,8 +498,15 @@ mod tests {
         path::Path,
     };
 
-    use super::{PAGE, Reply, ViewerServer, answer};
-    use crate::flow::fixtures::{self, frozen, import, output};
+    use super::{JSON, PAGE, Reply, ViewerServer, answer};
+    use crate::{
+        flow::fixtures::{self, frozen, import, output},
+        store::{
+            digest_of,
+            graph::{GraphArtifact, RelationKind},
+            semantic::{SemanticCache, SemanticEdge, write_cache},
+        },
+    };
 
     const HOST: &str = "127.0.0.1:9";
 
@@ -581,6 +630,41 @@ mod tests {
         }
         let empty = tempfile::tempdir().expect("empty store");
         assert_error(&get(empty.path(), "/artifacts/index.json"), 404);
+    }
+
+    #[test]
+    fn serves_a_graph_with_its_cached_edges_under_the_catalog_digest() {
+        let (root, _) = fixture();
+        let store = root.path();
+        let file = fs::read(store.join("graph.json")).expect("graph");
+        assert_eq!(get(store, "/artifacts/graph.json").body, file);
+        write_cache(
+            store,
+            "graph.json",
+            &SemanticCache {
+                edges: vec![SemanticEdge {
+                    source: "src/main.rs::callable:main".to_owned(),
+                    target: "src/parse.rs::callable:read_input".to_owned(),
+                    kind: RelationKind::Calls,
+                    weight: 1,
+                }],
+                ..SemanticCache::new(digest_of(&file))
+            },
+        )
+        .expect("cache");
+
+        let served = get(store, "/artifacts/graph.json");
+        let catalog: serde_json::Value =
+            serde_json::from_slice(&get(store, "/artifacts/index.json").body).expect("catalog");
+
+        assert_eq!(catalog["artifacts"][0]["digest"], digest_of(&served.body));
+        assert_eq!(catalog["artifacts"][0]["graphDigest"], digest_of(&file));
+        let graph = GraphArtifact::read(&served.body).expect("graph").graph;
+        assert!(
+            graph.edges.iter().any(|edge| {
+                (edge.source, edge.target, edge.kind) == (0, 2, RelationKind::Calls)
+            })
+        );
     }
 
     #[test]
@@ -723,5 +807,247 @@ mod tests {
         let linked = root.path().join("linked");
         std::os::unix::fs::symlink(root.path(), &linked).expect("link store");
         assert!(ViewerServer::bind(&linked, 0).is_err());
+    }
+
+    /// Sets the declaration, scope, body, and content hash of a node from its source text.
+    fn set_ranges(node: &mut crate::store::graph::ArtifactNode, text: &str) {
+        use crate::{
+            analysis::source::{ContentHash, SourceRange, content_span},
+            store::graph::ArtifactRange,
+        };
+        let range = |start: usize, end: usize| SourceRange {
+            start: u32::try_from(start).expect("offset"),
+            end: u32::try_from(end).expect("offset"),
+        };
+        let name = text.find(&node.name).expect("name");
+        let close = text.rfind('}').expect("body end") + 1;
+        let declaration = range(name, name + node.name.len());
+        let scope = range(text.find("fn ").expect("fn"), close);
+        let body = range(text.find('{').expect("body"), close);
+        let span = content_span(&[declaration], Some(body), Some(scope)).expect("span");
+        node.content_hash =
+            Some(ContentHash::of(&text[span.start as usize..span.end as usize]).to_string());
+        let artifact = |range: SourceRange| ArtifactRange {
+            start: range.start,
+            end: range.end,
+        };
+        node.declarations = vec![artifact(declaration)];
+        node.scope = Some(artifact(scope));
+        node.body = Some(artifact(body));
+    }
+
+    /// A project folder with a store, one frozen flow, a graph with source ranges, and source files.
+    ///
+    /// Step functions: `main` and `parse_args` are readable, `read_input` is not in the graph,
+    /// `write_result` leaves the project, and `lock_store` changed after the index.
+    fn source_fixture() -> tempfile::TempDir {
+        let project = tempfile::tempdir().expect("project");
+        let store = project.path().join(".tekdek");
+        fs::create_dir(&store).expect("store");
+        let mut graph = fixtures::write_graph(&store, "src/extra.rs::callable:helper");
+        frozen(import(&store, "demo-flow", &output()));
+        let main = "fn main() {\n    parse_args();\n}\n";
+        let parse = "/// Parses the flags.\nfn parse_args() -> Args {\n    Args\n}\n";
+        let lock = "fn lock_store() {}\n";
+        fs::create_dir(project.path().join("src")).expect("src");
+        fs::write(project.path().join("src/main.rs"), main).expect("main");
+        fs::write(project.path().join("src/parse.rs"), parse).expect("parse");
+        fs::write(
+            project.path().join("src/store.rs"),
+            "fn lock_store() { changed(); }\n",
+        )
+        .expect("store");
+        let nodes = &mut graph.graph.nodes;
+        set_ranges(&mut nodes[0], main);
+        set_ranges(&mut nodes[1], parse);
+        nodes[2].key = "src/parse.rs::callable:renamed".to_owned();
+        nodes[3].path = "../outside.rs".to_owned();
+        set_ranges(&mut nodes[4], lock);
+        graph.write(&store.join("graph.json")).expect("graph");
+        project
+    }
+
+    #[test]
+    fn serves_the_source_of_each_step_function_once_in_step_order() {
+        let project = source_fixture();
+        let reply = get(
+            &project.path().join(".tekdek"),
+            "/source?artifact=graph.json&flow=demo-flow",
+        );
+        assert_eq!((reply.status, reply.content_type), (200, JSON));
+        let body: serde_json::Value = serde_json::from_slice(&reply.body).expect("source JSON");
+        assert_eq!(
+            (body["artifact"].as_str(), body["flow"].as_str()),
+            (Some("graph.json"), Some("demo-flow"))
+        );
+        let functions = body["functions"].as_array().expect("functions");
+        let statuses: Vec<(&str, &str)> = functions
+            .iter()
+            .map(|function| {
+                (
+                    function["key"].as_str().unwrap_or_default(),
+                    function["status"].as_str().unwrap_or_default(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            statuses,
+            [
+                ("src/main.rs::callable:main", "ok"),
+                ("src/parse.rs::callable:parse_args", "ok"),
+                ("src/parse.rs::callable:read_input", "missing"),
+                ("src/store.rs::callable:write_result", "unreadable"),
+                ("src/store.rs::callable:lock_store", "changed"),
+            ]
+        );
+        assert_eq!(
+            functions[1]["lines"],
+            serde_json::json!([
+                "/// Parses the flags.",
+                "fn parse_args() -> Args {",
+                "    Args",
+                "}"
+            ])
+        );
+        assert_eq!(functions[1]["docLines"], serde_json::json!([1, 1]));
+        assert_eq!(
+            (
+                functions[1]["firstLine"].as_u64(),
+                functions[1]["declarationLine"].as_u64()
+            ),
+            (Some(1), Some(2))
+        );
+        assert_eq!(functions[3]["reason"], "the path leaves the project");
+        assert!(functions[4].get("lines").is_none());
+    }
+
+    #[test]
+    fn rejects_source_requests_outside_the_catalog() {
+        let project = source_fixture();
+        let store = project.path().join(".tekdek");
+        for (url, code) in [
+            ("/source", 400),
+            ("/source?flow=demo-flow", 400),
+            (
+                "/source?artifact=graph.json&flow=demo-flow&path=src/main.rs",
+                400,
+            ),
+            (
+                "/source?artifact=graph.json&artifact=graph.json&flow=demo-flow",
+                400,
+            ),
+            ("/source?artifact=graph.json&flow=demo-flow&flow", 400),
+            ("/source?artifact=graph.json&flow=other-flow", 404),
+            ("/source?artifact=other.json&flow=demo-flow", 404),
+            ("/source?artifact=..%2Fgraph.json&flow=demo-flow", 404),
+            ("/source?artifact=graph.json&flow=Demo", 404),
+        ] {
+            assert_error(&get(&store, url), code);
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_source_requests_for_a_missing_or_linked_graph_or_lineage() {
+        let url = "/source?artifact=graph.json&flow=demo-flow";
+        let project = source_fixture();
+        let store = project.path().join(".tekdek");
+        fs::rename(store.join("graph.json"), project.path().join("graph.json")).expect("move");
+        assert_error(&get(&store, url), 404);
+        std::os::unix::fs::symlink(project.path().join("graph.json"), store.join("graph.json"))
+            .expect("link graph");
+        assert_error(&get(&store, url), 404);
+
+        let project = source_fixture();
+        let store = project.path().join(".tekdek");
+        let lineage = store.join("flows/demo-flow");
+        fs::rename(&lineage, project.path().join("lineage")).expect("move lineage");
+        std::os::unix::fs::symlink(project.path().join("lineage"), &lineage).expect("link lineage");
+        assert_error(&get(&store, url), 404);
+    }
+
+    #[test]
+    fn rejects_source_requests_for_a_graph_or_pointer_that_is_a_folder() {
+        let url = "/source?artifact=graph.json&flow=demo-flow";
+        let project = source_fixture();
+        let store = project.path().join(".tekdek");
+        fs::remove_file(store.join("graph.json")).expect("remove graph");
+        fs::create_dir(store.join("graph.json")).expect("graph folder");
+        assert_error(&get(&store, url), 404);
+
+        let project = source_fixture();
+        let store = project.path().join(".tekdek");
+        let pointer = store.join("flows/demo-flow/current.json");
+        fs::remove_file(&pointer).expect("remove pointer");
+        fs::create_dir(&pointer).expect("pointer folder");
+        assert_error(&get(&store, url), 404);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_source_requests_for_a_graph_or_pointer_that_is_a_pipe() {
+        let url = "/source?artifact=graph.json&flow=demo-flow";
+        let pipe = |path: &Path| {
+            fs::remove_file(path).expect("remove file");
+            let made = std::process::Command::new("mkfifo")
+                .arg(path)
+                .status()
+                .expect("mkfifo");
+            assert!(made.success(), "mkfifo must create the pipe");
+        };
+        let project = source_fixture();
+        let store = project.path().join(".tekdek");
+        pipe(&store.join("graph.json"));
+        assert_error(&get(&store, url), 404);
+
+        let project = source_fixture();
+        let store = project.path().join(".tekdek");
+        pipe(&store.join("flows/demo-flow/current.json"));
+        assert_error(&get(&store, url), 404);
+    }
+
+    #[test]
+    fn rejects_source_requests_for_a_lineage_that_holds_another_flow() {
+        let project = source_fixture();
+        let store = project.path().join(".tekdek");
+        fs::rename(
+            store.join("flows/demo-flow"),
+            store.join("flows/other-flow"),
+        )
+        .expect("rename");
+        assert_error(
+            &get(&store, "/source?artifact=graph.json&flow=other-flow"),
+            404,
+        );
+    }
+
+    #[test]
+    fn fails_source_requests_for_a_flow_that_cannot_be_read() {
+        let project = source_fixture();
+        let store = project.path().join(".tekdek");
+        fs::write(store.join("flows/demo-flow/current.json"), "{").expect("pointer");
+        assert_error(
+            &get(&store, "/source?artifact=graph.json&flow=demo-flow"),
+            500,
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn refuses_source_behind_a_symbolic_link() {
+        let project = source_fixture();
+        let source = project.path().join("src");
+        fs::rename(&source, project.path().join("real")).expect("move");
+        std::os::unix::fs::symlink(project.path().join("real"), &source).expect("link");
+        let reply = get(
+            &project.path().join(".tekdek"),
+            "/source?artifact=graph.json&flow=demo-flow",
+        );
+        let body: serde_json::Value = serde_json::from_slice(&reply.body).expect("source JSON");
+        assert_eq!(body["functions"][0]["status"], "unreadable");
+        assert_eq!(
+            body["functions"][0]["reason"],
+            "the path holds a symbolic link"
+        );
     }
 }

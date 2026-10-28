@@ -36,8 +36,8 @@ cargo test --locked --all-targets
 
 ## Lift Deck rules
 
-- Keep the Code explorer sidebar transparent at every zoom level and viewport width. Do not add a solid panel, blur, or opaque backing layer. Keep the faint map visibility under the text (the reading mask).
-- Directories, files, and lifted boxes support explicit collapse, including when a flow opens them. A toggle keeps the row on the map and preserves its screen position.
-- Directories and files start closed. The flow start opens the tree path to the flow's named rows once. No row moves between flow steps; only a user fold changes the flow layout.
-- Draw every connector (tethers, call arcs, the stack arrow) in screen space from the on-screen rectangles of the two nodes that it joins. Each end must touch its node.
-- Keep the flow controls at a fixed size in each state. Call lines show static relationships, not runtime counts.
+- Keep the Code explorer sidebar transparent at every viewport width. Do not add a solid panel, blur, or opaque backing layer.
+- Directories start closed. The flow start opens the path to each flow file once. Nothing on the canvas moves or animates between steps or clusters: the file box, the deck, and the connectors appear at their final place.
+- The deck is pinned: one place and one width for every step and cluster.
+- Draw every connector (the guide, the tether, the arrow) in screen space from the on-screen rectangles of the two elements that it joins. Each end must touch its element. Draw at most three, and never let one cross another, a box, or a panel.
+- Show each piece of information once. Line numbers appear only in the code viewer. Call lists show static relationships, not runtime counts.

@@ -9,7 +9,7 @@ use rustpython_parser::{
     lexer,
 };
 
-use super::{CallableSyntax, invalid_source_range, source_text};
+use super::{CallableSyntax, invalid_source_range, source_text, token_error};
 use crate::analysis::fact::AnalysisError;
 
 /// Reads a callable signature from its source range.
@@ -27,9 +27,7 @@ pub(super) fn source_signature(
     let mut depth = 0_u32;
 
     for token in lexer::lex(definition, Mode::Module) {
-        let (token, range) = token.map_err(|error| AnalysisError {
-            message: format!("cannot tokenize Python source: {error:?}"),
-        })?;
+        let (token, range) = token.map_err(|error| token_error(&error))?;
 
         match token {
             // Enter a bracketed expression.

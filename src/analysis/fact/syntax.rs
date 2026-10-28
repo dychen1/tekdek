@@ -1,6 +1,6 @@
 //! Syntax Fact Builder
 //!
-//! `SyntaxFactBuilder` creates entity and relation facts.
+//! `SyntaxFactBuilder` creates entity, relation, and import-site facts.
 //! It assigns stable entity keys and merges repeated fields.
 //! Each fact list retains insertion order.
 
@@ -8,8 +8,8 @@ use std::collections::HashMap;
 
 use crate::analysis::{
     fact::{
-        AnalysisError, EntityEvidence, EntityFact, EntityKey, EntityKind, FieldData,
-        RelationEvidence, RelationFact, RelationKind, SyntaxFacts,
+        AnalysisError, EntityEvidence, EntityFact, EntityKey, EntityKind, FieldData, ImportSite,
+        RelationFact, RelationKind, SyntaxFacts,
     },
     source::{SourceRange, SourceSpan},
 };
@@ -17,6 +17,7 @@ use crate::analysis::{
 pub struct SyntaxFactBuilder {
     entities: Vec<EntityFact>,
     relations: Vec<RelationFact>,
+    import_sites: Vec<ImportSite>,
     entity_positions: HashMap<EntityKey, usize>,
 }
 
@@ -26,27 +27,43 @@ impl SyntaxFactBuilder {
         Self {
             entities: Vec::new(),
             relations: Vec::new(),
+            import_sites: Vec::new(),
             entity_positions: HashMap::new(),
         }
     }
 
     /// Adds one module under its relative source path.
     ///
+    /// The module scope and body cover the whole source. Content hashes and
+    /// position lookups rely on this rule.
+    ///
     /// # Errors
     ///
-    /// Returns an error if the path already names a module.
-    pub fn add_module(
-        &mut self,
-        path: &str,
-        evidence: EntityEvidence,
-    ) -> Result<EntityKey, AnalysisError> {
+    /// Returns an error if the path already names a module or the source is
+    /// too large.
+    pub fn add_module(&mut self, path: &str, source: &str) -> Result<EntityKey, AnalysisError> {
         let key = EntityKey::module(path);
         if self.entity_positions.contains_key(&key) {
             return Err(AnalysisError::new(format!(
                 "duplicate source module: {key}"
             )));
         }
-        self.push_entity(key.clone(), path.to_owned(), EntityKind::Module, evidence);
+        let end = u32::try_from(source.len())
+            .map_err(|_| AnalysisError::new(format!("the {path} source is too large")))?;
+        let whole_source = Some(SourceRange { start: 0, end });
+        self.push_entity(
+            key.clone(),
+            path.to_owned(),
+            EntityKind::Module,
+            EntityEvidence {
+                path: path.to_owned(),
+                declarations: Vec::new(),
+                scope: whole_source,
+                body: whole_source,
+                type_inputs: Vec::new(),
+                type_outputs: Vec::new(),
+            },
+        );
         Ok(key)
     }
 
@@ -112,33 +129,36 @@ impl SyntaxFactBuilder {
         key
     }
 
-    /// Adds one relation without an observation.
+    /// Adds one relation.
     pub fn add_relation(&mut self, source: &EntityKey, target: &EntityKey, kind: RelationKind) {
-        self.add_observed_relation(source, target, kind, Vec::new());
-    }
-
-    /// Adds one relation with its observations.
-    pub fn add_observed_relation(
-        &mut self,
-        source: &EntityKey,
-        target: &EntityKey,
-        kind: RelationKind,
-        observations: Vec<SourceSpan>,
-    ) {
         self.relations.push(RelationFact {
             source: source.clone(),
             target: target.clone(),
             kind,
-            evidence: RelationEvidence { observations },
         });
     }
 
-    /// Returns both fact lists and consumes the builder.
+    /// Adds one import statement with its owner and imported names.
+    pub fn add_import_site(
+        &mut self,
+        owner: &EntityKey,
+        statement: SourceSpan,
+        names: Vec<SourceRange>,
+    ) {
+        self.import_sites.push(ImportSite {
+            owner: owner.clone(),
+            statement,
+            names,
+        });
+    }
+
+    /// Returns all fact lists and consumes the builder.
     #[must_use]
     pub fn finish(self) -> SyntaxFacts {
         SyntaxFacts {
             entities: self.entities,
             relations: self.relations,
+            import_sites: self.import_sites,
         }
     }
 
@@ -198,7 +218,7 @@ mod tests {
     fn assigns_ordinals_after_entity_key_collisions() {
         let mut facts = SyntaxFactBuilder::new();
         let module = facts
-            .add_module("app.py", evidence())
+            .add_module("app.py", "")
             .expect("the module key must be unique");
 
         let first = facts.add_entity(&module, "Router".to_owned(), class(), evidence());

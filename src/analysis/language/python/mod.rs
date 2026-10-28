@@ -3,17 +3,14 @@
 //! This module owns the adapter that reports syntax and semantic facts from Python sources.
 //!
 //! `syntax` selects and parses Python sources. It reports modules, classes,
-//! callables, fields, containment, imports, and declared metadata.
-//! `server` runs Pyright. It reports resolved calls, references, and type targets.
+//! callables, fields, containment, import sites, and declared metadata.
+//! `server` configures the Pyright session and the fallback of its symbols.
 
-mod server;
+pub(crate) mod server;
 mod syntax;
 
-use std::path::{Path, PathBuf};
-
 use crate::analysis::{
-    fact::{AnalysisError, SemanticFact, SyntaxFacts},
-    lsp::LspError,
+    fact::{AnalysisError, SyntaxFacts},
     source::{DocumentSnapshot, Sources},
 };
 
@@ -24,24 +21,13 @@ use super::{Language, LanguageAdapter, LanguageProfile};
 // -----------------------------------------------------------------------------
 
 pub struct PythonAdapter {
-    root: PathBuf,
     profile: LanguageProfile,
 }
 
 impl PythonAdapter {
     #[must_use]
-    pub fn new(root: PathBuf, profile: LanguageProfile) -> Self {
-        Self { root, profile }
-    }
-
-    #[must_use]
-    pub fn root(&self) -> &Path {
-        &self.root
-    }
-
-    #[must_use]
-    pub fn profile(&self) -> &LanguageProfile {
-        &self.profile
+    pub fn new(profile: LanguageProfile) -> Self {
+        Self { profile }
     }
 }
 
@@ -70,26 +56,6 @@ impl LanguageAdapter for PythonAdapter {
     fn produce_syntax_facts(&self, sources: &Sources<'_>) -> Result<SyntaxFacts, AnalysisError> {
         syntax::produce_syntax_facts(sources)
     }
-
-    /// Produces normalized semantic facts from the Python language server.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the configured language server fails.
-    fn produce_semantic_facts(
-        &mut self,
-        sources: &Sources<'_>,
-    ) -> Result<Vec<SemanticFact>, AnalysisError> {
-        server::produce_semantic_facts(&self.root, &self.profile, sources)
-            .map_err(language_server_error)
-    }
-}
-
-fn language_server_error(error: LspError) -> AnalysisError {
-    AnalysisError::new(format!(
-        "cannot analyze Python with the language server: {}",
-        error.into_message()
-    ))
 }
 
 #[cfg(test)]
@@ -99,7 +65,7 @@ mod tests {
     use serde_json::Value;
 
     use crate::analysis::{
-        language::{CapabilityPolicy, Language, LanguageAdapter, LanguageProfile, ServerCommand},
+        language::{Language, LanguageAdapter, LanguageProfile, ServerCommand},
         source::DocumentSnapshot,
     };
 
@@ -107,21 +73,17 @@ mod tests {
 
     #[test]
     fn selects_configured_python_extensions() {
-        let adapter = PythonAdapter::new(
-            PathBuf::from("/workspace"),
-            LanguageProfile {
-                language: Language::Python,
-                enabled: true,
-                extensions: vec!["python".to_owned()],
-                language_id: "python".to_owned(),
-                server: ServerCommand {
-                    program: "pyright-langserver".to_owned(),
-                    arguments: vec!["--stdio".to_owned()],
-                    initialization_options: Value::Null,
-                },
-                required_capabilities: CapabilityPolicy::SEMANTIC_GRAPH,
+        let adapter = PythonAdapter::new(LanguageProfile {
+            language: Language::Python,
+            enabled: true,
+            extensions: vec!["python".to_owned()],
+            language_id: "python".to_owned(),
+            server: ServerCommand {
+                program: "pyright-langserver".to_owned(),
+                arguments: vec!["--stdio".to_owned()],
+                initialization_options: Value::Null,
             },
-        );
+        });
         let documents = [DocumentSnapshot {
             path: PathBuf::from("app.python"),
             content: "value = 1\n".to_owned(),

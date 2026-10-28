@@ -15,21 +15,23 @@
 //! # Compatibility
 //!
 //! The reader ignores unknown fields. Older schema 1 documents that hold a
-//! `clustering` or a `comparison` field stay readable.
+//! `clustering` or a `comparison` field, or a node `position`, stay readable.
 //!
 //! # Sections
 //!
-//! `Schema` defines the document shape.
+//! `Schema` defines the document shape and its wire enums.
 //! `Conversion` maps the analysis graph onto that shape.
 //! `Reading and writing` validates, reads, and writes one document.
 
-use std::{collections::BTreeSet, fs, io, path::Path};
+use std::{collections::BTreeSet, fmt, io, path::Path};
 
 use serde::{Deserialize, Serialize};
 
-use super::{digest_of, lock_store, reject_symlink, write_json};
+use super::{
+    digest_of, lock_store, read_bytes, reject_symlink, semantic::SEMANTIC_SUFFIX, write_bytes,
+};
 use crate::analysis::{
-    fact::{EntityKind, RelationKind},
+    fact::{self, EntityKind},
     graph::{Edge, Graph, Node, NodeId, ProvenanceOrigin},
     source::{SourceRange, SourceSpan},
 };
@@ -53,6 +55,13 @@ pub struct GraphArtifact {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ArtifactGraph {
     pub languages: Vec<String>,
+    /// The hash of the source files that the graph was built from. A graph from an older version has none.
+    #[serde(
+        rename = "sourceHash",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub source_hash: Option<String>,
     pub nodes: Vec<ArtifactNode>,
     pub edges: Vec<ArtifactEdge>,
 }
@@ -68,19 +77,16 @@ pub struct ArtifactNode {
     pub language: String,
     pub key: String,
     pub name: String,
-    pub kind: String,
+    pub kind: NodeKind,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content_hash: Option<String>,
     pub path: String,
-    pub origin: String,
+    pub origin: Origin,
     pub declarations: Vec<ArtifactRange>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scope: Option<ArtifactRange>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub body: Option<ArtifactRange>,
-    /// Optional declaration metadata preserved when reading graph artifacts.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub position: Option<ArtifactPosition>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub signature: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -98,9 +104,9 @@ pub struct ArtifactNode {
 pub struct ArtifactEdge {
     pub source: u32,
     pub target: u32,
-    pub kind: String,
+    pub kind: RelationKind,
     pub weight: u32,
-    pub origin: String,
+    pub origin: Origin,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub observations: Vec<ArtifactObservation>,
 }
@@ -119,11 +125,50 @@ pub struct ArtifactRange {
     pub end: u32,
 }
 
-/// One one-based line and column.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ArtifactPosition {
-    pub line: u32,
-    pub column: u32,
+/// The kind of one graph node. Serde refuses any other value on read.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NodeKind {
+    Module,
+    Type,
+    Callable,
+    Field,
+}
+
+/// Every node kind, in declaration order.
+pub const NODE_KINDS: [NodeKind; 4] = [
+    NodeKind::Module,
+    NodeKind::Type,
+    NodeKind::Callable,
+    NodeKind::Field,
+];
+
+impl fmt::Display for NodeKind {
+    /// Writes the wire name.
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.serialize(formatter)
+    }
+}
+
+/// The kind of one graph edge. Serde refuses any other value on read.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RelationKind {
+    Contains,
+    Calls,
+    Imports,
+    InputType,
+    OutputType,
+    UsesType,
+    UsesValue,
+}
+
+/// The analysis stage that made one node or edge. Serde refuses any other value on read.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Origin {
+    Syntax,
+    Semantic,
 }
 
 // -----------------------------------------------------------------------------
@@ -145,6 +190,7 @@ impl GraphArtifact {
             schema_version: SCHEMA_VERSION,
             graph: ArtifactGraph {
                 languages,
+                source_hash: None,
                 nodes: graph
                     .identified_nodes()
                     .map(|(id, node)| artifact_node(id, node))
@@ -153,17 +199,33 @@ impl GraphArtifact {
             },
         }
     }
+
+    /// Records the hash of the source files that the graph was built from.
+    #[must_use]
+    pub fn with_source_hash(mut self, hash: String) -> Self {
+        self.graph.source_hash = Some(hash);
+        self
+    }
 }
 
 fn artifact_node(id: NodeId, node: &Node) -> ArtifactNode {
     let evidence = &node.provenance.evidence;
-    let (signature, parameters, return_type, declared_type, documentation) = match &node.kind {
+    let (kind, signature, parameters, return_type, declared_type, documentation) = match &node.kind
+    {
         // Emit no kind-specific metadata for modules.
-        EntityKind::Module => (None, Vec::new(), None, None, None),
+        EntityKind::Module => (NodeKind::Module, None, Vec::new(), None, None, None),
         // Preserve type documentation.
-        EntityKind::Type(data) => (None, Vec::new(), None, None, data.documentation.clone()),
+        EntityKind::Type(data) => (
+            NodeKind::Type,
+            None,
+            Vec::new(),
+            None,
+            None,
+            data.documentation.clone(),
+        ),
         // Preserve callable signature metadata.
         EntityKind::Callable(data) => (
+            NodeKind::Callable,
             data.signature.clone(),
             data.parameters.clone(),
             data.return_type.clone(),
@@ -171,7 +233,14 @@ fn artifact_node(id: NodeId, node: &Node) -> ArtifactNode {
             data.documentation.clone(),
         ),
         // Preserve field type metadata.
-        EntityKind::Field(data) => (None, Vec::new(), None, data.declared_type.clone(), None),
+        EntityKind::Field(data) => (
+            NodeKind::Field,
+            None,
+            Vec::new(),
+            None,
+            data.declared_type.clone(),
+            None,
+        ),
     };
 
     ArtifactNode {
@@ -179,10 +248,10 @@ fn artifact_node(id: NodeId, node: &Node) -> ArtifactNode {
         language: node.language.as_str().to_owned(),
         key: node.key.to_string(),
         name: node.name.clone(),
-        kind: node.kind.tag().to_owned(),
+        kind,
         content_hash: node.content_hash.map(|hash| hash.to_string()),
         path: evidence.path.clone(),
-        origin: origin_name(node.provenance.origin).to_owned(),
+        origin: origin(node.provenance.origin),
         declarations: evidence
             .declarations
             .iter()
@@ -191,7 +260,6 @@ fn artifact_node(id: NodeId, node: &Node) -> ArtifactNode {
             .collect(),
         scope: evidence.scope.map(artifact_range),
         body: evidence.body.map(artifact_range),
-        position: None,
         signature,
         parameters,
         return_type,
@@ -204,9 +272,9 @@ fn artifact_edge(edge: &Edge) -> ArtifactEdge {
     ArtifactEdge {
         source: edge.source.0,
         target: edge.target.0,
-        kind: relation_kind_name(edge.kind).to_owned(),
+        kind: relation_kind(edge.kind),
         weight: edge.weight,
-        origin: origin_name(edge.provenance.origin).to_owned(),
+        origin: origin(edge.provenance.origin),
         observations: edge
             .provenance
             .evidence
@@ -232,30 +300,29 @@ fn artifact_range(range: SourceRange) -> ArtifactRange {
     }
 }
 
-fn relation_kind_name(kind: RelationKind) -> &'static str {
+pub(crate) fn relation_kind(kind: fact::RelationKind) -> RelationKind {
     match kind {
         // Encode containment.
-        RelationKind::Contains => "contains",
+        fact::RelationKind::Contains => RelationKind::Contains,
         // Encode direct calls.
-        RelationKind::Calls => "calls",
+        fact::RelationKind::Calls => RelationKind::Calls,
         // Encode imports.
-        RelationKind::Imports => "imports",
+        fact::RelationKind::Imports => RelationKind::Imports,
         // Encode an accepted signature type.
-        RelationKind::InputType => "input_type",
+        fact::RelationKind::InputType => RelationKind::InputType,
         // Encode a returned signature type.
-        RelationKind::OutputType => "output_type",
+        fact::RelationKind::OutputType => RelationKind::OutputType,
         // Encode type use.
-        RelationKind::UsesType => "uses_type",
+        fact::RelationKind::UsesType => RelationKind::UsesType,
         // Encode value use.
-        RelationKind::UsesValue => "uses_value",
+        fact::RelationKind::UsesValue => RelationKind::UsesValue,
     }
 }
 
-fn origin_name(origin: ProvenanceOrigin) -> &'static str {
+fn origin(origin: ProvenanceOrigin) -> Origin {
     match origin {
-        ProvenanceOrigin::Syntax => "syntax",
-        ProvenanceOrigin::Semantic => "semantic",
-        ProvenanceOrigin::Derived => "derived",
+        ProvenanceOrigin::Syntax => Origin::Syntax,
+        ProvenanceOrigin::Semantic => Origin::Semantic,
     }
 }
 
@@ -289,7 +356,18 @@ impl GraphArtifact {
         Ok(artifact)
     }
 
-    /// Writes compact JSON followed by one newline, under the store lock.
+    /// Returns the document as compact JSON followed by one newline.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if serialization fails.
+    pub fn to_bytes(&self) -> io::Result<Vec<u8>> {
+        let mut document = serde_json::to_vec(self).map_err(io::Error::other)?;
+        document.push(b'\n');
+        Ok(document)
+    }
+
+    /// Writes the document into one store file, under the store lock.
     ///
     /// # Errors
     ///
@@ -300,7 +378,7 @@ impl GraphArtifact {
             .filter(|parent| !parent.as_os_str().is_empty())
             .unwrap_or(Path::new("."));
         let _lock = lock_store(directory)?;
-        write_json(path, self)
+        write_bytes(path, &self.to_bytes()?)
     }
 }
 
@@ -324,18 +402,12 @@ impl ArtifactGraph {
                 return Err(invalid("invalid or duplicate graph node identity"));
             }
             if !languages.contains(&node.language)
-                || !matches!(node.kind.as_str(), "module" | "type" | "callable" | "field")
-                || !matches!(node.origin.as_str(), "syntax" | "semantic" | "derived")
                 || node
                     .declarations
                     .iter()
                     .chain(&node.scope)
                     .chain(&node.body)
                     .any(|range| range.start > range.end)
-                || node
-                    .position
-                    .as_ref()
-                    .is_some_and(|position| position.line == 0 || position.column == 0)
             {
                 return Err(invalid("invalid graph node metadata"));
             }
@@ -344,18 +416,7 @@ impl ArtifactGraph {
             if !ids.contains(&edge.source) || !ids.contains(&edge.target) {
                 return Err(invalid("a graph edge names an unknown node"));
             }
-            if !matches!(
-                edge.kind.as_str(),
-                "contains"
-                    | "calls"
-                    | "imports"
-                    | "input_type"
-                    | "output_type"
-                    | "uses_type"
-                    | "uses_value"
-            ) || !matches!(edge.origin.as_str(), "syntax" | "semantic" | "derived")
-                || edge.observations.iter().any(|span| span.start > span.end)
-            {
+            if edge.observations.iter().any(|span| span.start > span.end) {
                 return Err(invalid("invalid graph edge metadata"));
             }
         }
@@ -365,14 +426,16 @@ impl ArtifactGraph {
 
 /// Checks that a graph file name is one store entry that ends with `.json`.
 ///
+/// This is the only graph-name rule. Index, the catalog, the reader, and the
+/// server use it, so every graph that index writes is readable and listed.
+///
 /// # Errors
-/// Returns `InvalidInput` for a path, a control character, outer whitespace,
-/// another extension, or the reserved name `index.json`.
+/// Returns `InvalidInput` for a path, a leading dot, a control character, outer
+/// whitespace, another extension, the reserved name `index.json`, or the name of
+/// a semantic cache, `<graph>.semantic.json`.
 pub fn check_graph_name(file: &str) -> io::Result<()> {
     let invalid = |message: String| io::Error::new(io::ErrorKind::InvalidInput, message);
     if file.is_empty()
-        || file == "."
-        || file == ".."
         || file
             .chars()
             .any(|ch| ch.is_control() || matches!(ch, '/' | '\\' | ':'))
@@ -382,10 +445,21 @@ pub fn check_graph_name(file: &str) -> io::Result<()> {
             "invalid store name {file:?}: use one path component"
         )));
     }
+    if file.starts_with('.') {
+        return Err(invalid(format!(
+            "invalid store name {file:?}: a graph file name cannot start with a dot"
+        )));
+    }
     if file.strip_suffix(".json").is_none() || file.eq_ignore_ascii_case("index.json") {
         return Err(invalid(
             "the graph file must end with .json and must not be index.json".to_owned(),
         ));
+    }
+    // A case-insensitive file system holds `app.Semantic.json` and the cache of `app.json` in one file.
+    if file.to_ascii_lowercase().ends_with(SEMANTIC_SUFFIX) {
+        return Err(invalid(format!(
+            "invalid store name {file:?}: a graph file name cannot end with {SEMANTIC_SUFFIX}"
+        )));
     }
     Ok(())
 }
@@ -397,14 +471,7 @@ pub fn check_graph_name(file: &str) -> io::Result<()> {
 pub fn read_graph(directory: &Path, file: &str) -> io::Result<(ArtifactGraph, String)> {
     check_graph_name(file)?;
     reject_symlink(directory)?;
-    let path = directory.join(file);
-    reject_symlink(&path)?;
-    let bytes = fs::read(&path).map_err(|error| {
-        io::Error::new(
-            error.kind(),
-            format!("cannot read {}: {error}", path.display()),
-        )
-    })?;
+    let bytes = read_bytes(&directory.join(file))?;
     let artifact = GraphArtifact::read(&bytes)?;
     Ok((artifact.graph, digest_of(&bytes)))
 }
@@ -415,7 +482,7 @@ pub fn read_graph(directory: &Path, file: &str) -> io::Result<(ArtifactGraph, St
 
 #[cfg(test)]
 mod tests {
-    use super::{GraphArtifact, check_graph_name, read_graph};
+    use super::{GraphArtifact, NODE_KINDS, NodeKind, check_graph_name, digest_of, read_graph};
     use crate::analysis::{
         fact::{
             CallableData, CallableKind, EntityEvidence, EntityKey, EntityKind, RelationEvidence,
@@ -440,13 +507,74 @@ mod tests {
     }
 
     #[test]
-    fn reads_an_older_graph_with_clustering_and_comparison_fields() {
+    fn refuses_an_unknown_node_kind_edge_kind_or_origin() {
+        let value = serde_json::to_value(GraphArtifact::new(&two_node_graph())).expect("value");
+        for (pointer, unknown) in [
+            ("/graph/nodes/0/kind", "interface"),
+            ("/graph/nodes/0/origin", "derived"),
+            ("/graph/edges/0/kind", "derives"),
+            ("/graph/edges/0/origin", "derived"),
+        ] {
+            let mut changed = value.clone();
+            *changed.pointer_mut(pointer).expect(pointer) = unknown.into();
+            let bytes = serde_json::to_vec(&changed).expect("bytes");
+            assert!(GraphArtifact::read(&bytes).is_err(), "{pointer}");
+        }
+    }
+
+    #[test]
+    fn lists_every_node_kind_once() {
+        // A new kind fails this match until NODE_KINDS and this list name it.
+        let position = |kind: NodeKind| match kind {
+            NodeKind::Module => 0,
+            NodeKind::Type => 1,
+            NodeKind::Callable => 2,
+            NodeKind::Field => 3,
+        };
+        assert_eq!(NODE_KINDS.map(position), [0, 1, 2, 3]);
+        assert_eq!(
+            NODE_KINDS.map(|kind| kind.to_string()),
+            ["module", "type", "callable", "field"]
+        );
+    }
+
+    #[test]
+    fn writes_the_demo_graph_back_byte_for_byte() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("demo/tekdek.json");
+        let bytes = std::fs::read(path).expect("demo graph");
+
+        let artifact = GraphArtifact::read(&bytes).expect("read the demo graph");
+
+        let written = artifact.to_bytes().expect("bytes");
+        assert_eq!(digest_of(&written), digest_of(&bytes));
+    }
+
+    #[test]
+    fn keeps_the_source_hash_and_reads_a_graph_without_one() {
+        let artifact = GraphArtifact::new(&two_node_graph()).with_source_hash("00ff".to_owned());
+        let bytes = artifact.to_bytes().expect("bytes");
+        let value: serde_json::Value = serde_json::from_slice(&bytes).expect("value");
+        assert_eq!(value["graph"]["sourceHash"], "00ff");
+        let read = GraphArtifact::read(&bytes).expect("read");
+        assert_eq!(read.graph.source_hash.as_deref(), Some("00ff"));
+
+        let older = GraphArtifact::new(&two_node_graph())
+            .to_bytes()
+            .expect("bytes");
+        assert!(!String::from_utf8_lossy(&older).contains("sourceHash"));
+        let read = GraphArtifact::read(&older).expect("an older graph should stay readable");
+        assert_eq!(read.graph.source_hash, None);
+    }
+
+    #[test]
+    fn reads_an_older_graph_with_clustering_comparison_and_position_fields() {
         let mut value = serde_json::to_value(GraphArtifact::new(&two_node_graph())).expect("value");
         value["clustering"] =
             serde_json::json!({"method": "file_path", "clusters": [], "memberships": []});
         value["comparison"] =
             serde_json::json!({"base": "b1", "target": "b2", "targetKind": "commit"});
         value["graph"]["nodes"][0]["change"] = "unchanged".into();
+        value["graph"]["nodes"][0]["position"] = serde_json::json!({"line": 1, "column": 1});
         value["graph"]["edges"][0]["previousWeight"] = 3.into();
 
         let read = GraphArtifact::read(&serde_json::to_vec(&value).expect("bytes"))
@@ -456,6 +584,7 @@ mod tests {
         assert!(written.get("clustering").is_none());
         assert!(written.get("comparison").is_none());
         assert!(written["graph"]["nodes"][0].get("change").is_none());
+        assert!(written["graph"]["nodes"][0].get("position").is_none());
     }
 
     #[test]
@@ -471,9 +600,21 @@ mod tests {
 
         assert_eq!(graph.nodes.len(), 2);
         assert_eq!(digest, crate::store::digest_of(&bytes));
-        for name in ["index.json", "../app.json", "app.txt", " app.json", ""] {
+        for name in [
+            "index.json",
+            "../app.json",
+            "app.txt",
+            " app.json",
+            "",
+            ".hidden.json",
+            "a:b.json",
+            "app.semantic.json",
+            "app.Semantic.json",
+        ] {
             assert!(check_graph_name(name).is_err(), "{name:?}");
         }
+        let dot = check_graph_name(".hidden.json").expect_err("a leading dot");
+        assert!(dot.to_string().contains("cannot start with a dot"), "{dot}");
     }
 
     #[test]

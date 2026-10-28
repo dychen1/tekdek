@@ -17,15 +17,22 @@ path = "src/main.rs"
 dist = true
 
 [features]
-default = ["python", "rust"]
+default = ["python", "rust", "typescript"]
 python = ["dep:rustpython-parser"]
 rust = ["dep:syn", "dep:proc-macro2"]
+typescript = ["dep:oxc_allocator", "dep:oxc_ast", "dep:oxc_ast_visit", "dep:oxc_parser", "dep:oxc_span", "dep:oxc_syntax"]
 
 [dependencies]
 dirs = "6.0.0"
 icu_normalizer = { version = "2.3.0", default-features = false, features = ["compiled_data"] }
 jiff = "0.2.35"
 lsp-types = "0.97"
+oxc_allocator = { version = "0.154.0", optional = true }
+oxc_ast = { version = "0.154.0", optional = true }
+oxc_ast_visit = { version = "0.154.0", optional = true }
+oxc_parser = { version = "0.154.0", optional = true }
+oxc_span = { version = "0.154.0", optional = true }
+oxc_syntax = { version = "0.154.0", optional = true }
 proc-macro2 = { version = "1.0.107", features = ["span-locations"], optional = true }
 rustpython-parser = { version = "0.4", features = ["all-nodes-with-ranges"], optional = true }
 serde = { version = "1", features = ["derive"] }

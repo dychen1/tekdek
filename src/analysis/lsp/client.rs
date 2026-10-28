@@ -1,17 +1,18 @@
 //! Language server client.
 //!
-//! This module owns the server process, message transport, and path and position
-//! conversion. A server command, protocol values, paths, and source text are the
-//! inputs. Protocol results, file URIs, and source byte offsets are the outputs.
+//! This module owns the server process, message transport, and file URI
+//! conversion. A server command, protocol values, and paths are the inputs.
+//! Protocol results and file URIs are the outputs.
 //!
 //! # Sections
 //!
 //! `Client` owns the server process and synchronous requests.
 //! `Message Framing` reads and writes LSP messages.
 //! `Message Classification` identifies notifications, requests, and responses.
-//! `Path and Position Conversion` converts file paths and source coordinates.
+//! `File URIs` converts file paths to file URIs and back.
 
 use std::{
+    collections::BTreeMap,
     io::{BufRead, BufReader, Read, Write},
     path::{Path, PathBuf},
     process::{Child, ChildStdin, Command, Stdio},
@@ -23,8 +24,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-#[cfg(any(feature = "python", feature = "rust", test))]
-use lsp_types::Position;
 use lsp_types::{
     InitializeParams, InitializeResult, InitializedParams, Uri,
     notification::{Exit, Initialized, Notification},
@@ -34,7 +33,7 @@ use serde_json::{Value, json};
 use url::Url;
 
 use super::LspError;
-use crate::analysis::program::find_program;
+use crate::analysis::{program::find_program, timing};
 
 // -----------------------------------------------------------------------------
 // Client
@@ -140,6 +139,7 @@ impl LspClient {
             "method": N::METHOD,
             "params": parameters,
         }))
+        .map_err(|error| self.with_standard_error(error))
     }
 
     /// # Errors
@@ -160,14 +160,39 @@ impl LspClient {
                 R::METHOD
             ))
         })?;
-        let result = match self.request_value(R::METHOD, &parameters, timeout) {
-            Ok(result) => result,
-            Err(error) => return Err(self.request_error(error)),
-        };
+        let started = timing::start();
+        let result = self.request_value(R::METHOD, &parameters, timeout);
+        timing::record_request(started, R::METHOD);
+        result
+            .and_then(|result| {
+                serde_json::from_value(result).map_err(|error| {
+                    LspError::new(format!("cannot decode the {} result: {error}", R::METHOD))
+                })
+            })
+            .map_err(|error| self.with_standard_error(error))
+    }
 
-        serde_json::from_value(result).map_err(|error| {
-            LspError::new(format!("cannot decode the {} result: {error}", R::METHOD))
-        })
+    /// Sends many requests with at most `window` in flight, and returns the
+    /// results in input order.
+    ///
+    /// The batch times out when no request gets an answer for `timeout`, so a
+    /// server that answers one request after the other never times out a
+    /// queued request. Server requests that arrive in between are answered,
+    /// and other messages are skipped. After the first error, the batch sends
+    /// nothing more.
+    ///
+    /// # Errors
+    ///
+    /// Returns the input index and the error of the first request that fails
+    /// or cannot be sent. A timeout names the oldest unanswered request.
+    pub fn request_batch(
+        &mut self,
+        requests: &[(&'static str, Value)],
+        window: usize,
+        timeout: Duration,
+    ) -> Result<Vec<Value>, (usize, LspError)> {
+        self.batch_values(requests, window.max(1), timeout)
+            .map_err(|(index, error)| (index, self.with_standard_error(error)))
     }
 
     /// Sends the initialization request and then the initialized notification.
@@ -180,13 +205,8 @@ impl LspClient {
         parameters: InitializeParams,
         timeout: Duration,
     ) -> Result<InitializeResult, LspError> {
-        let result = match self.request::<Initialize>(parameters, timeout) {
-            Ok(result) => result,
-            Err(error) => return Err(self.initialization_error(error)),
-        };
-        if let Err(error) = self.notify::<Initialized>(InitializedParams {}) {
-            return Err(self.initialization_error(error));
-        }
+        let result = self.request::<Initialize>(parameters, timeout)?;
+        self.notify::<Initialized>(InitializedParams {})?;
         Ok(result)
     }
 
@@ -203,13 +223,28 @@ impl LspClient {
         method: &str,
         timeout: Duration,
     ) -> Result<Value, LspError> {
+        self.notification_value(method, timeout)
+            .map_err(|error| self.with_standard_error(error))
+    }
+
+    /// Requests a clean server shutdown.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the shutdown request, exit notification, or process check fails.
+    pub fn shutdown(mut self) -> Result<(), LspError> {
+        self.request::<Shutdown>((), Duration::from_secs(10))?;
+        self.notify::<Exit>(())?;
+        self.wait_for_exit(Duration::from_secs(5))
+    }
+
+    /// Answers server requests and skips other messages until the notification
+    /// arrives. One timeout covers the full wait loop.
+    fn notification_value(&mut self, method: &str, timeout: Duration) -> Result<Value, LspError> {
         let deadline = Instant::now() + timeout;
 
         loop {
-            let message = match self.receive(method, deadline) {
-                Ok(message) => message,
-                Err(error) => return Err(self.transport_error(error)),
-            };
+            let message = self.receive(method, deadline)?;
 
             if is_server_request(&message) {
                 self.answer_server_request(&message)?;
@@ -222,17 +257,6 @@ impl LspClient {
                 return Ok(message.get("params").cloned().unwrap_or(Value::Null));
             }
         }
-    }
-
-    /// Requests a clean server shutdown.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the shutdown request, exit notification, or process check fails.
-    pub fn shutdown(mut self) -> Result<(), LspError> {
-        self.request::<Shutdown>((), Duration::from_secs(10))?;
-        self.notify::<Exit>(())?;
-        self.wait_for_exit(Duration::from_secs(5))
     }
 
     /// Answers server requests that arrive before the matching response.
@@ -268,17 +292,74 @@ impl LspClient {
         }
     }
 
+    /// Keeps up to `window` requests in flight and matches answers by ID.
+    fn batch_values(
+        &mut self,
+        requests: &[(&'static str, Value)],
+        window: usize,
+        timeout: Duration,
+    ) -> Result<Vec<Value>, (usize, LspError)> {
+        let mut results = vec![Value::Null; requests.len()];
+        let mut unsent = requests.iter().enumerate();
+        let mut in_flight = BTreeMap::<u64, InFlight>::new();
+        let mut deadline = Instant::now() + timeout;
+
+        loop {
+            while in_flight.len() < window {
+                let Some((index, (method, parameters))) = unsent.next() else {
+                    break;
+                };
+                let request_id = self.allocate_request_id();
+                self.send(&json!({
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "method": method,
+                    "params": parameters,
+                }))
+                .map_err(|error| (index, error))?;
+                in_flight.insert(
+                    request_id,
+                    InFlight {
+                        index,
+                        method,
+                        started: timing::start(),
+                    },
+                );
+            }
+            let Some((_, oldest)) = in_flight.first_key_value() else {
+                return Ok(results);
+            };
+            let (oldest_index, oldest_method) = (oldest.index, oldest.method);
+
+            let message = self
+                .receive(oldest_method, deadline)
+                .map_err(|error| (oldest_index, error))?;
+            if is_server_request(&message) {
+                self.answer_server_request(&message)
+                    .map_err(|error| (oldest_index, error))?;
+                continue;
+            }
+            let Some(request) = message
+                .get("id")
+                .and_then(Value::as_u64)
+                .and_then(|request_id| in_flight.remove(&request_id))
+            else {
+                continue;
+            };
+            deadline = Instant::now() + timeout;
+            timing::record_request(request.started, request.method);
+            results[request.index] =
+                response_result(&message).map_err(|error| (request.index, error))?;
+        }
+    }
+
     fn allocate_request_id(&mut self) -> u64 {
         self.request_id_counter += 1;
         self.request_id_counter
     }
 
     fn send(&mut self, message: &Value) -> Result<(), LspError> {
-        if let Err(error) = write_message(&mut self.stdin, message) {
-            return Err(self.transport_error(error));
-        }
-
-        Ok(())
+        write_message(&mut self.stdin, message)
     }
 
     /// Waits for the server process to exit and kills it after the timeout.
@@ -311,11 +392,10 @@ impl LspClient {
             .ok_or_else(|| LspError::timeout(method))?;
 
         match self.incoming_messages.recv_timeout(remaining) {
-            Ok(Ok(message)) => Ok(message),
-            Ok(Err(error)) => Err(self.transport_error(error)),
+            Ok(result) => result,
             Err(RecvTimeoutError::Timeout) => Err(LspError::timeout(method)),
             Err(RecvTimeoutError::Disconnected) => {
-                Err(self.transport_error(LspError::new("the language server reader stopped")))
+                Err(LspError::new("the language server reader stopped"))
             }
         }
     }
@@ -324,8 +404,12 @@ impl LspClient {
         self.send(&server_request_response(message))
     }
 
-    /// Adds retained server standard error to a transport failure.
-    fn transport_error(&mut self, error: LspError) -> LspError {
+    /// Adds the retained server standard error to one failure.
+    ///
+    /// The public methods and the batch decoder of `capture` call this once
+    /// for each error. The wait lets a server that stops at the failure write
+    /// its last lines.
+    pub(crate) fn with_standard_error(&mut self, error: LspError) -> LspError {
         let deadline = Instant::now() + STDERR_EXIT_WAIT;
 
         loop {
@@ -345,31 +429,13 @@ impl LspClient {
 
         append_standard_error(error, &self.standard_error)
     }
+}
 
-    /// Adds retained server standard error to an initialization failure.
-    fn initialization_error(&mut self, error: LspError) -> LspError {
-        self.request_error(error)
-    }
-
-    /// Adds retained server standard error to a request failure.
-    fn request_error(&mut self, error: LspError) -> LspError {
-        let deadline = Instant::now() + STDERR_CAPTURE_WAIT;
-
-        while standard_error_is_empty(&self.standard_error) && Instant::now() < deadline {
-            match self.process.try_wait() {
-                Ok(Some(_)) => {
-                    if let Some(thread) = self.standard_error_thread.take() {
-                        let _ = thread.join();
-                    }
-                    break;
-                }
-                Ok(None) => thread::sleep(Duration::from_millis(1)),
-                Err(_) => break,
-            }
-        }
-
-        append_standard_error(error, &self.standard_error)
-    }
+/// One batch request that waits for its answer.
+struct InFlight {
+    index: usize,
+    method: &'static str,
+    started: Option<Instant>,
 }
 
 impl Drop for LspClient {
@@ -391,7 +457,6 @@ fn stop_process(process: &mut Child) {
 }
 
 const STDERR_CAPTURE_LIMIT: usize = 64 * 1024;
-const STDERR_CAPTURE_WAIT: Duration = Duration::from_millis(50);
 const STDERR_EXIT_WAIT: Duration = Duration::from_millis(50);
 
 /// Drains server standard error and retains a bounded prefix.
@@ -419,19 +484,11 @@ fn append_standard_error(error: LspError, capture: &Mutex<Vec<u8>>) -> LspError 
     };
     let standard_error = String::from_utf8_lossy(&retained);
     let standard_error = standard_error.trim();
-    let suffix = format!("\n{STDERR_ERROR_HEADING}\n{standard_error}");
 
-    if standard_error.is_empty() || error.to_string().ends_with(&suffix) {
+    if standard_error.is_empty() {
         error
     } else {
-        LspError::new(format!("{error}{suffix}"))
-    }
-}
-
-fn standard_error_is_empty(capture: &Mutex<Vec<u8>>) -> bool {
-    match capture.lock() {
-        Ok(retained) => retained.is_empty(),
-        Err(poisoned) => poisoned.into_inner().is_empty(),
+        LspError::new(format!("{error}\n{STDERR_ERROR_HEADING}\n{standard_error}"))
     }
 }
 
@@ -471,14 +528,13 @@ fn server_request_response(message: &Value) -> Value {
 
 /// Reads LSP messages from the server output.
 ///
-/// Discards notifications. Sends other messages and read errors through the channel.
-/// Stops after an error, a closed output, or a closed channel.
+/// Sends every message, notifications included, and the first read error
+/// through the channel. Each receive loop skips the messages it does not wait
+/// for. Stops after an error, a closed output, or a closed channel.
 fn read_loop(mut reader: impl BufRead, sender: &Sender<Result<Value, LspError>>) {
     loop {
         match read_message(&mut reader) {
             Ok(Some(message)) => {
-                // Notifications pass through. Each receive loop skips the
-                // notifications it does not wait for.
                 if sender.send(Ok(message)).is_err() {
                     return;
                 }
@@ -595,10 +651,8 @@ fn response_result(message: &Value) -> Result<Value, LspError> {
 }
 
 // -----------------------------------------------------------------------------
-// Path and Position Conversion
+// File URIs
 // -----------------------------------------------------------------------------
-// The client relies on the LSP default UTF-16 position encoding. It advertises
-// no other encoding.
 
 /// Converts an absolute file path to an LSP file URI.
 ///
@@ -630,81 +684,6 @@ pub fn uri_path(uri: &Uri) -> Option<PathBuf> {
     Url::parse(uri.as_str()).ok()?.to_file_path().ok()
 }
 
-/// Converts one zero-based UTF-16 LSP position into a UTF-8 byte offset.
-///
-/// # Errors
-///
-/// Returns an error if the line or character is outside the source text.
-/// Returns an error if the character splits a UTF-16 surrogate pair.
-#[cfg(any(feature = "python", feature = "rust", test))]
-pub(crate) fn position_to_byte_offset(
-    source: &str,
-    path: &str,
-    position: Position,
-) -> Result<u32, LspError> {
-    let line_number = usize::try_from(position.line).map_err(|_| invalid_line(path, position))?;
-    let line_start = source
-        .split_inclusive('\n')
-        .take(line_number)
-        .map(str::len)
-        .sum::<usize>();
-    let line = source
-        .get(line_start..)
-        .and_then(|remainder| remainder.split('\n').next())
-        .filter(|_| line_number < source.split('\n').count())
-        .ok_or_else(|| invalid_line(path, position))?;
-    let line = line.strip_suffix('\r').unwrap_or(line);
-    let mut utf16_offset = 0_u32;
-
-    for (byte_offset, character) in line.char_indices() {
-        if utf16_offset == position.character {
-            return absolute_offset(line_start, byte_offset, path);
-        }
-
-        let character_width = if character.len_utf16() == 2 { 2 } else { 1 };
-        let next_offset = utf16_offset
-            .checked_add(character_width)
-            .ok_or_else(|| invalid_character(path, position))?;
-        if position.character < next_offset {
-            return Err(LspError::new(format!(
-                "the LSP character {} splits a UTF-16 character in {path}",
-                position.character
-            )));
-        }
-        utf16_offset = next_offset;
-    }
-
-    if utf16_offset == position.character {
-        return absolute_offset(line_start, line.len(), path);
-    }
-
-    Err(invalid_character(path, position))
-}
-
-/// # Errors
-///
-/// Returns an error if the combined offset does not fit in a source offset.
-#[cfg(any(feature = "python", feature = "rust", test))]
-fn absolute_offset(line_start: usize, byte_offset: usize, path: &str) -> Result<u32, LspError> {
-    line_start
-        .checked_add(byte_offset)
-        .and_then(|offset| u32::try_from(offset).ok())
-        .ok_or_else(|| LspError::new(format!("the source offset is too large in {path}")))
-}
-
-#[cfg(any(feature = "python", feature = "rust", test))]
-fn invalid_line(path: &str, position: Position) -> LspError {
-    LspError::new(format!("the LSP line {} is outside {path}", position.line))
-}
-
-#[cfg(any(feature = "python", feature = "rust", test))]
-fn invalid_character(path: &str, position: Position) -> LspError {
-    LspError::new(format!(
-        "the LSP character {} is outside line {} in {path}",
-        position.character, position.line
-    ))
-}
-
 // -----------------------------------------------------------------------------
 // Tests
 // -----------------------------------------------------------------------------
@@ -715,15 +694,86 @@ mod tests {
         io::{BufReader, Cursor},
         path::Path,
         sync::{Arc, Mutex},
+        time::Duration,
     };
 
-    use lsp_types::Position;
     use serde_json::json;
 
     use super::{
-        STDERR_CAPTURE_LIMIT, file_uri, position_to_byte_offset, read_message, read_standard_error,
+        LspClient, STDERR_CAPTURE_LIMIT, file_uri, read_message, read_standard_error,
         server_request_response, uri_path, write_message,
     };
+    use crate::analysis::lsp::fake_server::FakeServer;
+
+    #[test]
+    fn returns_batch_answers_in_input_order_and_answers_server_requests() {
+        let server = FakeServer::new();
+        let mut client = echo_client(&server, "batch");
+
+        let results = client
+            .request_batch(&echo_requests(), 64, Duration::from_secs(10))
+            .expect("the batch should complete");
+
+        assert_eq!(results, [json!(1), json!(2), json!(3)]);
+    }
+
+    #[test]
+    fn returns_the_index_of_a_failed_batch_request() {
+        let server = FakeServer::new();
+        let mut client = echo_client(&server, "batch-error");
+
+        let (index, error) = client
+            .request_batch(&echo_requests(), 64, Duration::from_secs(10))
+            .expect_err("the second answer is an error");
+
+        assert_eq!(index, 1);
+        assert!(
+            error.to_string().contains("echo failed"),
+            "the error should name the server error: {error}"
+        );
+    }
+
+    #[test]
+    fn times_out_only_when_no_answer_arrives_for_the_timeout() {
+        let server = FakeServer::new();
+        let mut client = echo_client(&server, "batch-slow");
+        // A first batch waits out the start of the new server program.
+        client
+            .request_batch(&echo_requests(), 64, Duration::from_secs(10))
+            .expect("the first batch should complete");
+
+        let results = client
+            .request_batch(&echo_requests(), 64, Duration::from_millis(500))
+            .expect("each answer arrives within the timeout of the previous one");
+
+        assert_eq!(results, [json!(1), json!(2), json!(3)]);
+    }
+
+    #[test]
+    fn keeps_no_more_requests_in_flight_than_the_window() {
+        let server = FakeServer::new();
+        let mut client = echo_client(&server, "window-2");
+
+        let results = client
+            .request_batch(&echo_requests(), 2, Duration::from_secs(10))
+            .expect("the fake server should see at most two unanswered requests");
+
+        assert_eq!(results, [json!(1), json!(2), json!(3)]);
+    }
+
+    fn echo_client(server: &FakeServer, mode: &str) -> LspClient {
+        let command = server.command(mode);
+        LspClient::start(&command.program, &command.arguments)
+            .expect("the fake language server should start")
+    }
+
+    fn echo_requests() -> [(&'static str, serde_json::Value); 3] {
+        [
+            ("test/echo", json!(1)),
+            ("test/echo", json!(2)),
+            ("test/echo", json!(3)),
+        ]
+    }
 
     #[test]
     fn reads_a_written_message() {
@@ -849,28 +899,5 @@ mod tests {
                 "{spelling} must name one path"
             );
         }
-    }
-
-    #[test]
-    fn converts_utf16_positions_into_utf8_offsets() {
-        let source = "alpha\né😀z\n";
-
-        assert_eq!(
-            position_to_byte_offset(source, "app.py", Position::new(1, 3))
-                .expect("the position must be valid"),
-            12
-        );
-        assert_eq!(
-            position_to_byte_offset(source, "app.py", Position::new(2, 0))
-                .expect("the final line must be valid"),
-            14
-        );
-    }
-
-    #[test]
-    fn rejects_a_position_inside_a_utf16_surrogate_pair() {
-        let result = position_to_byte_offset("😀", "app.py", Position::new(0, 1));
-
-        assert!(result.is_err());
     }
 }

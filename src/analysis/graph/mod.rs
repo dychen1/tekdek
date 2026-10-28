@@ -8,8 +8,13 @@
 //! `Provenance` records which stage created one graph item.
 
 pub mod build;
+#[cfg(test)]
+mod fixtures;
 mod lookup;
 mod semantic;
+
+pub(crate) use lookup::{SyntaxGraphIndex, constructors_by_class};
+pub(crate) use semantic::{build_semantic_edges, collect_call_sites, is_call_site};
 
 use crate::analysis::{
     fact::{EntityEvidence, EntityKey, EntityKind, RelationEvidence, RelationKind},
@@ -119,5 +124,4 @@ pub struct Provenance<E> {
 pub enum ProvenanceOrigin {
     Syntax,
     Semantic,
-    Derived,
 }

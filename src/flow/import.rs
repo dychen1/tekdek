@@ -1,18 +1,19 @@
 //! Flow import.
 //!
 //! This module freezes one agent output as the next generation of one flow.
-//! Agent output bytes and a graph artifact of the store are the inputs. One
-//! generation file and a moved current pointer are the outputs.
+//! Agent output bytes and a graph artifact of the store, with the edges of its
+//! semantic cache, are the inputs. One generation file and a moved current
+//! pointer are the outputs.
 //!
 //! An import validates the complete output before any write. It writes nothing
 //! when any error issue exists. A dry run does the complete import, including
-//! the self-check of the new generation, and writes nothing. The purpose follows from the store: a flow with a
-//! lineage gets a `revision`, and any other flow gets an `initial` generation. A
-//! revision must use the graph of its parent. The caller refreshes the catalog
-//! after a freeze.
+//! the self-check of the new generation, and writes nothing. The purpose follows
+//! from the store: a flow with a lineage gets a `revision`, and any other flow
+//! gets an `initial` generation. A revision must use the graph of its parent.
 //!
 //! # Sections
-//! `Import` freezes one agent output. `Rules` holds the parse, prior, and freeze steps.
+//! `Import` freezes one agent output. `Rules` holds the parse, prior, freeze, and
+//! report steps.
 
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -24,6 +25,7 @@ use serde::Serialize;
 use super::{
     FlowError, assign, canonical,
     derive::{self, DeriveError},
+    flow_id,
     lineage::{self, StoredGeneration},
     models::{
         AgentFlow, AgentFlowOutput, ArtifactKind, Author, Digests, FLOW_ARTIFACT_SCHEMA_VERSION,
@@ -35,8 +37,9 @@ use super::{
     validate::{self, CheckedFlow, PriorContext},
 };
 use crate::store::{
-    graph::{ArtifactGraph, check_graph_name, read_graph},
+    graph::{ArtifactGraph, check_graph_name},
     lock_store,
+    semantic::read_merged_graph,
 };
 
 // -----------------------------------------------------------------------------
@@ -90,12 +93,7 @@ pub fn import_flow(
     directory: &Path,
     request: ImportRequest<'_>,
 ) -> Result<ImportOutcome, FlowError> {
-    let flow_id = FlowId::try_from(request.name).map_err(|error| {
-        FlowError::Rejected(vec![FlowIssue::error(
-            IssueCode::InvalidKey,
-            error.to_string(),
-        )])
-    })?;
+    let flow_id = flow_id(request.name)?;
     check_graph_name(request.graph_file)?;
     validate::check_author(&request.author).map_err(|message| {
         FlowError::Rejected(vec![
@@ -111,7 +109,7 @@ pub fn import_flow(
     } else {
         Some(lock_store(directory)?)
     };
-    let (graph, graph_digest) = read_graph(directory, request.graph_file)?;
+    let (graph, graph_digest) = read_merged_graph(directory, request.graph_file)?;
     let binding = FactBinding {
         graph_artifact: request.graph_file.to_owned(),
         graph_digest: Sha256Digest::try_from(graph_digest)
@@ -139,20 +137,12 @@ pub fn import_flow(
         && canonical::digest(&intent)? == parent.digests.intent
         && derive::facts_digest(&facts)? == parent.digests.facts
     {
-        return Ok(ImportOutcome::Frozen(FrozenGeneration {
-            name: flow_id.to_string(),
-            ordinal: parent.generation.ordinal,
-            purpose: parent.generation.purpose,
-            generation_digest: parent.digests.generation.clone(),
-            file: lineage::generation_file(
-                &flow_id,
-                parent.generation.ordinal,
-                &parent.digests.generation,
-            ),
-            unchanged: true,
-            dry_run: request.dry_run,
+        return Ok(ImportOutcome::Frozen(report(
+            parent,
+            true,
+            request.dry_run,
             warnings,
-        }));
+        )));
     }
     let artifact = freeze(
         flow_id,
@@ -162,25 +152,15 @@ pub fn import_flow(
         intent,
         request.author,
     )?;
-    let file = if request.dry_run {
-        lineage::generation_file(
-            &artifact.flow_id,
-            artifact.generation.ordinal,
-            &artifact.digests.generation,
-        )
-    } else {
-        lineage::write_current(directory, &artifact)?
-    };
-    Ok(ImportOutcome::Frozen(FrozenGeneration {
-        name: artifact.flow_id.to_string(),
-        ordinal: artifact.generation.ordinal,
-        purpose,
-        generation_digest: artifact.digests.generation,
-        file,
-        unchanged: false,
-        dry_run: request.dry_run,
+    if !request.dry_run {
+        lineage::write_current(directory, &artifact)?;
+    }
+    Ok(ImportOutcome::Frozen(report(
+        &artifact,
+        false,
+        request.dry_run,
         warnings,
-    }))
+    )))
 }
 
 // -----------------------------------------------------------------------------
@@ -203,11 +183,12 @@ fn parse_output(input: &[u8]) -> Result<Result<AgentFlow, ImportOutcome>, FlowEr
         } => {
             let explanation = text::canonical(&explanation);
             let mut issues = contract_issues(contract_version);
-            if let Err(fault) = text::check_block(&explanation, 20, 1000) {
-                issues.push(
-                    FlowIssue::error(IssueCode::InvalidText, fault.to_string()).at("/explanation"),
-                );
-            }
+            validate::stored_text(
+                &mut issues,
+                &explanation,
+                "/explanation",
+                validate::NO_FLOW_EXPLANATION,
+            );
             if issues.is_empty() {
                 Ok(Err(ImportOutcome::NoFlow {
                     reason,
@@ -397,6 +378,29 @@ fn freeze(
     }
 }
 
+/// Builds the result of an import from the generation that is current after it.
+fn report(
+    artifact: &FlowArtifact,
+    unchanged: bool,
+    dry_run: bool,
+    warnings: Vec<FlowIssue>,
+) -> FrozenGeneration {
+    FrozenGeneration {
+        name: artifact.flow_id.to_string(),
+        ordinal: artifact.generation.ordinal,
+        purpose: artifact.generation.purpose,
+        generation_digest: artifact.digests.generation.clone(),
+        file: lineage::generation_file(
+            &artifact.flow_id,
+            artifact.generation.ordinal,
+            &artifact.digests.generation,
+        ),
+        unchanged,
+        dry_run,
+        warnings,
+    }
+}
+
 // -----------------------------------------------------------------------------
 // Tests
 // -----------------------------------------------------------------------------
@@ -578,6 +582,37 @@ mod tests {
             .push(spare);
         assert_rejected(path, "demo-flow", &value, IssueCode::UnusedCluster);
         assert_rejected(path, "Demo", &output(), IssueCode::InvalidKey);
+    }
+
+    #[test]
+    fn unused_cluster_issues_keep_the_index_of_the_agent_output() {
+        let directory = fixtures::store();
+        let mut value = output();
+        let clusters = value["flow"]["clusters"].as_array_mut().expect("clusters");
+        let mut invalid = clusters[0].clone();
+        invalid["key"] = "Bad_Key".into();
+        invalid["label"] = "Invalid key cluster".into();
+        let mut spare = clusters[0].clone();
+        spare["key"] = "spare-cluster".into();
+        spare["label"] = "Spare cluster label".into();
+        clusters.insert(0, invalid);
+        clusters.push(spare);
+
+        let error = import(directory.path(), "demo-flow", &value).expect_err("rejected output");
+
+        let unused: Vec<_> = error
+            .issues()
+            .iter()
+            .filter(|issue| issue.code == IssueCode::UnusedCluster)
+            .map(|issue| (issue.path.as_deref(), issue.cluster_key.as_deref()))
+            .collect();
+        assert_eq!(
+            unused,
+            [
+                (Some("/flow/clusters/0"), Some("Bad_Key")),
+                (Some("/flow/clusters/3"), Some("spare-cluster"))
+            ]
+        );
     }
 
     /// Builds a revision that moves the entry function into a new cluster and edits one annotation.
