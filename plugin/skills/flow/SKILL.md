@@ -17,9 +17,10 @@ Freeze one behavior of a codebase as a tekdek flow: an ordered walk through its 
 
 ## Setup
 
-- This skill needs tekdek 0.1.0 or later. Run `tekdek version`. If the command is not found, stop and give the user the install steps from the tekdek README. If the version is older, stop and tell the user to run the installer again to upgrade.
-- If the project has no store, follow [language-servers.md](language-servers.md), then run `tekdek index` in the project root.
-- If the source no longer matches the graph, tell the user before you index again or import.
+- This skill needs tekdek 0.1.0 or later. Run `tekdek version`. If the command is not found, follow [install.md](install.md): use an installed binary by its full path, or give the user the install command and stop. If the version is older, stop and tell the user to run the installer again to upgrade.
+- If the project has no store, run `tekdek index` in the project root.
+- Before the first `graph show`, follow [language-servers.md](language-servers.md): `graph show`, `flow import`, and `flow verify` need the language servers.
+- `graph show` and `serve` index the project again when the source changed. Flows frozen against the older graph then play as stale, so tell the user when the source changed before you write a flow.
 
 ## Commands
 
