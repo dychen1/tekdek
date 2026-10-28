@@ -12,6 +12,7 @@ use serde_json::json;
 pub enum Language {
     Python,
     Rust,
+    TypeScript,
 }
 
 impl Language {
@@ -20,6 +21,7 @@ impl Language {
         match self {
             Self::Python => "python",
             Self::Rust => "rust",
+            Self::TypeScript => "typescript",
         }
     }
 
@@ -29,6 +31,7 @@ impl Language {
         match self {
             Self::Python => "npm install -g pyright",
             Self::Rust => "rustup component add rust-analyzer",
+            Self::TypeScript => "npm install -g typescript",
         }
     }
 
@@ -41,6 +44,7 @@ impl Language {
         match value {
             "python" => Ok(Self::Python),
             "rust" => Ok(Self::Rust),
+            "typescript" => Ok(Self::TypeScript),
             _ => Err(format!("unsupported language: {value}")),
         }
     }
@@ -109,6 +113,22 @@ pub fn builtin_profiles() -> Vec<LanguageProfile> {
         },
     });
 
+    // One profile reads JavaScript too: the same parser and server handle both.
+    #[cfg(feature = "typescript")]
+    profiles.push(LanguageProfile {
+        language: Language::TypeScript,
+        enabled: true,
+        extensions: ["ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs"]
+            .map(str::to_owned)
+            .to_vec(),
+        language_id: "typescript".to_owned(),
+        server: ServerCommand {
+            program: "tsc".to_owned(),
+            arguments: vec!["--lsp".to_owned(), "--stdio".to_owned()],
+            initialization_options: Value::Null,
+        },
+    });
+
     profiles
 }
 
@@ -125,6 +145,7 @@ mod tests {
         let expected = [
             cfg!(feature = "python").then_some(Language::Python),
             cfg!(feature = "rust").then_some(Language::Rust),
+            cfg!(feature = "typescript").then_some(Language::TypeScript),
         ]
         .into_iter()
         .flatten()
@@ -133,7 +154,7 @@ mod tests {
         assert_eq!(languages, expected);
     }
 
-    #[cfg(all(feature = "python", feature = "rust"))]
+    #[cfg(all(feature = "python", feature = "rust", feature = "typescript"))]
     #[test]
     fn orders_profiles_by_language_name() {
         let mut profiles = builtin_profiles();
@@ -142,6 +163,14 @@ mod tests {
 
         assert_eq!(profiles[0].language, Language::Python);
         assert_eq!(profiles[1].language, Language::Rust);
+        assert_eq!(profiles[2].language, Language::TypeScript);
+    }
+
+    #[test]
+    fn parses_every_language_name() {
+        for language in [Language::Python, Language::Rust, Language::TypeScript] {
+            assert_eq!(Language::parse(language.as_str()), Ok(language));
+        }
     }
 
     #[cfg(feature = "rust")]

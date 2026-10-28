@@ -38,8 +38,11 @@ pub struct SessionConfig<'a> {
 pub enum ServerReadiness {
     /// The server answers every request correctly at once.
     #[cfg_attr(
-        not(feature = "python"),
-        allow(dead_code, reason = "only the Python adapter uses immediate readiness")
+        not(any(feature = "python", feature = "typescript")),
+        allow(
+            dead_code,
+            reason = "only the Python and TypeScript adapters use immediate readiness"
+        )
     )]
     Immediate,
     /// The server reports readiness through `experimental/serverStatus`.
@@ -251,6 +254,7 @@ pub(super) const fn language_title(language: Language) -> &'static str {
     match language {
         Language::Python => "Python",
         Language::Rust => "Rust",
+        Language::TypeScript => "TypeScript",
     }
 }
 

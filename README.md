@@ -7,7 +7,7 @@
 ## Overview
 
 - Purpose: help engineers follow one behavior of a codebase while the file structure stays in view.
-- Scope: Rust and Python indexing, agent-written flows with clusters, the Lift Deck viewer, installers, and a Claude Code plugin.
+- Scope: Rust, Python, TypeScript, and JavaScript indexing, agent-written flows with clusters, the Lift Deck viewer, installers, and a Claude Code plugin.
 - Approach: index the source into a graph, let a coding agent write a flow against the graph, freeze the flow, and play it in the browser.
 - Boundaries: a flow explains ordered visits to functions and never changes the source facts. Lines show static calls, not runtime counts.
 - Outcome: a frozen, shareable flow that plays the same way for every reader.
@@ -63,12 +63,14 @@ The plugin adds `/tekdek:flow` and `/tekdek:flow-view`, which call the `tekdek` 
 | --- | --- | --- | --- |
 | Rust | Yes | `rust-analyzer` | `rustup component add rust-analyzer`, `brew install rust-analyzer`, or a [release binary](https://github.com/rust-lang/rust-analyzer/releases) |
 | Python | Yes | `pyright-langserver` | `npm install -g pyright`, or without Node.js: `uv tool install 'pyright[nodejs]'` or `pipx install 'pyright[nodejs]'` |
-| TypeScript and JavaScript | Not yet | `typescript-language-server` | `npm install -g typescript-language-server typescript@6` |
+| TypeScript and JavaScript | Yes | `tsc --lsp` of TypeScript 7 | `npm install -g typescript` |
 | Go | Not yet | `gopls` | `go install golang.org/x/tools/gopls@latest` |
 
 - `tekdek doctor` prints the path and version of each server, or the install command of a missing server. It runs the version command of each server, so a server that cannot run, such as a rustup proxy without the component, is `broken`. pyright reports its version through the `pyright` program next to `pyright-langserver`; without it, the version is unverified.
 - `tekdek doctor <root>` checks only the languages that have source files in the root. A Rust project then does not need pyright.
 - Name a server that is not on `PATH` in the [configuration file](#configuration), for example `program = ".venv/bin/pyright-langserver"` in `[languages.python]`.
+- The TypeScript server is the `tsc` program of TypeScript 7 or later. Earlier versions have no `--lsp` option. To use the TypeScript of a project, set `program` in `[languages.typescript]` to the absolute path of its `node_modules/.bin/tsc`.
+- The TypeScript server resolves ES module imports in TypeScript and JavaScript. It does not resolve `require` calls, so a CommonJS call into another file gets no edge.
 - `tekdek index` skips the files of a language that it does not index yet. Request a language in [issue #4](https://github.com/dychen1/tekdek/issues/4).
 - `/tekdek:flow` looks for a local server first and asks before it installs one, for example `pyright needed for project acme-api - ~20 MB. y or n to download and install?`.
 
@@ -167,9 +169,12 @@ The URL keeps the graph, the flow, and the step: `?artifact=<file>&flow=<name>&s
 
 ## Language Analysis
 
-- The file extension selects the adapter: `.rs` for Rust, and `.py` and `.pyi` for Python. A `.py` file wins over a matching `.pyi` file.
-- A parser makes the syntax facts, which define all graph nodes: `syn` for Rust and the RustPython parser for Python. A language server adds the call, reference, and type edges of the nodes that a command reads.
+- The file extension selects the adapter: `.rs` for Rust, `.py` and `.pyi` for Python, and `.ts`, `.tsx`, `.mts`, `.cts`, `.js`, `.jsx`, `.mjs`, and `.cjs` for TypeScript and JavaScript. A `.py` file wins over a matching `.pyi` file. TypeScript declaration files, such as `index.d.ts`, have no node.
+- `index` skips hidden folders, and folders named `node_modules`, `target`, or `__pycache__`. For TypeScript and JavaScript, it also skips folders named `dist`, `build`, or `coverage`.
+- A TypeScript or JavaScript file that does not parse keeps its file node without declarations, and `index` prints a warning that names it. A Python or Rust file that does not parse stops the index.
+- A parser makes the syntax facts, which define all graph nodes: `syn` for Rust, the RustPython parser for Python, and the Oxc parser for TypeScript and JavaScript. A language server adds the call, reference, and type edges of the nodes that a command reads.
 - Edges connect nodes of the same language only. Symbols outside the source root make no edges.
+- A TypeScript or JavaScript function is a node when a declaration, a class member, or a variable names it: `function run()`, `run() {}` in a class, and `const run = () => {}`. A callback or an object method belongs to the function or file that holds it. Overload signatures and their implementation are one node.
 - The Rust parser does not expand macros or evaluate conditional compilation. The default rust-analyzer profile disables build scripts, procedural macros, check on save, and cache priming.
 - When one adapter fails, `index` writes no graph.
 
@@ -253,7 +258,7 @@ cachePriming.enable = false
 |   |-- analysis/              # Indexer: pipeline, semantic resolver, preflight, program lookup, configuration, sources
 |   |   |-- fact/              # Syntax and semantic fact models
 |   |   |-- graph/             # Graph models and construction
-|   |   |-- language/          # Python and Rust adapters and their profiles
+|   |   |-- language/          # Python, Rust, and TypeScript adapters and their profiles
 |   |   `-- lsp/               # Language server client, session, and capture
 |   |-- store/                 # Store folder, project store, atomic writes, graph artifact, semantic cache
 |   |-- flow/                  # Frozen flows: models, import, verify, lineage, rules

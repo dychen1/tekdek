@@ -171,7 +171,8 @@ fn rank_name(node: &ArtifactNode) -> &str {
 ///
 /// A test module is an inline `tests` or `test` module. A test file is in a
 /// `tests`, `test`, or `__tests__` folder, or its stem is `conftest`, `test`,
-/// or `tests`, starts with `test_`, or ends with `_test` or `_tests`.
+/// or `tests`, starts with `test_`, or ends with `_test`, `_tests`, `.test`, or
+/// `.spec`.
 fn is_test(key: &str) -> bool {
     let mut parts: Vec<&str> = key.split("::").next().unwrap_or(key).split('/').collect();
     let file = parts.pop().unwrap_or_default();
@@ -186,6 +187,7 @@ fn is_test(key: &str) -> bool {
         || stem.starts_with("test_")
         || stem.ends_with("_test")
         || stem.ends_with("_tests")
+        || matches!(stem.rsplit_once('.'), Some((_, "test" | "spec")))
 }
 
 fn kind_order(kind: NodeKind) -> u8 {
@@ -376,6 +378,8 @@ mod tests {
             "pkg/api_test.py::callable:test_get",
             "pkg/test_api.py",
             "pkg/conftest.py::callable:client",
+            "web/app.test.ts::callable:renders",
+            "web/app.spec.tsx",
         ] {
             assert!(is_test(key), "{key}");
         }
@@ -383,6 +387,7 @@ mod tests {
             "src/testing.rs::callable:helper",
             "src/contest.rs",
             "src/attest/mod.rs::callable:sign",
+            "web/spec.ts",
         ] {
             assert!(!is_test(key), "{key}");
         }

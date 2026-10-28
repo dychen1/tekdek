@@ -24,19 +24,19 @@ pub mod config;
 pub mod fact;
 pub mod graph;
 pub mod language;
-#[cfg(any(feature = "python", feature = "rust"))]
+#[cfg(any(feature = "python", feature = "rust", feature = "typescript"))]
 pub mod lsp;
-#[cfg(any(feature = "python", feature = "rust"))]
+#[cfg(any(feature = "python", feature = "rust", feature = "typescript"))]
 mod pipeline;
-#[cfg(any(feature = "python", feature = "rust"))]
+#[cfg(any(feature = "python", feature = "rust", feature = "typescript"))]
 mod preflight;
 pub mod program;
-#[cfg(any(feature = "python", feature = "rust"))]
+#[cfg(any(feature = "python", feature = "rust", feature = "typescript"))]
 pub mod resolve;
 pub mod source;
 pub(crate) mod timing;
 
-#[cfg(any(feature = "python", feature = "rust"))]
+#[cfg(any(feature = "python", feature = "rust", feature = "typescript"))]
 pub use pipeline::{
     Indexed, PipelineConfig, PipelineError, detect_project_languages, run, source_hash,
 };

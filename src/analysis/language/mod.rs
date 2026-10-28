@@ -9,18 +9,21 @@
 //! # Modules
 //!
 //! `python` analyzes Python with Pyright. `rust` analyzes Rust with
-//! rust-analyzer. `profile` names each language and its built-in settings.
+//! rust-analyzer. `typescript` analyzes TypeScript and JavaScript with the
+//! TypeScript server. `profile` names each language and its built-in settings.
 //!
 //! # Sections
 //!
 //! `Language contract` defines the adapter trait and the production order.
-//! `Document paths` checks the source path rule that both syntax adapters share.
+//! `Document paths` checks the source path rule that every syntax adapter shares.
 
 mod profile;
 #[cfg(feature = "python")]
 pub mod python;
 #[cfg(feature = "rust")]
 pub mod rust;
+#[cfg(feature = "typescript")]
+pub mod typescript;
 
 use std::path::Component;
 
@@ -35,6 +38,8 @@ pub use profile::{Language, LanguageProfile, ServerCommand, builtin_profiles};
 pub use python::PythonAdapter;
 #[cfg(feature = "rust")]
 pub use rust::RustAdapter;
+#[cfg(feature = "typescript")]
+pub use typescript::TypeScriptAdapter;
 
 // -----------------------------------------------------------------------------
 // Language contract
@@ -99,11 +104,35 @@ pub(crate) fn session_config<'a>(
         Language::Python => Some(python::server::session_config(root, profile)),
         #[cfg(feature = "rust")]
         Language::Rust => Some(rust::server::session_config(root, profile)),
+        #[cfg(feature = "typescript")]
+        Language::TypeScript => Some(typescript::server::session_config(root, profile)),
         #[allow(
             unreachable_patterns,
-            reason = "a build with both language features compiles every adapter"
+            reason = "a build with every language feature compiles every adapter"
         )]
         _ => None,
+    }
+}
+
+/// Returns the language id that opens one document in its server.
+///
+/// The TypeScript server parses a document by its id, so its id follows the
+/// extension. Every other language keeps the configured id.
+pub(crate) fn document_language_id<'a>(
+    language: Language,
+    configured: &'a str,
+    path: &str,
+) -> &'a str {
+    match language {
+        #[cfg(feature = "typescript")]
+        Language::TypeScript => {
+            typescript::server::document_language_id(path).unwrap_or(configured)
+        }
+        #[allow(
+            unreachable_patterns,
+            reason = "a build without the typescript feature has no dialect ids"
+        )]
+        _ => configured,
     }
 }
 
