@@ -61,7 +61,7 @@ use super::{
         Edge, Graph, NodeId, SyntaxGraphIndex, build_semantic_edges, collect_call_sites,
         constructors_by_class, is_call_site,
     },
-    language::{Language, LanguageProfile, session_config},
+    language::{Language, LanguageProfile, document_language_id, session_config},
     lsp::{
         CapturedDocument, CapturedSemanticFact, FallbackPolicy, LspClient, LspError,
         ProtocolSymbolSite, SemanticCapture,
@@ -294,7 +294,7 @@ impl Session {
                 .notify::<DidOpenTextDocument>(DidOpenTextDocumentParams {
                     text_document: TextDocumentItem::new(
                         uri.clone(),
-                        scope.language_id.to_owned(),
+                        document_language_id(scope.language, scope.language_id, path).to_owned(),
                         1,
                         text.to_owned(),
                     ),
@@ -735,7 +735,7 @@ fn alias_after(text: &str, name_end: u32, limit: u32) -> Option<SourceRange> {
     let after = keyword.strip_prefix("as")?;
     let alias = after.trim_start();
     let length = alias
-        .find(|character: char| !(character.is_alphanumeric() || character == '_'))
+        .find(|character: char| !(character.is_alphanumeric() || matches!(character, '_' | '$')))
         .unwrap_or(alias.len());
     if keyword.len() == rest.len() || alias.len() == after.len() || length == 0 {
         return None;

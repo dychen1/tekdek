@@ -37,7 +37,21 @@ test("prefixed triple-quoted Python strings open, carry, and close like plain on
   assert.equal(fClose, '<span class="t-str">    end&#39;&#39;&#39;</span>');
 });
 
+test("TypeScript keywords, names, decorators, comments, and multi-line strings take their colors", () => {
+  const [doc1, doc2, deco, sig, tpl1, tpl2, arrow] = highlight([
+    "/** Runs it.", " */", "@log()", "export async function run(x: Item): Promise<void> {", "  const s = `a", "b`; // done", "  const f = (y) => go(y);",
+  ], "typescript");
+  assert.equal(doc1, '<span class="t-com">/** Runs it.</span>');
+  assert.equal(doc2, '<span class="t-com"> */</span>');
+  assert.ok(deco.startsWith('<span class="t-attr">@log</span>'));
+  assert.ok(sig.startsWith('<span class="t-kw">export</span> <span class="t-kw">async</span> <span class="t-kw">function</span> <span class="t-fn">run</span>'));
+  assert.ok(sig.includes('<span class="t-type">Item</span>') && sig.includes('<span class="t-type">Promise</span>'));
+  assert.ok(tpl1.endsWith('<span class="t-str">`a</span>'));
+  assert.ok(tpl2.startsWith('<span class="t-str">b`</span>') && tpl2.endsWith('<span class="t-com">// done</span>'));
+  assert.ok(arrow.includes('<span class="t-fn">go</span>'));
+});
+
 test("another language shows escaped plain text", () => {
-  assert.deepEqual(highlight(["a < b"], "typescript"), ["a &lt; b"]);
+  assert.deepEqual(highlight(["a < b"], "go"), ["a &lt; b"]);
   assert.deepEqual(highlight(["a < b"], undefined), ["a &lt; b"]);
 });

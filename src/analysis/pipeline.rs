@@ -15,6 +15,8 @@ use std::{error::Error, fmt, io, panic, path::PathBuf, thread};
 use super::language::PythonAdapter;
 #[cfg(feature = "rust")]
 use super::language::RustAdapter;
+#[cfg(feature = "typescript")]
+use super::language::TypeScriptAdapter;
 use super::{
     fact::{AnalysisError, FactSet},
     graph::{
@@ -166,9 +168,11 @@ pub(crate) fn adapter(
         Language::Python => Ok(Box::new(PythonAdapter::new(profile.clone()))),
         #[cfg(feature = "rust")]
         Language::Rust => Ok(Box::new(RustAdapter::new(profile.clone()))),
+        #[cfg(feature = "typescript")]
+        Language::TypeScript => Ok(Box::new(TypeScriptAdapter::new(profile.clone()))),
         #[allow(
             unreachable_patterns,
-            reason = "a build with both language features compiles every adapter"
+            reason = "a build with every language feature compiles every adapter"
         )]
         language => Err(AnalysisError::new(format!(
             "the {language} adapter is not available in this build"

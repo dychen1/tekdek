@@ -162,8 +162,9 @@ pub enum CutError {
 
 /// Cuts one node out of its file text.
 ///
-/// The cut starts at the Rust doc comments and attributes, or the Python
-/// decorators, right above the scope, and ends at the scope's last line.
+/// The cut starts at the Rust doc comments and attributes, the Python
+/// decorators, or the TypeScript `JSDoc` comments and decorators, right above
+/// the scope, and ends at the scope's last line.
 ///
 /// # Errors
 ///
@@ -197,8 +198,12 @@ pub fn cut(text: &str, node: &ArtifactNode) -> Result<SourceCut, CutError> {
         }
         _ => declaration,
     };
+    let doc_prefixes = doc_prefixes(&node.language);
     let docs: Vec<usize> = (first..scope_first)
-        .filter(|&line| lines.text(line).trim_start().starts_with("///"))
+        .filter(|&line| {
+            let text = lines.text(line).trim_start();
+            doc_prefixes.iter().any(|prefix| text.starts_with(prefix))
+        })
         .collect();
     let total = scope_last - first + 1;
     let shown = total.min(MAX_LINES);
@@ -255,6 +260,7 @@ fn leading(lines: &Lines<'_>, scope_first: usize, language: &str) -> usize {
     let prefixes: &[&str] = match language {
         "rust" => &["///", "#["],
         "python" => &["@"],
+        "typescript" => &["/*", "*", "@"],
         _ => &[],
     };
     (0..scope_first)
@@ -264,6 +270,15 @@ fn leading(lines: &Lines<'_>, scope_first: usize, language: &str) -> usize {
             prefixes.iter().any(|prefix| text.starts_with(prefix))
         })
         .count()
+}
+
+/// The line starts of documentation comments in one language.
+fn doc_prefixes(language: &str) -> &'static [&'static str] {
+    match language {
+        "rust" => &["///"],
+        "typescript" => &["/*", "*"],
+        _ => &[],
+    }
 }
 
 // -----------------------------------------------------------------------------
@@ -408,6 +423,28 @@ mod tests {
                 "    return os.path.basename(path)"
             ]
         );
+    }
+
+    #[test]
+    fn cuts_a_typescript_method_with_its_jsdoc_and_decorator() {
+        let text = "class A {\n  /**\n   * Runs it.\n   */\n  @log()\n  run(x: number): void {\n    go(x);\n  }\n}\n";
+        let name = at(text, "run(");
+        let body = (at(text, "{\n    go"), end(text, "  }"));
+        let cut = cut(
+            text,
+            &node(
+                text,
+                "typescript",
+                (name, name + 3),
+                (at(text, "@log"), body.1),
+                body,
+            ),
+        )
+        .expect("cut");
+        assert_eq!((cut.first_line, cut.declaration_line), (2, 6));
+        assert_eq!(cut.doc_lines, Some([2, 4]));
+        assert_eq!(cut.signature_lines, [6, 6]);
+        assert_eq!(cut.lines.last().map(String::as_str), Some("  }"));
     }
 
     #[test]

@@ -157,7 +157,19 @@ fn check_server(profile: &LanguageProfile, used: Option<&[Language]>) -> ServerC
         check.install = Some(profile.language.server_install_command());
         return check;
     };
-    match probe(&path) {
+    let probe = match probe(&path) {
+        Probe::Version(version)
+            if profile.language == Language::TypeScript
+                && typescript_major(&version).is_some_and(|major| major < 7) =>
+        {
+            Probe::Failed(format!(
+                "TypeScript {} has no language server. TypeScript 7 and later have it",
+                version.trim_start_matches("Version ")
+            ))
+        }
+        probe => probe,
+    };
+    match probe {
         // Report the version line.
         Probe::Version(version) => {
             check.status = Status::Ok;
@@ -177,6 +189,16 @@ fn check_server(profile: &LanguageProfile, used: Option<&[Language]>) -> ServerC
     }
     check.path = Some(path);
     check
+}
+
+/// Returns the major version in `tsc --version` output, such as `Version 7.0.2`.
+fn typescript_major(version: &str) -> Option<u32> {
+    version
+        .strip_prefix("Version ")?
+        .split('.')
+        .next()?
+        .parse()
+        .ok()
 }
 
 /// The result of one version command.
@@ -304,7 +326,7 @@ fn describe(checks: &[ServerCheck], root: Option<&Path>) -> String {
             ),
         };
         lines.push(format!(
-            "{:<8}{:<10}{detail}",
+            "{:<12}{:<10}{detail}",
             check.language,
             check.status.label()
         ));
@@ -330,6 +352,7 @@ mod tests {
         for language in [
             cfg!(feature = "python").then_some("python"),
             cfg!(feature = "rust").then_some("rust"),
+            cfg!(feature = "typescript").then_some("typescript"),
         ]
         .into_iter()
         .flatten()
@@ -499,13 +522,23 @@ mod tests {
 
         assert_eq!(code, 0, "{output}");
         assert!(
-            output.contains("python  not used  no source files in"),
+            output.contains("python      not used  no source files in"),
             "{output}"
         );
-        assert!(output.contains("rust    ok        fake 1.0"), "{output}");
+        assert!(
+            output.contains("rust        ok        fake 1.0"),
+            "{output}"
+        );
 
         let (code, _) =
             check(vec!["--config".to_owned(), path.display().to_string()]).expect("report");
         assert_eq!(code, 1);
+    }
+
+    #[test]
+    fn reads_the_typescript_major_version() {
+        assert_eq!(super::typescript_major("Version 7.0.2"), Some(7));
+        assert_eq!(super::typescript_major("Version 5.9.3"), Some(5));
+        assert_eq!(super::typescript_major("tsc dev"), None);
     }
 }

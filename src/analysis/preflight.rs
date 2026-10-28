@@ -10,10 +10,8 @@
 //! `Server programs` finds each server program on the search path.
 
 use super::{
-    PipelineError,
-    language::LanguageProfile,
-    program::find_program,
-    source::{self, DocumentSnapshot},
+    PipelineError, language::LanguageProfile, pipeline, program::find_program,
+    source::DocumentSnapshot,
 };
 
 // -----------------------------------------------------------------------------
@@ -59,10 +57,12 @@ pub(super) fn detect_languages<'a>(
     let mut detected = profiles
         .iter()
         .filter(|profile| {
+            // The adapter's own selection, so skipped files (`.d.ts`, `dist/`) detect nothing.
+            // A selection error counts as detected so that the index reports it.
             profile.enabled
-                && documents
-                    .iter()
-                    .any(|document| source::document_has_extension(document, &profile.extensions))
+                && pipeline::adapter(profile)
+                    .and_then(|adapter| adapter.select_sources(documents))
+                    .map_or(true, |sources| !sources.is_empty())
         })
         .collect::<Vec<_>>();
     detected.sort_by_key(|profile| profile.language);
@@ -123,8 +123,10 @@ mod tests {
     #[cfg(feature = "rust")]
     use super::detect_languages;
     use super::detect_required_languages;
+    #[cfg(all(feature = "python", feature = "rust", feature = "typescript"))]
+    use super::enabled_extensions;
     #[cfg(all(feature = "python", feature = "rust"))]
-    use super::{enabled_extensions, preflight_server_programs_with};
+    use super::preflight_server_programs_with;
     #[cfg(feature = "rust")]
     use crate::analysis::language::{Language, LanguageProfile};
     use crate::analysis::{language::builtin_profiles, source::DocumentSnapshot};
@@ -159,6 +161,22 @@ mod tests {
         assert_eq!(languages(&detected), [Language::Python]);
     }
 
+    #[cfg(all(feature = "python", feature = "rust", feature = "typescript"))]
+    #[test]
+    fn ignores_files_that_the_adapter_skips() {
+        let documents = vec![
+            snapshot("app.py", "def run():\n    pass\n"),
+            snapshot("dist/bundle.js", "function run() {}\n"),
+            snapshot("types/env.d.ts", "declare function run(): void;\n"),
+        ];
+
+        let profiles = builtin_profiles();
+
+        let detected = detect_languages(&documents, &profiles);
+
+        assert_eq!(languages(&detected), [Language::Python]);
+    }
+
     #[cfg(all(feature = "rust", not(feature = "python")))]
     #[test]
     fn detects_rust_in_a_rust_only_build() {
@@ -181,7 +199,7 @@ mod tests {
         );
     }
 
-    #[cfg(all(feature = "python", feature = "rust"))]
+    #[cfg(all(feature = "python", feature = "rust", feature = "typescript"))]
     #[test]
     fn collects_enabled_extensions_in_stable_order() {
         let mut profiles = builtin_profiles();
@@ -192,21 +210,26 @@ mod tests {
 
         let extensions = enabled_extensions(&profiles);
 
-        assert_eq!(extensions, ["py", "pyi", "rs"]);
+        assert_eq!(
+            extensions,
+            [
+                "cjs", "cts", "js", "jsx", "mjs", "mts", "py", "pyi", "rs", "ts", "tsx"
+            ]
+        );
     }
 
-    #[cfg(all(feature = "python", feature = "rust"))]
+    #[cfg(all(feature = "python", feature = "rust", feature = "typescript"))]
     #[test]
     fn reports_every_missing_detected_server() {
         let profiles = builtin_profiles();
         let detected = profiles.iter().collect::<Vec<_>>();
 
         let error = preflight_server_programs_with(&detected, |_| false)
-            .expect_err("both language servers should be missing");
+            .expect_err("every language server should be missing");
 
         assert_eq!(
             error.to_string(),
-            "cannot start language servers: python needs pyright-langserver; rust needs rust-analyzer. Run `tekdek doctor` for the install commands"
+            "cannot start language servers: python needs pyright-langserver; rust needs rust-analyzer; typescript needs tsc. Run `tekdek doctor` for the install commands"
         );
     }
 

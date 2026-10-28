@@ -553,7 +553,7 @@ mod tests {
         let store = directory.path().join("store");
         std::fs::create_dir_all(&root).expect("root");
         std::fs::create_dir_all(&store).expect("store");
-        for file in ["app.py", "lib.rs"] {
+        for file in ["app.py", "lib.rs", "app.ts"] {
             std::fs::write(root.join(file), [0xff, 0xfe]).expect("source that is not UTF-8");
         }
         std::fs::write(store.join("app.json"), "old graph\n").expect("old graph");
@@ -616,6 +616,7 @@ mod tests {
         assert_eq!(refresh_project_graph(&store, None), Ok(None));
     }
 
+    #[cfg(feature = "rust")]
     #[test]
     fn reports_a_source_that_the_refresh_cannot_read() {
         let project = tempfile::tempdir().expect("project");
