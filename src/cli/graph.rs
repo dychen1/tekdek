@@ -34,10 +34,11 @@ use super::{
 pub(super) const USAGE: &str =
     "usage: tekdek graph <command> [--store <directory>] [--graph <file>] [--json]
   search <text> [--kind module|type|callable|field] [--limit <n>]
-  show <key> [--config <path>]
+  show <key>... [--config <path>]
 search lists the node keys that contain every word of the text, best match
-first. show prints one node with its signature, container, members, callers,
-and callees. Before it reads the graph, show reindexes the project graph if the
+first. show prints each node with its signature, container, members, callers,
+and callees. Several keys resolve in one daemon request; JSON output then puts
+the nodes in a `nodes` list. Before it reads the graph, show reindexes the project graph if the
 source changed, as serve does. Then it gets the callers and callees of the node
 from the language servers, through the daemon of the store, and keeps them in
 <graph>.semantic.json. --config selects the language servers, as for index.
@@ -63,7 +64,7 @@ enum Action {
         limit: usize,
     },
     Show {
-        key: String,
+        keys: Vec<String>,
         config: Option<PathBuf>,
     },
 }
@@ -105,9 +106,9 @@ impl Command {
                     .transpose()?
                     .unwrap_or(DEFAULT_LIMIT),
             },
-            // Show one node by its exact key.
-            ["show", key] => Action::Show {
-                key: (*key).to_owned(),
+            // Show one or more nodes by their exact keys.
+            ["show", keys @ ..] if !keys.is_empty() => Action::Show {
+                keys: keys.iter().map(|key| (*key).to_owned()).collect(),
                 config: options.remove("--config").map(PathBuf::from),
             },
             // Reject missing commands and extra operands.
@@ -158,20 +159,42 @@ fn execute(command: Command, ensure: &Ensure<'_>) -> Result<(u8, String), Box<dy
             let human = describe_search(&result, &file);
             Ok((0, render(command.json, &in_graph(&file, &result), human)?))
         }
-        // Describe one node with its resolved edges, or suggest keys that share its last segment.
-        Action::Show { key, config } => {
-            if !graph.nodes.iter().any(|node| node.key == key) {
-                return Err(missing_key(&graph, &file, &key).into());
+        // Describe each node with its resolved edges, or suggest keys that share the last segment of a missing key.
+        Action::Show { keys, config } => {
+            if let Some(key) = keys
+                .iter()
+                .find(|key| !graph.nodes.iter().any(|node| node.key == **key))
+            {
+                return Err(missing_key(&graph, &file, key).into());
             }
-            ensure(&store, &file, std::slice::from_ref(&key), config.as_deref())?;
+            ensure(&store, &file, &keys, config.as_deref())?;
             let (graph, _) = read_merged_graph(&store, &file)?;
-            let Some(detail) = query::show(&graph, &key) else {
-                return Err(missing_key(&graph, &file, &key).into());
+            let details = keys
+                .iter()
+                .map(|key| query::show(&graph, key).ok_or_else(|| missing_key(&graph, &file, key)))
+                .collect::<Result<Vec<_>, _>>()?;
+            let human = details
+                .iter()
+                .map(describe_node)
+                .collect::<Vec<_>>()
+                .join("\n\n");
+            let output = match details.as_slice() {
+                [detail] => render(command.json, &in_graph(&file, detail), human)?,
+                _ => render(
+                    command.json,
+                    &in_graph(&file, &Nodes { nodes: &details }),
+                    human,
+                )?,
             };
-            let human = describe_node(&detail);
-            Ok((0, render(command.json, &in_graph(&file, &detail), human)?))
+            Ok((0, output))
         }
     }
+}
+
+/// The nodes of a `show` with several keys, in key order.
+#[derive(Serialize)]
+struct Nodes<'a> {
+    nodes: &'a [NodeDetail],
 }
 
 /// One query result with the graph file that answered it.
@@ -355,6 +378,30 @@ mod tests {
         assert_eq!(shown["graph"], "app.json");
         assert_eq!(shown["callees"][0]["key"], "src/main.rs::callable:start");
         assert_eq!(shown["callers"], serde_json::json!([]));
+    }
+
+    #[test]
+    fn shows_several_keys_with_one_resolution() {
+        let directory = tempfile::tempdir().expect("store");
+        fixture(directory.path());
+        let asked = RefCell::new(Vec::new());
+
+        let shown = execute_with(
+            directory.path(),
+            &["show", START, MAIN],
+            0,
+            &|_, _, keys, _| {
+                asked.borrow_mut().push(keys.to_vec());
+                Ok(())
+            },
+        );
+
+        assert_eq!(shown["nodes"][0]["key"], START);
+        assert_eq!(shown["nodes"][1]["key"], MAIN);
+        assert_eq!(
+            asked.into_inner(),
+            [vec![START.to_owned(), MAIN.to_owned()]]
+        );
     }
 
     #[test]

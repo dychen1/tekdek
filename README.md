@@ -7,12 +7,39 @@
 ## Overview
 
 - Purpose: help engineers follow one behavior of a codebase while the file structure stays in view.
-- Scope: Rust, Python, TypeScript, and JavaScript indexing, agent-written flows with clusters, the Lift Deck viewer, installers, and a Claude Code plugin.
+- Scope: Rust, Python, TypeScript, and JavaScript indexing, agent-written flows with clusters, the Lift Deck viewer, installers, and a plugin for Claude Code and Codex.
 - Approach: index the source into a graph, let a coding agent write a flow against the graph, freeze the flow, and play it in the browser.
 - Boundaries: a flow explains ordered visits to functions and never changes the source facts. Lines show static calls, not runtime counts.
 - Outcome: a frozen, shareable flow that plays the same way for every reader.
 
 ## Install
+
+Install the plugin in your coding agent. It adds the `flow` and `flow-view` skills, and its launcher downloads the `tekdek` binary of the plugin version on the first run, so no other install is needed.
+
+- Claude Code:
+
+  ```text
+  /plugin marketplace add dychen1/tekdek
+  /plugin install tekdek@tekdek
+  ```
+
+- Codex:
+
+  ```sh
+  codex plugin marketplace add dychen1/tekdek
+  codex plugin add tekdek@tekdek
+  ```
+
+Then ask for a flow, for example `/tekdek:flow explain how a request is authenticated` in Claude Code. The skill indexes the project and asks before it installs a missing language server (see [Language Servers](#language-servers)).
+
+- The marketplace pins the plugin to the latest release tag, so the skills always match a released binary. Both agents read the same `.claude-plugin/marketplace.json`.
+- The launcher `plugin/bin/tekdek` caches the binary in `~/.cache/tekdek/<version>/` and checks its sha256. Claude Code puts it on `PATH` after your own `PATH`, so an installed `tekdek` runs first. Codex runs it by its path.
+- For the private repository, the agents use your git credentials, and the launcher uses the GitHub CLI: run `gh auth login`, then `gh auth setup-git`.
+- Claude Code does not update plugins from third-party marketplaces by default. Turn on auto-update for the `tekdek` marketplace in `/plugin`, or run `/plugin marketplace update tekdek`. In Codex, run `codex plugin marketplace upgrade tekdek`.
+
+### The CLI Alone
+
+To run `tekdek` without an agent, or before Claude Code restarts:
 
 - macOS and Linux:
 
@@ -34,28 +61,7 @@
   cargo install --locked --path .
   ```
 
-The installers need no Rust or Node.js. They put `tekdek` in `$XDG_BIN_HOME`, else `$XDG_DATA_HOME/../bin`, else `~/.local/bin`, and add that folder to `PATH`. The Linux binaries need glibc 2.34 or later: Ubuntu 22.04, Debian 12, RHEL 9, Amazon Linux 2023, or newer. Alpine and older distributions cannot run them; build from source there.
-
-The installers download from GitHub Releases without credentials, so they work only after the repository becomes public. Until then, a user with access can download the archive for their system with the GitHub CLI, extract it, and move the binary into a folder on `PATH`:
-
-```sh
-gh release download --repo dychen1/tekdek --pattern 'tekdek-aarch64-apple-darwin.tar.xz'
-tar -xJf tekdek-aarch64-apple-darwin.tar.xz
-mkdir -p ~/.local/bin && mv tekdek-aarch64-apple-darwin/tekdek ~/.local/bin/
-```
-
-The archives are `tekdek-aarch64-apple-darwin.tar.xz` (Apple silicon), `tekdek-x86_64-apple-darwin.tar.xz` (Intel Mac), `tekdek-x86_64-unknown-linux-gnu.tar.xz`, `tekdek-aarch64-unknown-linux-gnu.tar.xz`, and `tekdek-x86_64-pc-windows-msvc.zip`. Add `--tag v0.1.0` for a specific release.
-
-Install the agent skills in Claude Code:
-
-```text
-/plugin marketplace add dychen1/tekdek
-/plugin install tekdek@tekdek
-```
-
-The plugin adds `/tekdek:flow` and `/tekdek:flow-view`, which call the `tekdek` binary. The marketplace pins the plugin to the latest release tag, so the skills always match a released binary. For the private repository, Claude Code uses your git credentials (`gh auth login`, then `gh auth setup-git`). Other coding agents can follow `plugin/skills/flow/SKILL.md`.
-
-Claude Code does not update plugins from third-party marketplaces by default. Turn on auto-update for the `tekdek` marketplace in `/plugin`, or update by hand with `/plugin marketplace update tekdek`. Upgrade the binary with the same installer command.
+The installers need no Rust or Node.js. They put `tekdek` in `$XDG_BIN_HOME`, else `$XDG_DATA_HOME/../bin`, else `~/.local/bin`, and add that folder to `PATH`. Run the same command to upgrade. The installers download without credentials, so they work only after the repository becomes public; until then, use the plugin launcher or `gh release download --repo dychen1/tekdek`. The Linux binaries need glibc 2.34 or later: Ubuntu 22.04, Debian 12, RHEL 9, Amazon Linux 2023, or newer. Alpine and older distributions cannot run them; build from source there.
 
 ## Language Servers
 
@@ -141,7 +147,7 @@ The agent names 1 to 8 clusters for the phases of a flow and labels each step wi
 
 `tekdek index` writes the syntax graph: the nodes and their `contains` edges. The call, reference, type, and import edges come later, from a language server, for the nodes that a command reads.
 
-- `graph show <key>` gets the edges of its node. `flow import` and `flow verify` get the edges of every step node before they derive the fact layer.
+- `graph show <key>...` gets the edges of its nodes in one request. `flow import` and `flow verify` get the edges of every step node before they derive the fact layer.
 - A daemon of the store keeps the servers warm. The first command starts it with the servers, which takes some seconds. The next commands take milliseconds for each node. The daemon stops after 10 minutes without a request. It keeps the search path of the command that started it: when a server program is not on that path, it answers the error and stops, so the next command starts a daemon with its own path. Its files are `daemon.lock`, `daemon.sock`, and `daemon.log` in the store; `index` and the daemon add them to the `.gitignore` of an older store.
 - When `flow verify` cannot get the edges, for example in CI without a server, it prints a warning and verifies against the graph and its cache as they are.
 - The edges go to `<graph>.semantic.json`, which records the byte digest of its graph. After a new index, the next command replaces the cache. The cache is not part of the flow binding, so it never makes a flow stale. `serve` sends each graph with the edges of its cache.
@@ -187,7 +193,7 @@ tekdek index [<root>] [--name <name>] [--store <directory>] | [--output <path>]
   [--config <path>]
 
 tekdek graph search <text> [--kind module|type|callable|field] [--limit <n>]
-tekdek graph show <key> [--config <path>]
+tekdek graph show <key>... [--config <path>]
 
 tekdek flow list [--graph <file>]
 tekdek flow show <name>
@@ -218,7 +224,7 @@ With `--json`, the result or the error is one JSON document on standard output. 
 | --- | --- |
 | `index` | The default root is the working directory, or the project root when a store exists. The default name is the root folder name. A root inside a project with a store needs `--name`. `--output` writes one graph and changes no store. |
 | `graph search` | Lists the keys that contain every word, best name match first. Spaces, `::`, `:`, `.`, and `/` separate words, so `Command::parse` and `flow/import` work. The default limit is 20. JSON output names the graph file. |
-| `graph show` | Shows the signature, documentation summary, container, members, callers, and callees. A missing key names close keys. It reindexes the project graph if the source changed, then gets the edges of the node (see [Semantic Edges](#semantic-edges)). |
+| `graph show` | Shows the signature, documentation summary, container, members, callers, and callees of each key. A missing key names close keys. It reindexes the project graph if the source changed, then gets the edges of all the nodes in one request (see [Semantic Edges](#semantic-edges)). |
 | `flow list` | Lists the current generation of each flow, with its freshness. |
 | `flow import` | `--author-name` alone records an agent author. Gets the edges of the step nodes first. |
 | `flow verify` | Recomputes the derived layers and digests of the current generation. Gets the edges of the step nodes first, unless the flow is stale. |
@@ -279,8 +285,8 @@ cachePriming.enable = false
 |   |-- fonts/                 # JetBrains Mono latin subset (SIL OFL 1.1)
 |   `-- tests/                 # Viewer tests
 |-- demo/                      # Demo store: this repository's graph and one flow
-|-- .claude-plugin/            # Claude Code marketplace
-|-- plugin/                    # Claude Code plugin: the flow and flow-view skills
+|-- .claude-plugin/            # Plugin marketplace for Claude Code and Codex
+|-- plugin/                    # Plugin: the flow and flow-view skills, and the bin/tekdek launcher
 `-- .github/                   # CI and release workflows, and the release build setup steps
 ```
 

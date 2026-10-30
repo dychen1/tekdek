@@ -17,7 +17,7 @@ Freeze one behavior of a codebase as a tekdek flow: an ordered walk through its 
 
 ## Setup
 
-- This skill needs tekdek 0.1.0 or later. Run `tekdek version`. If the command is not found, follow [install.md](install.md): use an installed binary by its full path, or give the user the install command and stop. If the version is older, stop and tell the user to run the installer again to upgrade.
+- This skill needs tekdek 0.1.0 or later. Run `tekdek version`. If the command is not found, follow [install.md](install.md): run the plugin launcher by its full path, or give the user the install command and stop. If the version is older, stop and tell the user to run the installer again to upgrade.
 - If the project has no store, run `tekdek index` in the project root.
 - Before the first `graph show`, follow [language-servers.md](language-servers.md): `graph show`, `flow import`, and `flow verify` need the language servers.
 - `graph show` and `serve` index the project again when the source changed. Flows frozen against the older graph then play as stale, so tell the user when the source changed before you write a flow.
@@ -26,7 +26,7 @@ Freeze one behavior of a codebase as a tekdek flow: an ordered walk through its 
 
 ```sh
 tekdek graph search <words> [--kind callable]   # node keys, best match first
-tekdek graph show <key>                         # signature, container, callers, callees
+tekdek graph show <key>...                      # signature, container, callers, callees of each key
 tekdek flow agent-contract                      # JSON Schema of the output document
 tekdek flow list                                # existing flows
 tekdek flow import <name> --graph <file> --input <path> --check --json   # complete dry run
@@ -40,7 +40,7 @@ Every command reads the nearest `.tekdek` folder. Pass `--store <directory>` for
 ## Write the Flow
 
 1. Read the project's agent instructions (`AGENTS.md`, `CLAUDE.md`) when they exist, and the output contract.
-2. Trace the behavior in the source. Find the node key of each function with `graph search` and `graph show`, and copy it exactly. A key is the file path plus `::` segments, such as `src/cli/flow.rs::type:Command::callable:parse`. A `[n]` suffix separates two declarations with the same path.
+2. Trace the behavior in the source. Find the node key of each function with `graph search` and `graph show`, and copy it exactly. Pass all the keys that you need to one `graph show`: one call resolves them together, and each call costs a source check. A key is the file path plus `::` segments, such as `src/cli/flow.rs::type:Command::callable:parse`. A `[n]` suffix separates two declarations with the same path.
 3. Follow one primary runtime path. An overview shows the major stages in ~12–25 steps. A detailed flow adds intermediate calls and returns to callers in ~25–60 steps. A step count from the user wins.
 4. Group the steps into 1–8 clusters. A cluster is a phase of the flow, not a folder. The viewer lifts one cluster at a time, so prefer clusters that the flow visits in one long run. Put an orchestrator that calls every phase in the first cluster that needs it.
 5. Give each step a title of 2–8 words and an annotation from the source: the input, the action, and the output or state change. Mark returns to callers, asynchronous or dynamic boundaries, and behavior that an external service owns.

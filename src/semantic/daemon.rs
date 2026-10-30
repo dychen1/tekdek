@@ -345,7 +345,17 @@ pub fn serve(
         resolver: None,
         exit: false,
     };
-    let served = daemon.listen(&listener, &socket, ours, idle_time());
+    // A reinstall replaces the executable, so the next client starts the new binary.
+    let binary = env::current_exe()
+        .ok()
+        .and_then(|path| Some((identity(&path).ok()?, path)));
+    let served = daemon.listen(
+        &listener,
+        &socket,
+        ours,
+        binary.as_ref().map(|(id, path)| (path.as_path(), *id)),
+        idle_time(),
+    );
     // The socket goes before the lock, and only while it is ours, so this
     // daemon never removes the socket of the next one.
     let removed = if identity(&socket).ok() == Some(ours) {
@@ -416,7 +426,7 @@ struct Daemon<L> {
 }
 
 impl<L: Fn(Option<&Path>) -> io::Result<Vec<LanguageProfile>>> Daemon<L> {
-    /// Answers connections until the idle time passes without one, the socket path stops naming the file `ours`, or an answer sets `exit`.
+    /// Answers connections until the idle time passes without one, the socket path stops naming the file `ours`, the executable `binary` is replaced, or an answer sets `exit`.
     ///
     /// A connection that arrives after the path changed gets no answer, so its
     /// client starts a new daemon.
@@ -426,16 +436,21 @@ impl<L: Fn(Option<&Path>) -> io::Result<Vec<LanguageProfile>>> Daemon<L> {
         listener: &UnixListener,
         socket: &Path,
         ours: (u64, u64),
+        binary: Option<(&Path, (u64, u64))>,
         idle: Duration,
     ) -> io::Result<()> {
         listener.set_nonblocking(true)?;
         let mut last = Instant::now();
         let owned = || {
-            let owned = identity(socket).ok() == Some(ours);
-            if !owned {
+            if identity(socket).ok() != Some(ours) {
                 log("the socket path names another file");
+                return false;
             }
-            owned
+            let current = binary.is_none_or(|(path, id)| identity(path).ok() == Some(id));
+            if !current {
+                log("the tekdek executable was replaced");
+            }
+            current
         };
         loop {
             match listener.accept() {
@@ -584,7 +599,7 @@ mod tests {
 
     use serde_json::json;
 
-    use super::{LOCK, LOG, SOCKET, ensure_with, serve};
+    use super::{Daemon, LOCK, LOG, SOCKET, ensure_with, identity, serve};
     use crate::{
         analysis::{language::ServerCommand, lsp::fake_server::FakeServer},
         semantic::tests::{HELPER, RUN, index, project, scripted, with_server},
@@ -857,6 +872,48 @@ mod tests {
         });
         assert!(cache(&store).resolved.contains(RUN));
         kill(&store, "-TERM");
+    }
+
+    #[test]
+    fn exits_when_its_executable_is_replaced() {
+        let folder = tempfile::tempdir().expect("folder");
+        let socket = folder.path().join("daemon.sock");
+        let binary = folder.path().join("tekdek");
+        fs::write(&binary, "old").expect("binary");
+        let listener = UnixListener::bind(&socket).expect("listener");
+        let ours = identity(&socket).expect("socket identity");
+        let installed = identity(&binary).expect("binary identity");
+        let mut daemon = Daemon {
+            store: folder.path().to_path_buf(),
+            root: folder.path().to_path_buf(),
+            load: |_: Option<&Path>| Ok(Vec::new()),
+            profiles: Vec::new(),
+            resolver: None,
+            exit: false,
+        };
+        let replace = thread::spawn({
+            let binary = binary.clone();
+            move || {
+                thread::sleep(Duration::from_millis(50));
+                let staged = binary.with_extension("new");
+                fs::write(&staged, "new").expect("new binary");
+                fs::rename(&staged, &binary).expect("replace binary");
+            }
+        });
+
+        let started = Instant::now();
+        daemon
+            .listen(
+                &listener,
+                &socket,
+                ours,
+                Some((&binary, installed)),
+                Duration::from_secs(30),
+            )
+            .expect("listen");
+        replace.join().expect("replace thread");
+
+        assert!(started.elapsed() < Duration::from_secs(5));
     }
 
     #[test]

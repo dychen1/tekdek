@@ -555,11 +555,22 @@ fn read_loop(mut reader: impl BufRead, sender: &Sender<Result<Value, LspError>>)
 ///
 /// Serializes JSON, writes the required header and body, and flushes the writer.
 ///
+/// A `null` `params` member is left out, as JSON-RPC allows: TypeScript 7
+/// rejects `"params": null` on `shutdown`.
+///
 /// # Errors
 ///
 /// Returns an error if JSON serialization or a writer operation fails.
 fn write_message(writer: &mut impl Write, message: &Value) -> Result<(), LspError> {
-    let body = serde_json::to_vec(message)?;
+    let body = if message.get("params").is_some_and(Value::is_null) {
+        let mut message = message.clone();
+        if let Some(object) = message.as_object_mut() {
+            object.remove("params");
+        }
+        serde_json::to_vec(&message)?
+    } else {
+        serde_json::to_vec(message)?
+    };
 
     write!(writer, "Content-Length: {}\r\n\r\n", body.len())?;
     writer.write_all(&body)?;
@@ -659,13 +670,29 @@ fn response_result(message: &Value) -> Result<Value, LspError> {
 /// # Errors
 ///
 /// Returns an error if the path is relative or file URL conversion fails.
+/// Path characters that a file URL keeps but an LSP URI rejects, such as
+/// the brackets of a Next.js route folder, are percent-encoded.
 pub fn file_uri(path: &Path) -> Result<Uri, LspError> {
-    let url = Url::from_file_path(path).map_err(|()| {
+    let mut url = Url::from_file_path(path).map_err(|()| {
         LspError::new(format!(
             "the LSP document path must be absolute: {}",
             path.display()
         ))
     })?;
+    let encoded = url
+        .path()
+        .chars()
+        .fold(String::new(), |mut text, character| {
+            match character {
+                '[' => text.push_str("%5B"),
+                ']' => text.push_str("%5D"),
+                '^' => text.push_str("%5E"),
+                '|' => text.push_str("%7C"),
+                _ => text.push(character),
+            }
+            text
+        });
+    url.set_path(&encoded);
 
     url.as_str().parse().map_err(|error| {
         LspError::new(format!(
@@ -795,6 +822,27 @@ mod tests {
     }
 
     #[test]
+    fn leaves_out_null_params() {
+        let mut bytes = Vec::new();
+
+        write_message(
+            &mut bytes,
+            &json!({"jsonrpc": "2.0", "id": 1, "method": "shutdown", "params": null}),
+        )
+        .expect("the message should be written");
+
+        let mut reader = BufReader::new(Cursor::new(bytes));
+        let actual = read_message(&mut reader)
+            .expect("the message should be valid")
+            .expect("the message should exist");
+
+        assert_eq!(
+            actual,
+            json!({"jsonrpc": "2.0", "id": 1, "method": "shutdown"})
+        );
+    }
+
+    #[test]
     fn rejects_a_message_without_content_length() {
         let bytes = b"Content-Type: application/json\r\n\r\n{}";
         let mut reader = BufReader::new(Cursor::new(bytes));
@@ -867,6 +915,15 @@ mod tests {
             .expect("the absolute path should form a URI");
 
         assert_eq!(uri.as_str(), "file:///tmp/code%20graph/na%C3%AFve.py");
+    }
+
+    #[test]
+    fn encodes_route_folder_brackets_and_reads_the_path_back() {
+        let path = Path::new("/tmp/app/[...slug]/a^b|c.tsx");
+        let uri = file_uri(path).expect("the bracket path should form a URI");
+
+        assert_eq!(uri.as_str(), "file:///tmp/app/%5B...slug%5D/a%5Eb%7Cc.tsx");
+        assert_eq!(uri_path(&uri).as_deref(), Some(path));
     }
 
     #[test]

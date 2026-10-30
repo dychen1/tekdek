@@ -296,6 +296,92 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn the_plugin_launcher_runs_a_checked_release_binary_and_caches_it() {
+        use std::{fs, os::unix::fs::PermissionsExt, path::Path, process::Command};
+
+        let target = match (std::env::consts::OS, std::env::consts::ARCH) {
+            ("macos", arch) => format!("{arch}-apple-darwin"),
+            ("linux", arch) => format!("{arch}-unknown-linux-gnu"),
+            _ => return,
+        };
+        let folder = tempfile::tempdir().expect("folder");
+        let root = folder.path();
+        let executable = |path: &Path, text: &str| {
+            fs::write(path, text).expect("script");
+            fs::set_permissions(path, fs::Permissions::from_mode(0o755)).expect("mode");
+        };
+        // A plugin copy with its launcher, and a release with one archive.
+        for folder in ["plugin/bin", "plugin/.claude-plugin", "fake-bin", "release"] {
+            fs::create_dir_all(root.join(folder)).expect("folder");
+        }
+        fs::copy(
+            concat!(env!("CARGO_MANIFEST_DIR"), "/plugin/bin/tekdek"),
+            root.join("plugin/bin/tekdek"),
+        )
+        .expect("launcher");
+        fs::write(
+            root.join("plugin/.claude-plugin/plugin.json"),
+            r#"{"name": "tekdek", "version": "9.9.9"}"#,
+        )
+        .expect("manifest");
+        let unpacked = root.join(format!("release/tekdek-{target}"));
+        fs::create_dir(&unpacked).expect("archive folder");
+        executable(&unpacked.join("tekdek"), "#!/bin/sh\necho \"release $*\"\n");
+        let archive = format!("tekdek-{target}.tar.xz");
+        let shell = |script: &str| {
+            let status = Command::new("sh")
+                .args(["-c", script])
+                .current_dir(root.join("release"))
+                .status()
+                .expect("sh");
+            assert!(status.success(), "{script}");
+        };
+        shell(&format!(
+            "tar -cJf {archive} tekdek-{target} && (sha256sum {archive} 2>/dev/null || shasum -a 256 {archive}) > {archive}.sha256"
+        ));
+        // The fake curl serves the release folder: `curl -fsSL -o <file> <url>`, so $3 is the file and $4 the URL.
+        executable(
+            &root.join("fake-bin/curl"),
+            &format!(
+                "#!/bin/sh\ncp \"{}/${{4##*/}}\" \"$3\" 2>/dev/null || exit 22\n",
+                root.join("release").display()
+            ),
+        );
+        let launch = || {
+            Command::new(root.join("plugin/bin/tekdek"))
+                .arg("version")
+                .env(
+                    "PATH",
+                    format!("{}:/usr/bin:/bin", root.join("fake-bin").display()),
+                )
+                .env("XDG_CACHE_HOME", root.join("cache"))
+                .output()
+                .expect("launcher")
+        };
+
+        let first = launch();
+        assert!(first.status.success(), "{first:?}");
+        assert_eq!(String::from_utf8_lossy(&first.stdout), "release version\n");
+        fs::remove_file(root.join("fake-bin/curl")).expect("no network");
+        let cached = launch();
+        assert_eq!(String::from_utf8_lossy(&cached.stdout), "release version\n");
+
+        // A wrong checksum caches nothing.
+        fs::remove_dir_all(root.join("cache")).expect("empty cache");
+        executable(
+            &root.join("fake-bin/curl"),
+            &format!(
+                "#!/bin/sh\ncp \"{}/${{4##*/}}\" \"$3\" 2>/dev/null || exit 22\ncase \"$3\" in *.sha256) echo 0000 > \"$3\" ;; esac\n",
+                root.join("release").display()
+            ),
+        );
+        let refused = launch();
+        assert_eq!(refused.status.code(), Some(2), "{refused:?}");
+        assert!(!root.join("cache/tekdek/9.9.9/tekdek").exists());
+    }
+
     #[test]
     fn the_skills_require_the_crate_version() {
         let requirement = format!("needs tekdek {} or later", env!("CARGO_PKG_VERSION"));
