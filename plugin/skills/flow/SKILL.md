@@ -113,4 +113,6 @@ Run the import with `--check` first. It lists every issue and writes nothing. Fi
 
 Run `flow verify <name>`. It must report `valid`. `flow show <name> --json` classifies each step transition in `view.steps[].transition`; `no_static_edge` is a gap. Close useful gaps with a revision, and explain the other gaps in the step ledgers.
 
-Report the flow name, mode, step count, cluster labels, connected transitions (all except `no_static_edge`) over total transitions, and the verify result. Tell the user to open the flow with `/tekdek:flow-view <name>` or `tekdek serve --flow <name> --open`.
+Report the flow name, mode, step count, cluster labels, connected transitions (all except `no_static_edge`) over total transitions, and the verify result. Then run `tekdek serve --flow <name> --port 0 --open` as a background process, so that it keeps running after this turn. The first output line is the URL of the flow.
+
+Always end the report with the browser URL as a link, for each flow that you wrote or revised. Do not finish without the URL. If the server does not start, say so and give the `tekdek serve` command.
