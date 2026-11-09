@@ -85,10 +85,25 @@ export async function loadFlow(entry: FlowEntry): Promise<FlowArtifact> {
 export async function loadDiff(index: ArtifactIndex, name: string): Promise<DiffArtifact> {
   const path = index.diffs?.find(entry => entry.name === name)?.file ?? `diffs/${name}.json`;
   const diff = await fetchJson<DiffArtifact>(artifactUrl(path), path, "diff");
-  if (diff?.kind !== "tekdek.diff" || diff.schemaVersion !== 1 || !Array.isArray(diff.rows) || !diff.head?.flow || !diff.base?.flow) {
+  if (diff?.kind !== "tekdek.diff" || diff.schemaVersion !== 1 || !Array.isArray(diff.rows) || !diff.head?.flow || !diff.base?.flow
+      || !diff.rows.every(validRow)) {
     throw new LoadError("diff", `The diff file ${path} is not a frozen schema 1 diff.`);
   }
   return diff;
+}
+
+const KINDS = new Set(["new", "removed", "changed", "moved", "unchanged"]);
+const OPS = new Set(["context", "added", "removed"]);
+const count = (value: unknown) => Number.isSafeInteger(value) && (value as number) >= 0;
+const validSpan = (span: unknown) => span === null
+  || (typeof span === "object" && typeof (span as { path?: unknown }).path === "string"
+    && count((span as { start?: unknown }).start) && count((span as { end?: unknown }).end));
+
+/** True when a row has only the kinds, counts, spans, and line ops of the schema. The view puts these values in markup without escapes. */
+export function validRow(row: DiffArtifact["rows"][number]): boolean {
+  return KINDS.has(row?.kind) && count(row.added) && count(row.removed)
+    && validSpan(row.baseSpan) && validSpan(row.headSpan)
+    && Array.isArray(row.lines) && row.lines.every(line => OPS.has(line?.op) && typeof line.text === "string");
 }
 
 // ============ source ============

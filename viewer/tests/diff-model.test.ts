@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import type { DiffArtifact, DiffRow, FlowArtifact } from "../src/data/models.ts";
+import { validRow } from "../src/data/load.ts";
 import { buildDiffModel, movedText, numberLines, slotsOf } from "../src/diff/model.ts";
 
 /** A small frozen flow: each step is `[id, cluster key]`, and each cluster label is its key in capitals. */
@@ -86,4 +87,16 @@ test("diff lines count from the spans: context moves both, removed the old, adde
     lines: [{ op: "context", text: "" }, { op: "removed", text: "" }, { op: "removed", text: "" }, { op: "added", text: "" }, { op: "context", text: "" }],
   });
   assert.deepEqual(lines.map(l => l.no), [20, 11, 12, 21, 22]);
+});
+
+test("a diff row with a kind, count, or line op outside the schema is rejected", () => {
+  const row: DiffRow = {
+    kind: "changed", beforeStep: "a", afterStep: "a", baseSpan: { path: "a.rs", start: 1, end: 2 }, headSpan: null,
+    added: 1, removed: 0, lines: [{ op: "added", text: "<b>x</b>" }],
+  };
+  assert.equal(validRow(row), true);
+  assert.equal(validRow({ ...row, kind: 'x" onmouseover="alert(1)' as DiffRow["kind"] }), false);
+  assert.equal(validRow({ ...row, added: "<img>" as unknown as number }), false);
+  assert.equal(validRow({ ...row, baseSpan: { path: "a.rs", start: "<i>" as unknown as number, end: 2 } }), false);
+  assert.equal(validRow({ ...row, lines: [{ op: "<s>" as "added", text: "" }] }), false);
 });
