@@ -107,6 +107,15 @@ test("the data path orders each model after the models that turn into it", () =>
     { input: ["list[CheckResult]"], output: ["EvalReport"] },
   ]);
   assert.deepEqual(path, ["RawTrace", "Trace", "Contract", "CheckPlan", "SourceTexts", "list[CheckResult]", "EvalReport"]);
-  assert.deepEqual(dataPath([{ input: ["A"], output: ["B"] }, { input: ["B"], output: ["A"] }]), ["A", "B"], "a cycle still lists each model once");
   assert.deepEqual(dataPath([]), []);
+});
+
+test("a cycle in the data path gives way at a model on the cycle, not at a model that waits for it", () => {
+  // B turns into C, so C must follow B although C shows first.
+  assert.deepEqual(dataPath([{ input: ["C"], output: ["D"] }, { input: ["A"], output: ["B"] }, { input: ["B"], output: ["A"] }, { input: ["B"], output: ["C"] }]),
+    ["A", "B", "C", "D"]);
+  // The entry returns X first, but X waits for B.
+  const path = dataPath([{ input: [], output: ["X"] }, { input: ["B"], output: ["X"] }, { input: ["A"], output: ["B"] }, { input: ["B"], output: ["A"] }]);
+  assert.ok(path.indexOf("B") < path.indexOf("X"), path.join(" "));
+  assert.equal(new Set(path).size, 3, "each model shows once");
 });

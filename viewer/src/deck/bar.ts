@@ -45,18 +45,22 @@ export function createBar(ctx: DeckContext): Bar {
 
   // ============ explainer ============
 
-  /** The data path of the flow: the models that enter and leave the cluster wear its color, the rest stay quiet.
-   *  Every model is a type, so the path drops the kind mark. Only an arrow into a model that leaves lights up. */
+  /** The data path of the flow: the models that enter the cluster wear its color, the models that leave also take a fill,
+   *  and the rest stay quiet. Every model is a type, so the path drops the kind mark. The arrows show data order only.
+   *  A screen reader gets one sentence instead of the drawn path. */
   function pathRow(C: ClusterView): string {
     if (!model.dataPath.length) return "";
-    const role = (name: string) => C.output.includes(name) ? "out" : C.input.includes(name) ? "in" : "";
-    const roles = model.dataPath.map(role);
+    const title = (name: string) => {
+      const enters = C.input.includes(name), leaves = C.output.includes(name);
+      return enters && leaves ? "Enters and leaves this cluster" : enters ? "Enters this cluster" : leaves ? "Leaves this cluster" : "";
+    };
     const nodes = model.dataPath.map((name, i) => {
-      const arrow = i ? `<span class="arr${roles[i] === "out" && roles[i - 1] ? " lit" : ""}" aria-hidden="true">→</span>` : "";
-      return `${arrow}<span class="pn${roles[i] ? ` ${roles[i]}` : ""}"${roles[i] ? ` title="${roles[i] === "in" ? "Enters" : "Leaves"} this cluster"` : ""}>${esc(name)}</span>`;
+      const t = title(name), role = C.output.includes(name) ? " out" : t ? " in" : "";
+      return `${i ? '<span class="arr">→</span>' : ""}<span class="pn${role}"${t ? ` title="${t}"` : ""}>${esc(name)}</span>`;
     }).join("");
-    const names = (list: readonly string[]) => list.length ? list.join(", ") : "nothing";
-    return `<p class="path" style="--c:${esc(C.cv)}" aria-label="Data path: ${esc(model.dataPath.join(", "))}. ${esc(names(C.input))} enters this cluster, ${esc(names(C.output))} leaves it.">${nodes}</p>`;
+    const names = (list: readonly string[], verb: string) => list.length ? `${list.join(", ")} ${list.length > 1 ? verb : `${verb}s`}` : `nothing ${verb}s`;
+    const said = `Data path: ${model.dataPath.join(", ")}. ${names(C.input, "enter")} this cluster, ${names(C.output, "leave")} it.`;
+    return `<p class="path" style="--c:${esc(C.cv)}"><span class="vh">${esc(said)}</span><span class="pw" aria-hidden="true">${nodes}</span></p>`;
   }
 
   /** The cluster: the data path, then its rules as ledger rows. */
@@ -70,8 +74,10 @@ export function createBar(ctx: DeckContext): Bar {
     chip.classList.toggle("none", !C);
     chip.style.setProperty("--c", C ? C.cv : "transparent");
     $("#chipText").textContent = C ? C.label : model.flow ? "No cluster lifted" : "No flow";
-    $("#cMeta").textContent = C ? `${plural(model.members.get(C.id)?.length ?? 0, "function")} · steps ${rangesOf(model.plan, C.id)} · ${C.phase}`
+    const meta = C ? `${plural(model.members.get(C.id)?.length ?? 0, "function")} · steps ${rangesOf(model.plan, C.id)} · ${C.phase}`
       : model.flow ? `${plural(N, "step")} in ${plural(model.clusters.length, "cluster")}` : "";
+    // The meta line truncates before the cluster chip, so its title keeps the full text.
+    $("#cMeta").textContent = meta; $("#cMeta").title = meta;
     cDesc.innerHTML = C ? clusterLedger(C) : model.flow && !state.cur && !state.resume ? "Step forward to lift the first cluster onto its deck." : "";
     if (clusterChanged && !document.body.classList.contains("booting")) {
       for (const el of [cExpl, cDesc]) { el.classList.remove("swap"); void el.offsetWidth; el.classList.add("swap"); }

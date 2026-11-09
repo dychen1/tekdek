@@ -86,7 +86,7 @@ export function buildModel(sourceGraph: DeckGraph, flow: DeckFlow | null, source
 
 /** Orders the data models of the clusters so that each model comes after the models that a cluster turns into it.
  *  A model in both the input and the output of one cluster passes through and adds no order. Ties keep the order in
- *  which the clusters first lift. A cycle gives way to the first model that it holds. */
+ *  which the clusters first lift. When only cycles are left, the first model that is on a cycle goes next. */
 export function dataPath(clusters: readonly { input: readonly string[]; output: readonly string[] }[]): string[] {
   const seen = [...new Set(clusters.flatMap(c => [...c.input, ...c.output]))];
   const next = new Map(seen.map(name => [name, new Set<string>()]));
@@ -96,8 +96,20 @@ export function dataPath(clusters: readonly { input: readonly string[]; output: 
   const before = new Map(seen.map(name => [name, 0]));
   for (const tos of next.values()) for (const to of tos) before.set(to, before.get(to)! + 1);
   const left = [...seen], path: string[] = [];
+  /** True when a model reaches itself through models that are still left. */
+  const onCycle = (start: string) => {
+    const stack = [...next.get(start)!], met = new Set<string>();
+    while (stack.length) {
+      const name = stack.pop()!;
+      if (name === start) return true;
+      if (met.has(name) || !left.includes(name)) continue;
+      met.add(name); stack.push(...next.get(name)!);
+    }
+    return false;
+  };
   while (left.length) {
-    const [name] = left.splice(Math.max(0, left.findIndex(n => before.get(n) === 0)), 1);
+    const ready = left.findIndex(n => before.get(n) === 0);
+    const [name] = left.splice(ready >= 0 ? ready : Math.max(0, left.findIndex(onCycle)), 1);
     path.push(name);
     for (const to of next.get(name)!) before.set(to, before.get(to)! - 1);
   }
