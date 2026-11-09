@@ -12,11 +12,11 @@
   Run `tekdek serve` and open the URL that it prints.
 -->
 <script>
-// Apply the saved Tokyo Night variant and shortcut switch before first paint.
+// Apply the saved theme variant and shortcut switch before first paint.
 try {
-  const v = localStorage.getItem('tekdek.deck.variant'); if (v === 'storm' || v === 'moon') document.documentElement.dataset.variant = v;
+  const v = localStorage.getItem('tekdek.deck.variant'); if (v === 'light' || v === 'night') document.documentElement.dataset.variant = v;
   if (localStorage.getItem('tekdek.deck.shortcuts') === 'off') document.documentElement.dataset.shortcuts = 'off';
-} catch (err) { /* storage is blocked: keep Night and the shortcuts */ }
+} catch (err) { /* storage is blocked: keep GitHub Dark and the shortcuts */ }
 </script>
 <link rel="stylesheet" href="./dist/app.css">
 <script type="module" src="./dist/app.js"></script>
@@ -75,9 +75,9 @@ try {
     <div class="kp-theme" role="group" aria-labelledby="kpThemeLbl">
       <span id="kpThemeLbl">theme</span>
       <div class="seg">
-        <button class="seg-b" type="button" data-variant="night" aria-pressed="true">night</button>
-        <button class="seg-b" type="button" data-variant="storm" aria-pressed="false">storm</button>
-        <button class="seg-b" type="button" data-variant="moon" aria-pressed="false">moon</button>
+        <button class="seg-b" type="button" data-variant="github" aria-pressed="true">github</button>
+        <button class="seg-b" type="button" data-variant="light" aria-pressed="false">light</button>
+        <button class="seg-b" type="button" data-variant="night" aria-pressed="false">night</button>
       </div>
     </div>
   </div>

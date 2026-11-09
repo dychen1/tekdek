@@ -9,7 +9,7 @@ import { clamp, esc } from "../layout/util.ts";
 import { icon } from "./markup.ts";
 import { $, pageOrigin, type DeckContext, type Tools } from "./context.ts";
 
-const VARIANTS = ["night", "storm", "moon"];
+const VARIANTS = ["github", "light", "night"];
 const KEY_VARIANT = "tekdek.deck.variant";
 const KEY_SHORTCUTS = "tekdek.deck.shortcuts";
 
@@ -62,12 +62,12 @@ export function createTools(ctx: DeckContext): Tools {
   }, { signal });
 
   // ============ theme variant ============
-  // The variant swaps the palette tokens on the root. Night is the default. The choice is kept for each viewer.
+  // The variant swaps the palette tokens on the root. GitHub Dark is the default. The choice is kept for each viewer.
 
   const varBtns = [...document.querySelectorAll<HTMLElement>(".seg-b[data-variant]")];
   function setVariant(v: string | null, save: boolean) {
-    const name = v && VARIANTS.includes(v) ? v : "night";
-    if (name === "night") delete document.documentElement.dataset.variant; else document.documentElement.dataset.variant = name;
+    const name = v && VARIANTS.includes(v) ? v : "github";
+    if (name === "github") delete document.documentElement.dataset.variant; else document.documentElement.dataset.variant = name;
     varBtns.forEach(b => b.setAttribute("aria-pressed", String(b.dataset.variant === name)));
     if (save) store.set(KEY_VARIANT, name);
   }
