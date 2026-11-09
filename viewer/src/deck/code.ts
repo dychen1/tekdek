@@ -8,7 +8,7 @@ import { displayName } from "../data/adapt.ts";
 import { highlight } from "../layout/highlight.ts";
 import { nearestStep } from "../layout/plan.ts";
 import { callRefs, calleesOf, callersOf, lineSpan, oneLineSignature, otherVisits, sourceNote, transitionFact, whole, type CallRef } from "../layout/step-facts.ts";
-import { clamp, esc, plural } from "../layout/util.ts";
+import { clamp, esc, indentOf, plural } from "../layout/util.ts";
 import { icon, ledgerHtml, md } from "./markup.ts";
 import { $, type CodeColumn, type DeckContext } from "./context.ts";
 
@@ -121,15 +121,22 @@ export function createCode(ctx: DeckContext): CodeColumn {
 
   // ============ code viewer ============
 
+  let marksObserver: ResizeObserver | null = null;
+
   /** Draws the lines of an `ok` source and returns the margin marks that it drew. It lands on the declaration. */
   function renderCode(view: SourceView, lines: readonly string[]): { doc: boolean; sig: boolean } {
     const first = whole(view.firstLine, 1), more = whole(view.more, 0);
     const declIdx = clamp(whole(view.declarationLine, first) - first, 0, lines.length - 1);
     const html = highlight(lines, view.language);
-    const rows = lines.map((_, i) => `<div class="cl${i === declIdx ? " where" : ""}"><span class="no">${first + i}</span><span class="mk"></span><span class="tx">${html[i] || " "}</span></div>`);
+    const rows = lines.map((_, i) => `<div class="cl${i === declIdx ? " where" : ""}"><span class="no">${first + i}</span><span class="mk"></span><span class="tx" style="--ind:${indentOf(lines[i] ?? "")}ch">${html[i] || " "}</span></div>`);
     if (more > 0) rows.push(`<div class="cl end"><span class="no">⋮</span><span class="mk"></span><span class="tx">${plural(more, "more line")} in this function</span></div>`);
     codeEl.innerHTML = `<div class="code-in"><div class="gut"></div>${rows.join("")}</div>`;
     const gut = codeEl.querySelector(".gut")!, els = codeEl.querySelectorAll<HTMLElement>(".cl");
+    // wrapped lines change height with the column width and the wrap switch, so the marks measure again on each resize
+    const placers: (() => void)[] = [];
+    marksObserver?.disconnect();
+    marksObserver = new ResizeObserver(() => placers.forEach(place => place()));
+    marksObserver.observe(codeEl.querySelector(".code-in")!);
     /** Draws one margin mark over a line range. Returns false when the range is not in the lines. */
     const mark = (range: readonly [number, number] | null | undefined, name: "doc" | "signature"): boolean => {
       const span = lineSpan(range, first, lines.length);
@@ -138,8 +145,12 @@ export function createCode(ctx: DeckContext): CodeColumn {
       const a = els[from], b = els[to];
       const m = document.createElement("div");
       m.className = "mark";
-      m.style.top = `${a.offsetTop + 2}px`;
-      m.style.height = `${Math.max(8, b.offsetTop + b.offsetHeight - a.offsetTop - 4)}px`;
+      const place = () => {
+        m.style.top = `${a.offsetTop + 2}px`;
+        m.style.height = `${Math.max(8, b.offsetTop + b.offsetHeight - a.offsetTop - 4)}px`;
+      };
+      place();
+      placers.push(place);
       m.title = `${name}: line${count > 1 ? "s" : ""} ${first + from}${count > 1 ? `–${first + to}` : ""}`;
       m.dataset.mark = name;
       m.innerHTML = `<span>${name === "signature" && count < 3 ? "sig" : name}</span>`;
@@ -216,6 +227,7 @@ export function createCode(ctx: DeckContext): CodeColumn {
   return {
     render,
     destroy() {
+      marksObserver?.disconnect();
       for (const el of [head, stepEl, whereEl, codeEl]) el.replaceChildren();
       stepEl.classList.remove("swap"); codeEl.classList.remove("swap");
       setFold(false);

@@ -3,6 +3,7 @@ import { test } from "node:test";
 
 import type { DiffArtifact, DiffRow, FlowArtifact } from "../src/data/models.ts";
 import { validRow } from "../src/data/load.ts";
+import { indentOf } from "../src/layout/util.ts";
 import { buildDiffModel, movedText, numberLines, slotsOf } from "../src/diff/model.ts";
 
 /** A small frozen flow: each step is `[id, cluster key]`, and each cluster label is its key in capitals. */
@@ -99,4 +100,11 @@ test("a diff row with a kind, count, or line op outside the schema is rejected",
   assert.equal(validRow({ ...row, added: "<img>" as unknown as number }), false);
   assert.equal(validRow({ ...row, baseSpan: { path: "a.rs", start: "<i>" as unknown as number, end: 2 } }), false);
   assert.equal(validRow({ ...row, lines: [{ op: "<s>" as "added", text: "" }] }), false);
+});
+
+test("the indent of a code line counts spaces and tab stops of 8", () => {
+  assert.equal(indentOf("    let a = 1;"), 4);
+  assert.equal(indentOf("\tx"), 8);
+  assert.equal(indentOf("  \tx"), 8);
+  assert.equal(indentOf("x"), 0);
 });

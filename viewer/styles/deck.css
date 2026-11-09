@@ -456,6 +456,13 @@ button.ref:hover{text-decoration:underline;text-underline-offset:3px}
 .cl .no{left:0;color:var(--quiet);text-align:right;user-select:none}
 .cl .mk{left:40px}
 .cl .tx{padding:0 12px 0 10px;color:var(--ink)}
+/* Line wrap is on unless the root says off: long lines break inside the text column, and the line number stays on the first row. */
+:root:not([data-wrap="off"]) .code-in{min-width:0}
+:root:not([data-wrap="off"]) .cl{grid-template-columns:40px 18px minmax(0,1fr)}
+:root:not([data-wrap="off"]) .cl .tx{white-space:pre-wrap;overflow-wrap:anywhere;
+  padding-left:calc(10px + var(--ind, 0ch) + 2ch);text-indent:calc(-1 * (var(--ind, 0ch) + 2ch))}
+#wrapBtn{margin-left:auto}
+#wrapBtn[aria-pressed="true"]{color:var(--accent)}
 .cl.where,.cl.where .no,.cl.where .mk{background:var(--surface-where)}
 /* the current line lifts its quiet text: --quiet is under 4.5:1 on the line highlight */
 .cl.where .no{color:var(--ink)}

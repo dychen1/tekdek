@@ -9,7 +9,7 @@ import type { CodeView } from "../deck/context.ts";
 import { whereHtml } from "../deck/code.ts";
 import { ledgerHtml, md } from "../deck/markup.ts";
 import { highlight } from "../layout/highlight.ts";
-import { clamp, esc, plural } from "../layout/util.ts";
+import { clamp, esc, indentOf, plural } from "../layout/util.ts";
 import { buildDiffModel, KINDS, movedText, numberLines, slotsOf, type Counted, type OverviewRow, type Side, type SideStep, type Slot } from "./model.ts";
 
 export interface DiffView {
@@ -329,7 +329,7 @@ export function createDiffView(diff: DiffArtifact, go: (step: number) => void): 
     const first = lines.findIndex(l => l.op !== "context");
     const body = lines.map((l, i) => {
       const op = l.op === "added" ? " ad" : l.op === "removed" ? " rm" : "";
-      return `<div class="cl${op}"${i === first ? " data-land" : ""}><span class="no">${l.no ?? ""}</span><span class="mk">${l.op === "added" ? "+" : l.op === "removed" ? "−" : ""}</span><span class="tx">${html[i] || " "}</span></div>`;
+      return `<div class="cl${op}"${i === first ? " data-land" : ""}><span class="no">${l.no ?? ""}</span><span class="mk">${l.op === "added" ? "+" : l.op === "removed" ? "−" : ""}</span><span class="tx" style="--ind:${indentOf(l.text)}ch">${html[i] || " "}</span></div>`;
     }).join("");
     const counts = row.added || row.removed ? `<span class="dstat">${delta(row.added, row.removed).replace(/tspan/g, "span")}</span>` : "";
     const text = movedText(row);

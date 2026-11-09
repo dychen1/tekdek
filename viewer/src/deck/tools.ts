@@ -2,7 +2,7 @@
    theme switch, the map pan, full screen code, the shortcut switch, and the top band layout. `main.ts` owns the flow
    badge in the top band.
    # Sections
-   key popover, theme variant, map tools, full screen, shortcuts, top band */
+   key popover, theme variant, map tools, full screen, shortcuts, line wrap, top band */
 import { ZOOM_MAX, ZOOM_MIN } from "../layout/deck-geometry.ts";
 import { rangesOf } from "../layout/plan.ts";
 import { clamp, esc } from "../layout/util.ts";
@@ -12,6 +12,7 @@ import { $, pageOrigin, type DeckContext, type Tools } from "./context.ts";
 const VARIANTS = ["github", "light", "night"];
 const KEY_VARIANT = "tekdek.deck.variant";
 const KEY_SHORTCUTS = "tekdek.deck.shortcuts";
+const KEY_WRAP = "tekdek.deck.wrap";
 
 /** Per-viewer conveniences. The inline script in `index.html` reads them onto the root before first paint, and every
  *  deck starts from the root, so blocked storage keeps the choice of this page. */
@@ -214,6 +215,18 @@ export function createTools(ctx: DeckContext): Tools {
   }
   keyBtns.forEach(b => b.addEventListener("click", () => setShortcuts(b.dataset.shortcuts === "on", true), { signal }));
   setShortcuts(document.documentElement.dataset.shortcuts !== "off", false);
+
+  // ============ line wrap ============
+  // The code viewer wraps long lines unless the root flag says off. The choice is kept for each viewer.
+
+  const wrapBtn = $("#wrapBtn");
+  function setWrap(on: boolean, save: boolean) {
+    if (on) delete document.documentElement.dataset.wrap; else document.documentElement.dataset.wrap = "off";
+    wrapBtn.setAttribute("aria-pressed", String(on));
+    if (save) store.set(KEY_WRAP, on ? "on" : "off");
+  }
+  wrapBtn.addEventListener("click", () => setWrap(document.documentElement.dataset.wrap === "off", true), { signal });
+  setWrap(document.documentElement.dataset.wrap !== "off", false);
 
   // ============ top band ============
 

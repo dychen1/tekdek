@@ -12,10 +12,11 @@
   Run `tekdek serve` and open the URL that it prints.
 -->
 <script>
-// Apply the saved theme variant and shortcut switch before first paint.
+// Apply the saved theme variant, shortcut switch, and line wrap before first paint.
 try {
   const v = localStorage.getItem('tekdek.deck.variant'); if (v === 'light' || v === 'night') document.documentElement.dataset.variant = v;
   if (localStorage.getItem('tekdek.deck.shortcuts') === 'off') document.documentElement.dataset.shortcuts = 'off';
+  if (localStorage.getItem('tekdek.deck.wrap') === 'off') document.documentElement.dataset.wrap = 'off';
 } catch (err) { /* storage is blocked: keep GitHub Dark and the shortcuts */ }
 </script>
 <link rel="stylesheet" href="./dist/app.css">
@@ -32,6 +33,7 @@ try {
   <symbol id="i-left" viewBox="0 0 16 16"><path d="M12.5 8h-9M7 4.5L3.5 8 7 11.5"/></symbol>
   <symbol id="i-right" viewBox="0 0 16 16"><path d="M3.5 8h9M9 4.5l3.5 3.5L9 11.5"/></symbol>
   <symbol id="i-ptr" viewBox="0 0 16 16"><path d="M6 3.5l4.5 4.5L6 12.5"/></symbol>
+  <symbol id="i-wrap" viewBox="0 0 16 16"><path d="M2.5 4h11M2.5 8h9a2 2 0 0 1 0 4H8M9.5 10.5 8 12l1.5 1.5M2.5 12h3"/></symbol>
   <symbol id="i-full" viewBox="0 0 16 16"><path d="M3 6.5V3h3.5M9.5 3H13v3.5M13 9.5V13H9.5M6.5 13H3V9.5"/></symbol>
   <symbol id="i-exit" viewBox="0 0 16 16"><path d="M6.5 3v3.5H3M13 6.5H9.5V3M9.5 13V9.5H13M3 9.5h3.5V13"/></symbol>
 </svg>
@@ -91,6 +93,7 @@ try {
     <button class="cbtn quiet foldbtn" id="foldBtn" type="button" aria-controls="cdStep" aria-expanded="true" title="Hide the step details" aria-label="Hide the step details" hidden><svg class="ic" aria-hidden="true"><use href="#i-chev"/></svg></button></div>
   <div class="cd-step" id="cdStep"></div>
   <header class="reader-head" id="codeHead"><div class="cw-path" id="where" title="Where the current step lives"></div>
+    <button class="cbtn quiet fsbtn" id="wrapBtn" type="button" aria-pressed="true" title="Wrap long lines" aria-label="Wrap long lines"><svg class="ic" aria-hidden="true"><use href="#i-wrap"/></svg></button>
     <button class="cbtn quiet fsbtn" id="fullBtn" type="button" aria-pressed="false" title="Full screen (f)" aria-label="Full screen (f)"><svg class="ic" aria-hidden="true"><use href="#i-full"/></svg></button></header>
   <div class="code" id="code" tabindex="0" aria-label="Source of the current function"></div>
 </section>
