@@ -1,6 +1,6 @@
 /* ==========================================================================
    Deck and code column. The explorer, the current file's box, the pinned cluster deck at a straight pitch,
-   the code column, and the bottom bar. One monospace family, Tokyo Night colors.
+   the code column, and the bottom bar. One monospace family. GitHub Dark is the default palette; night (Tokyo Night) and light swap it.
    # Sections
    fonts, tokens, base, canvas frame, file box, deck, lifted boxes, connectors, sidebar,
    shared controls, map tools and pickers, top band, code column, bottom bar,
@@ -12,14 +12,14 @@
 @font-face{font-family:"JetBrains Mono";font-style:normal;font-weight:700;font-display:block;src:url(../fonts/jetbrains-mono-latin-700.woff2) format("woff2")}
 
 /* ============ tokens ============ */
-/* The --tn-* palette holds the raw Tokyo Night colors. Every other token derives from it,
-   so a variant swaps the palette only. */
+/* The --tn-* palette holds the raw colors: GitHub Dark by default. Every other token derives from it,
+   so a variant swaps the palette. */
 :root{
-  --tn-bg:#1a1b26; --tn-pane:#16161e; --tn-raised:#1f2335;
-  --tn-sel:#283457; --tn-sel-2:#2e3c64; --tn-border:#29354f; --tn-border-2:#3b4261;
-  --tn-fg:#c0caf5; --tn-fg-dark:#a9b1d6; --tn-dim:#8d95bc; --tn-comment:#565f89; --tn-comment-text:#8088af; --tn-black:#0c0e14;
-  --tn-blue:#7aa2f7; --tn-cyan:#7dcfff; --tn-green:#9ece6a; --tn-yellow:#e0af68;
-  --tn-orange:#ff9e64; --tn-red:#f7768e; --tn-magenta:#bb9af7; --tn-purple:#9d7cd8;
+  --tn-bg:#0d1117; --tn-pane:#010409; --tn-raised:#161b22;
+  --tn-sel:#1c2d45; --tn-sel-2:#264166; --tn-border:#21262d; --tn-border-2:#30363d;
+  --tn-fg:#e6edf3; --tn-fg-dark:#c9d1d9; --tn-dim:#9198a1; --tn-comment:#6e7681; --tn-comment-text:#8b949e; --tn-black:#010409;
+  --tn-blue:#58a6ff; --tn-cyan:#39c5cf; --tn-green:#3fb950; --tn-yellow:#d29922;
+  --tn-orange:#f0883e; --tn-red:#f85149; --tn-magenta:#d2a8ff; --tn-purple:#a371f7;
 
   --bg:var(--tn-bg);
   --ink:var(--tn-fg); --ink-2:var(--tn-fg-dark); --dim:var(--tn-dim);
@@ -80,10 +80,28 @@
   --frame-l:calc(var(--sb) + 16px);
   --frame-r:calc(var(--rc) + var(--gap) + 16px);
 }
-:root[data-variant="storm"]{--tn-bg:#24283b; --tn-pane:#1f2335; --tn-raised:#292e42; --tn-dim:#979ec6; --tn-comment-text:#8d95b8}
-/* Moon keeps the Night selection: its own #2d3f76 puts dim text on a hover row under 4.5:1. */
-:root[data-variant="moon"]{--tn-bg:#222436; --tn-pane:#1e2030; --tn-raised:#2f334d; --tn-dim:#959ed0; --tn-comment:#636da6; --tn-comment-text:#8890bb;
-  --tn-fg:#c8d3f5; --tn-blue:#82aaff; --tn-cyan:#86e1fc; --tn-red:#ff757f; --tn-yellow:#ffc777; --tn-orange:#ff966c; --tn-magenta:#c099ff; --tn-green:#c3e88d; --tn-purple:#fca7ea}
+:root{color-scheme:dark}
+:root[data-variant="night"]{--tn-bg:#1a1b26; --tn-pane:#16161e; --tn-raised:#1f2335;
+  --tn-sel:#283457; --tn-sel-2:#2e3c64; --tn-border:#29354f; --tn-border-2:#3b4261;
+  --tn-fg:#c0caf5; --tn-fg-dark:#a9b1d6; --tn-dim:#8d95bc; --tn-comment:#565f89; --tn-comment-text:#8088af; --tn-black:#0c0e14;
+  --tn-blue:#7aa2f7; --tn-cyan:#7dcfff; --tn-green:#9ece6a; --tn-yellow:#e0af68;
+  --tn-orange:#ff9e64; --tn-red:#f7768e; --tn-magenta:#bb9af7; --tn-purple:#9d7cd8}
+/* Light inverts the depth cues: the shadows and the box faces use soft gray, not the dark palette mix. */
+:root[data-variant="light"]{color-scheme:light;
+  --tn-bg:#f6f8fa; --tn-pane:#ffffff; --tn-raised:#ffffff;
+  --tn-sel:#ddf4ff; --tn-sel-2:#b6e3ff; --tn-border:#d1d9e0; --tn-border-2:#afb8c1;
+  --tn-fg:#1f2328; --tn-fg-dark:#31363c; --tn-dim:#59636e; --tn-comment:#818b98; --tn-comment-text:#59636e; --tn-black:#6e7781;
+  --tn-blue:#0969da; --tn-cyan:#1b7c83; --tn-green:#1a7f37; --tn-yellow:#9a6700;
+  --tn-orange:#bc4c00; --tn-red:#cf222e; --tn-magenta:#8250df; --tn-purple:#a0469b;
+  --on-accent:#ffffff;
+  --card-face:linear-gradient(180deg,#ffffff 0%,#f3f5f7 100%);
+  --shade:color-mix(in srgb,#1f2328 16%,transparent);
+  --surface-recess:color-mix(in srgb,#1f2328 8%,transparent);
+  --face-light:inset 1px 1px 0 #ffffff,inset -1px -1px 0 color-mix(in srgb,#1f2328 12%,transparent);
+  --face-light-hot:inset 1px 1px 0 #ffffff,inset -1px -1px 0 color-mix(in srgb,#1f2328 20%,transparent);
+  --slot-recess:inset 1px 2px 4px color-mix(in srgb,#1f2328 14%,transparent);
+  --badge-shadow:0 2px 5px color-mix(in srgb,#1f2328 18%,transparent);
+  --key-lift-shadow:0 5px 6px color-mix(in srgb,#1f2328 22%,transparent)}
 /* a small window gives the map 40 px of the code column, so the widest decks start at 75% */
 @media (max-width:1300px){:root{--sb:228px; --rc:max(400px,calc(36vw - 40px))}}
 
