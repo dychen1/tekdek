@@ -113,6 +113,39 @@ pub fn remove_worktree(directory: &Path, path: &Path) -> Result<(), DiffError> {
     git(directory, &["worktree", "remove", "--force", &path]).map(drop)
 }
 
+/// Returns the git folder that all worktrees of the repository share.
+///
+/// # Errors
+/// Returns an error when `directory` is not in a git work tree.
+pub fn common_dir(directory: &Path) -> Result<PathBuf, DiffError> {
+    let path = PathBuf::from(git_line(directory, &["rev-parse", "--git-common-dir"])?);
+    Ok(if path.is_absolute() {
+        path
+    } else {
+        directory.join(path)
+    })
+}
+
+/// True when the repository lists `path` as one of its worktrees.
+///
+/// # Errors
+/// Returns an error when git cannot list the worktrees.
+pub fn is_worktree(directory: &Path, path: &Path) -> Result<bool, DiffError> {
+    let listing = String::from_utf8_lossy(&git(directory, &["worktree", "list", "--porcelain"])?)
+        .into_owned();
+    let wanted = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    Ok(listing
+        .lines()
+        .filter_map(|line| line.strip_prefix("worktree "))
+        .any(|listed| {
+            let listed = Path::new(listed);
+            listed
+                .canonicalize()
+                .unwrap_or_else(|_| listed.to_path_buf())
+                == wanted
+        }))
+}
+
 /// Returns the top folder of the work tree that holds `directory`.
 ///
 /// # Errors

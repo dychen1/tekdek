@@ -24,7 +24,7 @@ pub mod models;
 use std::{
     cell::RefCell,
     collections::{BTreeMap, BTreeSet},
-    env, fmt, fs, io,
+    fmt, fs, io,
     path::{Path, PathBuf},
 };
 
@@ -46,7 +46,7 @@ use crate::{
         models::{Author, FlowArtifact, FlowId, Provenance, Sha256Digest},
         validate::check_author,
     },
-    store::{atomic_write, digest_of, graph::read_graph, lock_store, read_bytes},
+    store::{atomic_write, graph::read_graph, lock_store, read_bytes},
 };
 
 /// The JSON Schema of the agent diff document.
@@ -86,8 +86,8 @@ pub type Indexer<'a> = dyn Fn(&Path, &str) -> Result<(), String> + 'a;
 
 /// Checks out the base commit in a worktree, indexes it, and lists the flows that fit it.
 ///
-/// The worktree is in the temporary folder, so the project graph does not
-/// change. An existing worktree for the same commit is used again. The base
+/// The worktree is in the git folder of the repository, so the project graph
+/// does not change. An existing worktree for the same commit is used again. The base
 /// graph gets the file name of the project graph.
 ///
 /// # Errors
@@ -105,6 +105,12 @@ pub fn prepare(
     let head_commit = git::commit(&root, "HEAD")?;
     let (worktree, base_root) = base_paths(&root, &base_commit)?;
     if worktree.exists() {
+        if !git::is_worktree(&root, &worktree)? {
+            return Err(DiffError::Git(format!(
+                "{} is not a worktree of this repository: remove it",
+                worktree.display()
+            )));
+        }
         if git::commit(&worktree, "HEAD")? != base_commit {
             return Err(DiffError::Git(format!(
                 "{} holds another commit: remove it",
@@ -157,15 +163,13 @@ fn fits(flow: &FlowArtifact, graph: &crate::store::graph::ArtifactGraph) -> bool
 }
 
 /// Returns the base worktree and the project folder inside it for one commit.
+///
+/// The worktree is in the git folder of the repository: only the repository
+/// owner can write there, and no index of the project reads it.
 fn base_paths(root: &Path, commit: &str) -> Result<(PathBuf, PathBuf), DiffError> {
-    let project = digest_of(root.to_string_lossy().as_bytes());
-    let short = |text: &str, count: usize| text.chars().rev().take(count).collect::<String>();
-    let name = format!(
-        "tekdek-diff-{}-{}",
-        short(&project, 8),
-        &commit[..commit.len().min(12)]
-    );
-    let worktree = env::temp_dir().join(name);
+    let worktree = git::common_dir(root)?
+        .join("tekdek-diff")
+        .join(&commit[..commit.len().min(12)]);
     let base_root = worktree.join(git::prefix(root)?);
     Ok((worktree, base_root))
 }
@@ -445,6 +449,43 @@ fn check_artifact(artifact: &DiffArtifact, read: &Reader<'_>) -> Vec<DiffIssue> 
             issue(path, "the flow digests do not match the flow".to_owned());
         }
     }
+    issues.extend(check_references(artifact));
+    let (before, after) = (&artifact.base.flow, &artifact.head.flow);
+    let mut issue = |path: &str, message: String| {
+        issues.push(DiffIssue {
+            path: path.to_owned(),
+            message,
+        });
+    };
+    let spans: Vec<_> = artifact
+        .rows
+        .iter()
+        .map(|row| (row.base_span.clone(), row.head_span.clone()))
+        .collect();
+    let rows = rederive_rows(before, after, &artifact.pairs, &spans, read);
+    if rows.len() != artifact.rows.len() {
+        issue("/rows", format!("expected {} rows", rows.len()));
+    }
+    for (index, (stored, derived)) in artifact.rows.iter().zip(&rows).enumerate() {
+        if stored != derived {
+            issue(
+                &format!("/rows/{index}"),
+                "the row does not match git: the commits or the flows changed".to_owned(),
+            );
+        }
+    }
+    issues
+}
+
+/// Returns every pair, note, and span that does not name a step, cluster, or file of the two flows.
+fn check_references(artifact: &DiffArtifact) -> Vec<DiffIssue> {
+    let mut issues = Vec::new();
+    let mut issue = |path: &str, message: String| {
+        issues.push(DiffIssue {
+            path: path.to_owned(),
+            message,
+        });
+    };
     let (before, after) = (&artifact.base.flow, &artifact.head.flow);
     let ids = |flow: &FlowArtifact| -> BTreeSet<String> {
         flow.intent
@@ -487,21 +528,35 @@ fn check_artifact(artifact: &DiffArtifact, read: &Reader<'_>) -> Vec<DiffIssue> 
             );
         }
     }
-    let spans: Vec<_> = artifact
-        .rows
-        .iter()
-        .map(|row| (row.base_span.clone(), row.head_span.clone()))
-        .collect();
-    let rows = rederive_rows(before, after, &artifact.pairs, &spans, read);
-    if rows.len() != artifact.rows.len() {
-        issue("/rows", format!("expected {} rows", rows.len()));
-    }
-    for (index, (stored, derived)) in artifact.rows.iter().zip(&rows).enumerate() {
-        if stored != derived {
-            issue(
-                &format!("/rows/{index}"),
-                "the row does not match git: the commits or the flows changed".to_owned(),
-            );
+    for (index, row) in artifact.rows.iter().enumerate() {
+        let path = |id: &Option<crate::flow::models::StepId>, flow: &FlowArtifact| {
+            let step = flow
+                .intent
+                .steps
+                .iter()
+                .find(|step| Some(&step.id) == id.as_ref())?;
+            let node = flow
+                .facts
+                .nodes
+                .iter()
+                .find(|node| node.key == step.node_key)?;
+            Some(node.path.clone())
+        };
+        // A span lies in the file of its own step, or of the other step for a new or removed step.
+        let base = path(&row.before_step, before).or_else(|| path(&row.after_step, after));
+        let head = path(&row.after_step, after).or_else(|| path(&row.before_step, before));
+        for (name, span, expected) in [
+            ("baseSpan", &row.base_span, base),
+            ("headSpan", &row.head_span, head),
+        ] {
+            if let Some(span) = span
+                && Some(&span.path) != expected.as_ref()
+            {
+                issue(
+                    &format!("/rows/{index}/{name}"),
+                    "the span is not in the file of its step".to_owned(),
+                );
+            }
         }
     }
     issues
@@ -677,5 +732,110 @@ impl From<serde_json::Error> for DiffError {
 impl From<io::Error> for DiffError {
     fn from(error: io::Error) -> Self {
         Self::Io(error)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::flow::{fixtures, models::Author};
+
+    /// Builds a valid diff of the fixture flow with itself, where the first step's function changed.
+    fn artifact(read: &Reader<'_>) -> DiffArtifact {
+        let store = fixtures::store();
+        fixtures::frozen(fixtures::import(store.path(), "demo", &fixtures::output()));
+        let flow = fixtures::current(store.path(), "demo");
+        let pairs: Vec<StepPair> = flow
+            .intent
+            .steps
+            .iter()
+            .map(|step| StepPair {
+                before: step.id.clone(),
+                after: step.id.clone(),
+            })
+            .collect();
+        let spans: Vec<_> = flow
+            .intent
+            .steps
+            .iter()
+            .map(|step| {
+                let node = flow
+                    .facts
+                    .nodes
+                    .iter()
+                    .find(|node| node.key == step.node_key);
+                let span = node.map(|node| models::LineSpan {
+                    path: node.path.clone(),
+                    start: 1,
+                    end: 2,
+                });
+                (span.clone(), span)
+            })
+            .collect();
+        let rows = rederive_rows(&flow, &flow, &pairs, &spans, read);
+        let mut artifact = DiffArtifact {
+            kind: DiffKind::Diff,
+            schema_version: DIFF_ARTIFACT_SCHEMA_VERSION,
+            name: FlowId::try_from("demo-diff").expect("name"),
+            base: DiffSide {
+                commit: "a".repeat(40),
+                flow: flow.clone(),
+            },
+            head: DiffSide {
+                commit: "b".repeat(40),
+                flow,
+            },
+            pairs,
+            notes: Vec::new(),
+            rows,
+            digest: Sha256Digest::of_bytes(b""),
+            provenance: Provenance {
+                frozen_at: "2026-11-08T00:00:00Z".to_owned(),
+                cli_version: "0.0.0".to_owned(),
+                author: Author::System,
+            },
+        };
+        artifact.digest = body_digest(&artifact).expect("digest");
+        artifact
+    }
+
+    #[expect(
+        clippy::unnecessary_wraps,
+        reason = "a reader returns None for a missing file"
+    )]
+    fn read(side: Side, _: &str) -> Option<String> {
+        Some(match side {
+            Side::Before => "fn main() {\n    old();\n}\n".to_owned(),
+            Side::After => "fn main() {\n    new();\n}\n".to_owned(),
+        })
+    }
+
+    #[test]
+    fn a_diff_checks_clean_against_the_commits_it_came_from() {
+        let artifact = artifact(&read);
+        assert_eq!(check_artifact(&artifact, &read), []);
+        assert_eq!(artifact.rows[0].kind, models::ChangeKind::Changed);
+    }
+
+    #[test]
+    fn a_changed_count_or_changed_commit_text_fails_the_check() {
+        let mut tampered = artifact(&read);
+        tampered.rows[0].added = 9;
+        let paths: Vec<_> = check_artifact(&tampered, &read)
+            .into_iter()
+            .map(|issue| issue.path)
+            .collect();
+        assert_eq!(paths, ["/digest", "/rows/0"]);
+
+        let mut moved = artifact(&read);
+        moved.rows[0].head_span.as_mut().expect("span").path = "src/other.rs".to_owned();
+        let paths: Vec<_> = check_artifact(&moved, &read)
+            .into_iter()
+            .map(|issue| issue.path)
+            .collect();
+        assert!(paths.contains(&"/rows/0/headSpan".to_owned()), "{paths:?}");
+
+        let other = |_: Side, _: &str| Some("fn main() {}\n".to_owned());
+        assert_ne!(check_artifact(&artifact(&read), &other), []);
     }
 }

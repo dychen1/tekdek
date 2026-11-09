@@ -28,7 +28,8 @@ pub(super) const USAGE: &str = "usage: tekdek diff <command> [--store <directory
   show <name>
   list
   agent-contract
-prepare checks out the base commit in a temporary worktree, indexes it, and
+prepare checks out the base commit in a worktree in the git folder, indexes it,
+and
 lists the flows that fit the base. The default base is the merge-base of HEAD
 and the default branch. Pass --store <base store> to graph and flow commands to
 read or write the base. import checks the agent diff document and freezes the
