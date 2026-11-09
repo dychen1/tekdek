@@ -14,7 +14,7 @@
 
 ## Install
 
-Install the plugin in your coding agent. It adds the `flow` and `flow-view` skills, and its launcher downloads the `tekdek` binary of the plugin version on the first run, so no other install is needed.
+Install the plugin in your coding agent. It adds the `flow`, `flow-view`, and `diff` skills, and its launcher downloads the `tekdek` binary of the plugin version on the first run, so no other install is needed.
 
 - Claude Code:
 
@@ -97,6 +97,7 @@ Press the right arrow to start the flow. Press `?` to show the key.
 1. Index the project: run `tekdek index` in the project root. It parses the source, so it takes seconds or less.
 2. Ask a coding agent for a flow, for example `/tekdek:flow explain how a request is authenticated`. The agent finds node keys with `tekdek graph search` and `tekdek graph show`, writes an output document with clusters, checks it with `tekdek flow import --check`, and freezes it with `tekdek flow import`.
 3. View the flow with `/tekdek:flow-view request-auth` or `tekdek serve --flow request-auth --open`.
+4. On a PR branch, ask for a diff only when you need one, for example `/tekdek:diff request-auth`. See [PR Diffs](#pr-diffs).
 
 Every command uses the nearest `.tekdek` folder from the working directory. The search stops at the top folder of the Git work tree, and it does not go up into your home folder. Pass `--store <directory>` to use another store.
 
@@ -142,6 +143,16 @@ The agent names 1 to 8 clusters for the phases of a flow and labels each step wi
 - `flow import` validates the complete output and freezes one generation. On any error, it prints every issue and writes no flow. `--check` runs the complete import and writes no flow. Both can add the edges of the step nodes to the semantic cache (see [Semantic Edges](#semantic-edges)).
 - A new name freezes an `initial` generation. An existing name freezes a `revision` with a diff against its parent, on the graph of the parent.
 - `flow verify` recomputes the derived layers and digests. An edited generation fails with `digest_mismatch`.
+
+## PR Diffs
+
+A diff shows what a pull request changed in one behavior. A flow import never makes a diff: the `diff` skill makes one when a user asks.
+
+- `diff prepare` checks out the base commit in a worktree in the git folder and indexes it. The default base is the merge-base of `HEAD` and the default branch. It lists the flows whose every step function is unchanged on the base.
+- The agent uses a flow that fits the base, or writes a Before flow in the base store (`--store <base store>`). It writes an After flow on the head graph. Then it writes one document: the pairs of Before and After steps by step number, and one note per changed cluster. `diff agent-contract` prints its JSON Schema.
+- `diff import` checks the document and freezes `diffs/<name>.json`. The diff holds both flows, both commits, the pairs, the notes, and one row for each step. Code derives each row from git: the kind (`new`, `removed`, `changed`, `moved` to another file, or `unchanged`), the line span on each commit, and the line diff of the function. The counts come from that line diff. Clusters are not compared. The freeze removes the base worktree.
+- `diff verify` reads the two commits from git and derives every row again. It reports `unverifiable` when git no longer has a commit.
+- `tekdek serve --diff <name>` opens the diff: the Before and After flows side by side, then the deck on the After flow with the diff of each step.
 
 ## Semantic Edges
 
@@ -202,20 +213,28 @@ tekdek flow import <name> --graph <file> --input <path or -> [--check] [--config
 tekdek flow verify <name> [--config <path>]
 tekdek flow agent-contract
 
-tekdek serve [--store <directory>] [--port <n>] [--flow <name>] [--open] [--no-index]
+tekdek diff prepare [--base <commit or branch>]
+tekdek diff import <name> --base <commit or branch> --before <flow> --after <flow>
+  --input <path or -> [--check] [--author agent|human|system] [--author-name <name>] [--model-id <id>]
+tekdek diff verify <name>
+tekdek diff show <name>
+tekdek diff list
+tekdek diff agent-contract
+
+tekdek serve [--store <directory>] [--port <n>] [--flow <name> | --diff <name>] [--open] [--no-index]
 tekdek doctor [<root>] [--config <path>] [--json]
 tekdek help
 tekdek version
 ```
 
-The `graph` and `flow` commands accept `--store <directory>` and `--json`. `--graph` takes a file name inside the store. Write `--option=value` for a value that starts with a hyphen.
+The `graph`, `flow`, and `diff` commands accept `--store <directory>` and `--json`. `--graph` takes a file name inside the store. Write `--option=value` for a value that starts with a hyphen.
 
 Every command uses the same exit codes:
 
 | Code | Meaning |
 | --- | --- |
 | 0 | The command succeeded. |
-| 1 | A check found a problem: `flow verify` found an issue, `flow import` got a `no_flow` answer, or `doctor` found a needed server that is missing or broken. |
+| 1 | A check found a problem: `flow verify` or `diff verify` found an issue, `flow import` got a `no_flow` answer, or `doctor` found a needed server that is missing or broken. |
 | 2 | An error: an invalid command line, a missing store or graph, a rejected agent output, a failed analysis, or a failed language server. |
 
 With `--json`, the result or the error is one JSON document on standard output. Without it, results go to standard output and errors go to standard error.
@@ -228,7 +247,8 @@ With `--json`, the result or the error is one JSON document on standard output. 
 | `flow list` | Lists the current generation of each flow, with its freshness. |
 | `flow import` | `--author-name` alone records an agent author. Gets the edges of the step nodes first. |
 | `flow verify` | Recomputes the derived layers and digests of the current generation. Gets the edges of the step nodes first, unless the flow is stale. |
-| `serve` | Serves on `127.0.0.1:8000` by default. Port 0 selects a free port. `--flow` prints the URL of one flow, and `--open` opens it. |
+| `diff import` | The Before flow comes from the base store, or else from this store. The After flow must be fresh. A function whose file has uncommitted changes is rejected. |
+| `serve` | Serves on `127.0.0.1:8000` by default. Port 0 selects a free port. `--flow` prints the URL of one flow, `--diff` the URL of one diff, and `--open` opens it. |
 | `doctor` | With a root, checks only the languages of the root. Statuses: `ok`, `broken`, `missing`, `disabled`, and `not used`. |
 
 ## Configuration
@@ -262,7 +282,7 @@ cachePriming.enable = false
 |-- src/
 |   |-- main.rs                # Binary entry
 |   |-- lib.rs                 # Library modules
-|   |-- cli/                   # Command routing and the index, graph, flow, serve, and doctor commands
+|   |-- cli/                   # Command routing and the index, graph, flow, diff, serve, and doctor commands
 |   |-- analysis/              # Indexer: pipeline, semantic resolver, preflight, program lookup, configuration, sources
 |   |   |-- fact/              # Syntax and semantic fact models
 |   |   |-- graph/             # Graph models and construction
@@ -271,7 +291,8 @@ cachePriming.enable = false
 |   |-- store/                 # Store folder, project store, atomic writes, graph artifact, semantic cache
 |   |-- flow/                  # Frozen flows: models, import, verify, lineage, rules
 |   |   `-- schema/            # Agent output and flow artifact JSON Schemas
-|   |-- catalog.rs             # Catalog of graphs and flows for the viewer
+|   |-- diff/                  # PR diffs: base worktree, pairs and notes, line diff, freeze, verify
+|   |-- catalog.rs             # Catalog of graphs, flows, and diffs for the viewer
 |   |-- query.rs               # Graph search and node neighbors for agents
 |   |-- semantic.rs            # Semantic edges on demand; semantic/daemon.rs keeps the servers warm
 |   |-- serve.rs               # Viewer server with the embedded viewer
@@ -286,7 +307,7 @@ cachePriming.enable = false
 |   `-- tests/                 # Viewer tests
 |-- demo/                      # Demo store: this repository's graph and one flow
 |-- .claude-plugin/            # Plugin marketplace for Claude Code and Codex
-|-- plugin/                    # Plugin: the flow and flow-view skills, and the bin/tekdek launcher
+|-- plugin/                    # Plugin: the flow, flow-view, and diff skills, and the bin/tekdek launcher
 `-- .github/                   # CI and release workflows, and the release build setup steps
 ```
 
@@ -305,7 +326,7 @@ Every Cargo build runs `build.rs`, which bundles `viewer/src` with esbuild. A bu
 
 The CI workflow runs `make check` on every pull request and every push to `main`.
 
-1. Set the new version in `Cargo.toml`, `plugin/.claude-plugin/plugin.json`, and the "needs tekdek X or later" line of both skills. Tests fail when they differ.
+1. Set the new version in `Cargo.toml`, `plugin/.claude-plugin/plugin.json`, and the "needs tekdek X or later" line of every skill. Tests fail when they differ.
 2. Merge the change to `main`, and wait until its CI run passes.
 3. Tag that commit and push the tag: `git tag v0.2.0 && git push origin v0.2.0`.
 4. Wait until the release workflow succeeds and the release has its archives and installers.
