@@ -1,12 +1,12 @@
 /* Deck bar. This module owns the bottom bar: the back, forward, and clear buttons, the step counter, the cluster
-   explainer (the chip, the size and step ranges, the description), and the step strip with its tips.
+   explainer (the chip, the size and step ranges, the data path, the rules), and the step strip with its tips.
    The bar keeps one fixed size in each state.
    # Sections
    step strip, explainer, buttons */
 import { nextStep, type ClusterView } from "../layout/model.ts";
 import { rangesOf } from "../layout/plan.ts";
 import { clamp, esc, f1, plural } from "../layout/util.ts";
-import { chip as idChip, ledgerRows } from "./markup.ts";
+import { ledgerRows } from "./markup.ts";
 import { $, pageOrigin, type Bar, type DeckContext } from "./context.ts";
 
 export function createBar(ctx: DeckContext): Bar {
@@ -45,11 +45,27 @@ export function createBar(ctx: DeckContext): Bar {
 
   // ============ explainer ============
 
-  /** The cluster as ledger rows: its phase with the data models that enter and leave, then its rules. */
+  /** The data path of the flow: the models that enter the cluster wear its color, the models that leave also take a fill,
+   *  and the rest stay quiet. Every model is a type, so the path drops the kind mark. The arrows show data order only.
+   *  A screen reader gets one sentence instead of the drawn path. */
+  function pathRow(C: ClusterView): string {
+    if (!model.dataPath.length) return "";
+    const title = (name: string) => {
+      const enters = C.input.includes(name), leaves = C.output.includes(name);
+      return enters && leaves ? "Enters and leaves this cluster" : enters ? "Enters this cluster" : leaves ? "Leaves this cluster" : "";
+    };
+    const nodes = model.dataPath.map((name, i) => {
+      const t = title(name), role = C.output.includes(name) ? " out" : t ? " in" : "";
+      return `${i ? '<span class="arr">→</span>' : ""}<span class="pn${role}"${t ? ` title="${t}"` : ""}>${esc(name)}</span>`;
+    }).join("");
+    const names = (list: readonly string[], verb: string) => list.length ? `${list.join(", ")} ${list.length > 1 ? verb : `${verb}s`}` : `nothing ${verb}s`;
+    const said = `Data path: ${model.dataPath.join(", ")}. ${names(C.input, "enter")} this cluster, ${names(C.output, "leave")} it.`;
+    return `<p class="path" style="--c:${esc(C.cv)}"><span class="vh">${esc(said)}</span><span class="pw" aria-hidden="true">${nodes}</span></p>`;
+  }
+
+  /** The cluster: the data path, then its rules as ledger rows. */
   function clusterLedger(C: ClusterView): string {
-    const types = (names: readonly string[]) => names.length ? names.map(name => idChip("type", name)).join(" ") : '<span class="none">none</span>';
-    const flow = `<dt>${esc(C.phase)}</dt><dd class="xf">${types(C.input)}<span class="arr" aria-label="to">→</span>${types(C.output)}</dd>`;
-    return `<dl class="lg">${flow}${ledgerRows([[C.rules.length > 1 ? "rules" : "rule", C.rules]])}</dl>`;
+    return `${pathRow(C)}<dl class="lg">${ledgerRows([[C.rules.length > 1 ? "rules" : "rule", C.rules]])}</dl>`;
   }
 
   function render(clusterChanged: boolean) {
@@ -58,8 +74,10 @@ export function createBar(ctx: DeckContext): Bar {
     chip.classList.toggle("none", !C);
     chip.style.setProperty("--c", C ? C.cv : "transparent");
     $("#chipText").textContent = C ? C.label : model.flow ? "No cluster lifted" : "No flow";
-    $("#cMeta").textContent = C ? `${plural(model.members.get(C.id)?.length ?? 0, "function")} · steps ${rangesOf(model.plan, C.id)}`
+    const meta = C ? `${plural(model.members.get(C.id)?.length ?? 0, "function")} · steps ${rangesOf(model.plan, C.id)} · ${C.phase}`
       : model.flow ? `${plural(N, "step")} in ${plural(model.clusters.length, "cluster")}` : "";
+    // The meta line truncates before the cluster chip, so its title keeps the full text.
+    $("#cMeta").textContent = meta; $("#cMeta").title = meta;
     cDesc.innerHTML = C ? clusterLedger(C) : model.flow && !state.cur && !state.resume ? "Step forward to lift the first cluster onto its deck." : "";
     if (clusterChanged && !document.body.classList.contains("booting")) {
       for (const el of [cExpl, cDesc]) { el.classList.remove("swap"); void el.offsetWidth; el.classList.add("swap"); }
