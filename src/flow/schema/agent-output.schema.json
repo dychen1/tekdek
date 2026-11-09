@@ -212,7 +212,7 @@
           "type": "string"
         },
         "description": {
-          "description": "One or two sentences. Name the data model that enters this group, the model that leaves it, and the rule that the group makes true about that data. Use exact type names from the source. Do not list function names.",
+          "description": "One or two plain sentences: what this group does for the flow, and the rule that it makes true. Do not list function names, types, or fields.",
           "allOf": [
             {
               "$ref": "#/$defs/BlockText"
@@ -316,7 +316,7 @@
           "type": "string"
         },
         "annotation": {
-          "description": "One to four short sentences for a reader who follows the flow. Ground them in the data models: the type that this visit receives and the fields it reads, the type that it returns or the fields, file, or store that it writes, and the decision or invariant at this visit, stated with those exact type and field names. Mark returns to a caller with the value that comes back. Do not claim runtime behavior that your evidence basis does not support.",
+          "description": "One to three short sentences in Simplified Technical English. Tell the reader what the function does at this visit and why it matters: the decision, the state change, the rule that it enforces, or the case that it rejects. The viewer already shows the signature, so do not list parameters, return types, or fields. Name a type or a field only when the reader needs it. Mark returns to a caller. Do not claim runtime behavior that your evidence basis does not support.",
           "allOf": [
             {
               "$ref": "#/$defs/BlockText"
