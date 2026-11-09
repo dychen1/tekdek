@@ -257,6 +257,41 @@ fn failure(json: bool, message: &str) -> (u8, String) {
 // Tests
 // -----------------------------------------------------------------------------
 
+/// Test executables.
+///
+/// A test that writes a program and then runs it must create the file through
+/// `write_executable`. If this process holds a write descriptor to the file
+/// while another test thread starts a child, the child keeps a copy of that
+/// descriptor until its `exec`. Linux then refuses to run the file with
+/// `ETXTBSY` ("Text file busy"). A child `sh` writes the file, so no write
+/// descriptor to it ever exists in this process.
+#[cfg(all(test, unix))]
+pub(crate) mod test_support {
+    use std::{
+        io::Write as _,
+        path::Path,
+        process::{Command, Stdio},
+    };
+
+    /// Writes `contents` to `path` as a file with mode 755.
+    pub(crate) fn write_executable(path: &Path, contents: &[u8]) {
+        let mut child = Command::new("/bin/sh")
+            .args(["-c", "cat > \"$1\" && chmod 755 \"$1\"", "sh"])
+            .arg(path)
+            .stdin(Stdio::piped())
+            .spawn()
+            .expect("sh");
+        child
+            .stdin
+            .take()
+            .expect("sh input")
+            .write_all(contents)
+            .expect("executable contents");
+        let status = child.wait().expect("sh");
+        assert!(status.success(), "cannot write {}", path.display());
+    }
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -304,7 +339,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn the_plugin_launcher_runs_a_checked_release_binary_and_caches_it() {
-        use std::{fs, os::unix::fs::PermissionsExt, path::Path, process::Command};
+        use std::{fs, path::Path, process::Command};
 
         let target = match (std::env::consts::OS, std::env::consts::ARCH) {
             ("macos", arch) => format!("{arch}-apple-darwin"),
@@ -314,18 +349,16 @@ mod tests {
         let folder = tempfile::tempdir().expect("folder");
         let root = folder.path();
         let executable = |path: &Path, text: &str| {
-            fs::write(path, text).expect("script");
-            fs::set_permissions(path, fs::Permissions::from_mode(0o755)).expect("mode");
+            super::test_support::write_executable(path, text.as_bytes());
         };
         // A plugin copy with its launcher, and a release with one archive.
         for folder in ["plugin/bin", "plugin/.claude-plugin", "fake-bin", "release"] {
             fs::create_dir_all(root.join(folder)).expect("folder");
         }
-        fs::copy(
-            concat!(env!("CARGO_MANIFEST_DIR"), "/plugin/bin/tekdek"),
-            root.join("plugin/bin/tekdek"),
-        )
-        .expect("launcher");
+        executable(
+            &root.join("plugin/bin/tekdek"),
+            include_str!("../../plugin/bin/tekdek"),
+        );
         fs::write(
             root.join("plugin/.claude-plugin/plugin.json"),
             r#"{"name": "tekdek", "version": "9.9.9"}"#,

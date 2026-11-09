@@ -232,14 +232,15 @@ fn probe(server: &Path) -> Probe {
         },
         None => (server.to_path_buf(), stem),
     };
-    let Ok(mut child) = Command::new(&command)
+    let mut child = match Command::new(&command)
         .arg("--version")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-    else {
-        return Probe::Failed(format!("`{name} --version` cannot start"));
+    {
+        Ok(child) => child,
+        Err(error) => return Probe::Failed(format!("`{name} --version` cannot start: {error}")),
     };
     let started = Instant::now();
     let status = loop {
@@ -254,7 +255,7 @@ fn probe(server: &Path) -> Probe {
                 ));
             }
             Ok(None) => thread::sleep(Duration::from_millis(20)),
-            Err(_) => return Probe::Failed(format!("`{name} --version` cannot run")),
+            Err(error) => return Probe::Failed(format!("`{name} --version` cannot run: {error}")),
         }
     };
     let read = |stream: Option<&mut dyn Read>| {
@@ -437,11 +438,11 @@ mod tests {
     /// Writes an executable shell script that prints `output` and exits with `code`.
     #[cfg(unix)]
     fn script(directory: &std::path::Path, name: &str, output: &str, code: u8) -> PathBuf {
-        use std::os::unix::fs::PermissionsExt;
-
         let path = directory.join(name);
-        fs::write(&path, format!("#!/bin/sh\n{output}\nexit {code}\n")).expect("script");
-        fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).expect("permissions");
+        crate::cli::test_support::write_executable(
+            &path,
+            format!("#!/bin/sh\n{output}\nexit {code}\n").as_bytes(),
+        );
         path
     }
 
