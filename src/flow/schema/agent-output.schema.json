@@ -87,7 +87,7 @@
       ],
       "properties": {
         "behavior": {
-          "description": "State the behavior that the flow explains, as one or two sentences. Start with 'How'. Do not describe your method or evidence here.",
+          "description": "State the behavior that the flow explains, as one or two sentences: the data that enters, how it is transformed, and what comes out. Start with 'How'. Do not describe your method or evidence here.",
           "allOf": [
             {
               "$ref": "#/$defs/BlockText"
@@ -316,7 +316,7 @@
           "type": "string"
         },
         "annotation": {
-          "description": "One to three short sentences in Simplified Technical English. Tell the reader what the function does at this visit and why it matters: the decision, the state change, the rule that it enforces, or the case that it rejects. The viewer already shows the signature, so do not list parameters, return types, or fields. Name a type or a field only when the reader needs it. Mark returns to a caller. Do not claim runtime behavior that your evidence basis does not support.",
+          "description": "Short text in Simplified Technical English that continues the story of the data through the flow: say which model the step takes from the previous step and what it hands on, and do not paraphrase the docstring. Use one lead sentence, then, when the step has several cases or rules, a `- ` list, a `1. ` list, or a small `|` table on new lines, with a blank line between blocks. Frame what the function does at this visit as data flow: the data model that it takes, what it turns that model into or changes in it, and the field that drives a decision or a rejection. Name those models and fields in backticks. The viewer already shows the signature, so do not list every parameter or field. Mark returns to a caller. Do not claim runtime behavior that your evidence basis does not support.",
           "allOf": [
             {
               "$ref": "#/$defs/BlockText"

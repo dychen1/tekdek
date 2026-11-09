@@ -9,7 +9,7 @@ import { highlight } from "../layout/highlight.ts";
 import { nearestStep } from "../layout/plan.ts";
 import { callRefs, calleesOf, callersOf, lineSpan, oneLineSignature, otherVisits, sourceNote, transitionFact, whole, type CallRef } from "../layout/step-facts.ts";
 import { clamp, esc, plural } from "../layout/util.ts";
-import { icon, md } from "./markup.ts";
+import { icon, md, mdBlock } from "./markup.ts";
 import { $, type CodeColumn, type DeckContext } from "./context.ts";
 
 // ============ markup ============
@@ -201,7 +201,7 @@ export function createCode(ctx: DeckContext): CodeColumn {
     // the summary names the closed rows, so a reader knows what opens
     const more = facts.length ? `<details class="cd-more"${factsOpen ? " open" : ""}><summary>${icon("chev")}<span class="cd-keys">${facts.map(([k]) => k).join(" · ")}</span></summary>` +
       `<dl class="cd-facts">${facts.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("")}</dl></details>` : "";
-    stepEl.innerHTML = `<p class="cd-ann">${custom?.tag ?? ""}${md(step.annotation)}</p>${more}`;
+    stepEl.innerHTML = `<div class="cd-ann">${mdBlock(step.annotation, custom?.tag ?? "")}</div>${more}`;
     stepEl.scrollTop = 0;
     fitFold();
     // the step text sets the code height, so a code view lands after it: two lines of context above the marked line

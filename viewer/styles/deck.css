@@ -376,6 +376,16 @@ kbd{display:inline-flex;align-items:center;gap:1px;height:16px;padding:0 4px;bor
 .cd-step{flex:0 1 auto;min-height:0;overflow:auto;padding:8px 16px 12px;scrollbar-width:thin;scrollbar-color:var(--line-soft) transparent}
 .cd-step.swap,.code.swap{animation:swap var(--dur-state) var(--ease-out)}
 .cd-ann{margin:0;font:var(--fs-ui)/1.6 var(--font-code);color:var(--ink)}
+.cd-ann>*{margin:0 0 8px}
+.cd-ann>:last-child{margin-bottom:0}
+.cd-ann ul,.cd-ann ol{padding-left:18px}
+.cd-ann ul{list-style:disc}
+.cd-ann ol{list-style:decimal}
+.cd-ann li+li{margin-top:2px}
+.cd-ann strong{font-weight:var(--fw-bold)}
+.cd-ann table{border-collapse:collapse;font-size:var(--fs-ui-s)}
+.cd-ann th,.cd-ann td{padding:2px 12px 2px 0;border-bottom:1px solid var(--line-faint);text-align:left;vertical-align:top}
+.cd-ann th{color:var(--ink-2);font-weight:var(--fw-bold)}
 /* the fact rows fold under one summary line, closed at load (code.ts) */
 .cd-more{margin:8px 0 0}
 .cd-more summary{display:flex;align-items:center;gap:5px;width:fit-content;max-width:100%;padding:2px 6px 2px 2px;margin-left:-2px;border-radius:var(--r-s);
