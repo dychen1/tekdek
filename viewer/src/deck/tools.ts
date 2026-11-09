@@ -9,7 +9,7 @@ import { clamp, esc } from "../layout/util.ts";
 import { icon } from "./markup.ts";
 import { $, pageOrigin, type DeckContext, type Tools } from "./context.ts";
 
-const VARIANTS = ["github", "night", "light"];
+const VARIANTS = ["github", "light", "night"];
 const KEY_VARIANT = "tekdek.deck.variant";
 const KEY_SHORTCUTS = "tekdek.deck.shortcuts";
 
