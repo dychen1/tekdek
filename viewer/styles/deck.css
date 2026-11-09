@@ -477,13 +477,21 @@ button.ref:hover{text-decoration:underline;text-underline-offset:3px}
 .chip{flex:0 1 auto;min-width:0;display:flex;align-items:center;white-space:nowrap;font:var(--fw-bold) var(--fs-ui-s) var(--font-code)}
 .chip span{min-width:0;max-width:100%;height:19px;padding:0 7px;display:block;overflow:hidden;text-overflow:ellipsis;line-height:19px;border-radius:var(--r-s);background:var(--c);color:var(--on-accent)}
 .chip.none span{padding:0 6px;background:transparent;border:1px dashed var(--line-strong);line-height:17px;color:var(--dim);font-weight:400}
-.cmeta{flex:0 0 auto;font:var(--fs-ui-s) var(--font-code);color:var(--dim);white-space:nowrap}
+/* the meta line gives way before the cluster name */
+.cmeta{flex:0 1000 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;font:var(--fs-ui-s) var(--font-code);color:var(--dim);white-space:nowrap}
 /* The cluster ledger scrolls inside its fixed row when its rules are long. */
 .c-desc{margin:0;min-width:0;overflow:auto;font:var(--fs-ui)/18px var(--font-code);color:var(--ink-2);scrollbar-width:thin;scrollbar-color:var(--line-soft) transparent}
 .c-desc .lg{grid-template-columns:fit-content(112px) minmax(0,1fr);column-gap:14px;row-gap:2px;font-size:var(--fs-ui-s);line-height:18px;color:var(--ink-2)}
 .c-desc .lg dt{font-size:12px}
 .c-desc .xf{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
 .c-desc .arr{color:var(--dim)}
+/* The data path: every model of the flow in data order, on one full-width line. The models that enter and leave the
+   cluster wear its color, and a model that leaves also takes a fill. The rest stay quiet, so the lit part marks the place. */
+.c-desc .path{margin:0 0 4px;display:flex;flex-wrap:wrap;align-items:center;gap:3px;font-size:var(--fs-ui-s);line-height:18px}
+.c-desc .path .pn{color:var(--dim);white-space:nowrap}
+.c-desc .path .pn.in,.c-desc .path .pn.out{padding:0 3px;border:1px solid var(--c);border-radius:var(--r-s);color:var(--ink);line-height:16px}
+.c-desc .path .pn.out{background:color-mix(in srgb,var(--c) 18%,transparent)}
+.c-desc .path .arr.lit{color:var(--c)}
 .ticks{display:flex;gap:2px;height:12px;align-items:center}
 .tick{flex:1 1 0;min-width:0;height:12px;padding:0;border:0;background:transparent;cursor:pointer;position:relative}
 .tick::before{content:"";position:absolute;left:0;right:0;top:2px;height:8px;border-radius:1px;background:color-mix(in srgb,var(--c) 26%,transparent);

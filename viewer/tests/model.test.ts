@@ -7,7 +7,7 @@ import { deckFlow, deckGraph } from "../src/data/adapt.ts";
 import type { DeckFlow } from "../src/data/models.ts";
 import { isShown } from "../src/layout/explorer.ts";
 import { MIN_DECK_W } from "../src/layout/deck-geometry.ts";
-import { buildModel, initialState, nextStep, shownFile, withMembership } from "../src/layout/model.ts";
+import { buildModel, dataPath, initialState, nextStep, shownFile, withMembership } from "../src/layout/model.ts";
 
 import { artifact, DIGEST, graphDocument, must } from "./fixtures.ts";
 
@@ -94,3 +94,19 @@ test("forward goes to the next step, and from the rest state continues at the st
   assert.equal(nextStep({ cur: 12, resume: 4 }), 13);
 });
 
+
+test("the data path orders each model after the models that turn into it", () => {
+  // The clusters of a real eval run, in lift order: the entry returns the last model, and a store passes models through.
+  const path = dataPath([
+    { input: [], output: ["EvalReport"] },
+    { input: ["RawTrace"], output: ["Trace"] },
+    { input: ["Contract", "CheckPlan", "EvalReport"], output: ["Contract", "CheckPlan"] },
+    { input: ["Trace"], output: ["Contract"] },
+    { input: ["Contract"], output: ["CheckPlan"] },
+    { input: ["CheckPlan", "SourceTexts"], output: ["list[CheckResult]"] },
+    { input: ["list[CheckResult]"], output: ["EvalReport"] },
+  ]);
+  assert.deepEqual(path, ["RawTrace", "Trace", "Contract", "CheckPlan", "SourceTexts", "list[CheckResult]", "EvalReport"]);
+  assert.deepEqual(dataPath([{ input: ["A"], output: ["B"] }, { input: ["B"], output: ["A"] }]), ["A", "B"], "a cycle still lists each model once");
+  assert.deepEqual(dataPath([]), []);
+});
