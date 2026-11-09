@@ -5,7 +5,7 @@
 
 // ============ artifact index ============
 
-/** One flow in the artifact index. `file` points to a frozen schema 3 generation under `flows/`. */
+/** One flow in the artifact index. `file` points to a frozen schema 4 generation under `flows/`. */
 export interface FlowEntry { name: string; file: string; stepCount?: number; clusterCount?: number; schemaVersion?: number; stale?: boolean }
 
 /** One indexed codebase. `digest` names the graph document that the server sends, with its cached semantic edges;
@@ -35,14 +35,20 @@ export interface GraphDocument { schemaVersion: number; graph: { nodes: GraphNod
 export type Transition = "flow_start" | "same_function" | "calls" | "returns_to_caller" | "sibling_call"
   | "calls_indirectly" | "returns_to_ancestor" | "no_static_edge";
 
-/** The fields of a frozen schema 3 flow artifact that the viewer reads. */
+/** The step text: one row for each used slot, in display order. A null slot is not used. Items hold marks. */
+export interface StepLedger {
+  takes: string[] | null; requires: string[] | null; does: string[] | null;
+  onFail: string[] | null; returns: string[] | null; writes: string[] | null;
+}
+
+/** The fields of a frozen schema 4 flow artifact that the viewer reads. */
 export interface FlowArtifact {
   kind: string; schemaVersion: number; flowId: string;
   generation: { ordinal: number };
   facts: { binding: { graphDigest: string }; nodes: { key: string; signature?: string | null; documentation?: string | null }[] };
   intent: {
-    clusters: { key: string; label: string; description: string }[];
-    steps: { id: string; nodeKey: string; clusterKey: string | null; title: string; annotation: string }[];
+    clusters: { key: string; label: string; phase: string; phaseNote: string | null; input: string[]; output: string[]; rules: string[] }[];
+    steps: { id: string; nodeKey: string; clusterKey: string | null; title: string; ledger: StepLedger }[];
   };
   assignment: { members: { outcome: string; nodeKey: string; clusterKey?: string }[] };
   view: { clusters: { clusterKey: string; color: string }[]; steps: { stepId: string; transition: Transition }[] };
@@ -93,11 +99,14 @@ export interface DeckTree { [name: string]: DeckTree | null }
 export interface DeckGraph { tree: DeckTree; functions: DeckFunction[]; calls: DeckCall[] }
 
 /** One flow cluster. `members` holds only functions that the bound graph contains. */
-export interface DeckCluster { id: string; label: string; description: string; color: ClusterColor; members: string[] }
+/** One cluster. `phase` is the readable stage name. `input` and `output` name data models; empty means none. */
+export interface DeckCluster {
+  id: string; label: string; phase: string; input: string[]; output: string[]; rules: string[]; color: ClusterColor; members: string[];
+}
 
 /** One flow step. `missing` is true when the bound graph no longer has the step function. */
 export interface DeckStep {
-  index: number; id: string; title: string; node: string; cluster: string; annotation: string; missing: boolean;
+  index: number; id: string; title: string; node: string; cluster: string; ledger: StepLedger; missing: boolean;
   transition: Transition | null; signature: string | null; documentation: string | null;
 }
 

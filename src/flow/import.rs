@@ -28,10 +28,10 @@ use super::{
     flow_id,
     lineage::{self, StoredGeneration},
     models::{
-        AgentFlow, AgentFlowOutput, ArtifactKind, Author, Digests, FLOW_ARTIFACT_SCHEMA_VERSION,
-        FactBinding, FactLayer, FlowArtifact, FlowId, FlowIssue, FlowStep, FrozenStatus,
-        Generation, GenerationPurpose, IntentLayer, IssueCode, NoFlowReason, NodeKey, Provenance,
-        Sha256Digest,
+        AGENT_CONTRACT_VERSION, AgentFlow, AgentFlowOutput, ArtifactKind, Author, Digests,
+        FLOW_ARTIFACT_SCHEMA_VERSION, FactBinding, FactLayer, FlowArtifact, FlowId, FlowIssue,
+        FlowStep, FrozenStatus, Generation, GenerationPurpose, IntentLayer, IssueCode,
+        NoFlowReason, NodeKey, Provenance, Sha256Digest,
     },
     text,
     validate::{self, CheckedFlow, PriorContext},
@@ -213,13 +213,15 @@ fn parse_output(input: &[u8]) -> Result<Result<AgentFlow, ImportOutcome>, FlowEr
 }
 
 fn contract_issues(version: u32) -> Vec<FlowIssue> {
-    if version == 1 {
+    if version == AGENT_CONTRACT_VERSION {
         vec![]
     } else {
         vec![
             FlowIssue::error(
                 IssueCode::UnsupportedContract,
-                format!("unsupported contract version {version}: expected 1"),
+                format!(
+                    "unsupported contract version {version}: expected {AGENT_CONTRACT_VERSION}"
+                ),
             )
             .at("/contractVersion"),
         ]
@@ -301,7 +303,7 @@ fn build_intent(
             node_key: step.node_key,
             cluster_key: step.cluster_key,
             title: step.title,
-            annotation: step.annotation,
+            ledger: step.ledger,
             attested_fact_digest,
         });
     }
@@ -497,6 +499,46 @@ mod tests {
     }
 
     #[test]
+    fn rejected_ledgers_and_marks_report_their_issue() {
+        let directory = fixtures::store();
+        let path = directory.path();
+        for (code, pointer, replacement) in [
+            (
+                IssueCode::InvalidMark,
+                "/flow/steps/0/ledger/does/0",
+                "Call `fn:missing_function` first.".into(),
+            ),
+            (
+                IssueCode::InvalidMark,
+                "/flow/steps/0/ledger/does/0",
+                "Read the `plain` value.".into(),
+            ),
+            (
+                IssueCode::InvalidMark,
+                "/flow/clusters/0/rules/0",
+                "Every `size:limit` holds.".into(),
+            ),
+            (
+                IssueCode::InvalidLedger,
+                "/flow/steps/0/ledger/does",
+                serde_json::json!([]),
+            ),
+            (
+                IssueCode::InvalidLedger,
+                "/flow/clusters/0/rules",
+                serde_json::json!([]),
+            ),
+        ] {
+            let mut value = output();
+            *value.pointer_mut(pointer).expect(pointer) = replacement;
+            assert_rejected(path, "demo-flow", &value, code);
+        }
+        let mut value = output();
+        value["flow"]["steps"][0]["ledger"]["does"] = Value::Null;
+        assert_rejected(path, "demo-flow", &value, IssueCode::InvalidLedger);
+    }
+
+    #[test]
     fn rejected_outputs_report_every_issue_and_write_nothing() {
         let directory = fixtures::store();
         let path = directory.path();
@@ -557,7 +599,7 @@ mod tests {
                 "/flow/evidenceBasis",
                 "guesswork".into(),
             ),
-            (IssueCode::UnsupportedContract, "/contractVersion", 2.into()),
+            (IssueCode::UnsupportedContract, "/contractVersion", 1.into()),
         ] {
             let mut value = output();
             *value.pointer_mut(pointer).expect(pointer) = replacement;
@@ -615,7 +657,7 @@ mod tests {
         );
     }
 
-    /// Builds a revision that moves the entry function into a new cluster and edits one annotation.
+    /// Builds a revision that moves the entry function into a new cluster and edits one ledger.
     fn revision(parent: &crate::flow::models::FlowArtifact) -> (Value, u32) {
         let mut value = output();
         for (step, stored) in value["flow"]["steps"]
@@ -642,7 +684,8 @@ mod tests {
                 relabeled += 1;
             }
         }
-        value["flow"]["steps"][4]["annotation"] = "Write the result under the store lock.".into();
+        value["flow"]["steps"][4]["ledger"]["does"] =
+            serde_json::json!(["Write the result under the store lock."]);
         value["flow"]["revisionSummary"] =
             "Move the entry function into a report cluster and shorten step 5.".into();
         (value, relabeled + 1)
@@ -731,7 +774,7 @@ mod tests {
         let directory = fixtures::store();
         let before = snapshot_files(directory.path());
         let value = serde_json::json!({
-            "contractVersion": 1, "outcome": "no_flow", "reason": "behavior_not_found",
+            "contractVersion": 2, "outcome": "no_flow", "reason": "behavior_not_found",
             "explanation": "The index has no handler for webhook retries."
         });
 

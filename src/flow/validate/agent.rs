@@ -1,21 +1,22 @@
 //! Agent output checks.
 //!
 //! This module canonicalizes and checks one agent flow before a freeze: text
-//! limits, keys, cluster vocabulary, node and prior step references, and the
-//! unanimous label rule. The agent flow, the prior step IDs, and the graph keys
+//! limits, keys, cluster vocabulary, ledgers and their marks, node and prior step
+//! references, and the unanimous label rule. The agent flow, the prior step IDs, and the graph keys
 //! are the input. A checked flow and every issue are the output.
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::{
-    BEHAVIOR, BOUNDARIES, CLUSTER_COUNT, CLUSTER_DESCRIPTION, CLUSTER_LABEL, PHASE_NOTE,
-    REVISION_SUMMARY, STEP_ANNOTATION, STEP_COUNT, STEP_TITLE, TextRule, cluster_rules,
-    stored_text, unused_clusters,
+    BEHAVIOR, BOUNDARIES, CLUSTER_COUNT, CLUSTER_LABEL, CLUSTER_RULE, CLUSTER_TYPE, LEDGER_ITEM,
+    PHASE_NOTE, REVISION_SUMMARY, STEP_COUNT, STEP_TITLE, TextRule, cluster_rules, graph_functions,
+    ledger_rules, stored_text, unused_clusters,
 };
 use crate::flow::{
     models::{
         AgentFlow, AgentStep, ClusterIntent, ClusterKey, EvidenceBasis, FlowIssue,
-        GenerationPurpose, IssueCode, NodeKey, StepId, is_cluster_key, is_node_key, is_step_id,
+        GenerationPurpose, IssueCode, NodeKey, StepId, StepLedger, is_cluster_key, is_node_key,
+        is_step_id,
     },
     text,
 };
@@ -34,7 +35,7 @@ pub struct CheckedStep {
     pub node_key: NodeKey,
     pub cluster_key: ClusterKey,
     pub title: String,
-    pub annotation: String,
+    pub ledger: StepLedger,
 }
 
 /// One agent flow after canonicalization and reference checks.
@@ -72,7 +73,8 @@ pub fn check_agent_flow(
             REVISION_SUMMARY,
         )
     });
-    let clusters = check_clusters(flow, &mut issues);
+    let functions = graph_functions(graph_keys);
+    let clusters = check_clusters(flow, &functions, &mut issues);
     if !STEP_COUNT.contains(&flow.steps.len()) {
         issues.push(
             FlowIssue::error(
@@ -100,6 +102,7 @@ pub fn check_agent_flow(
             let references = StepReferences {
                 context,
                 graph_keys,
+                functions: &functions,
                 known: &known,
             };
             check_step(step, index, &references, &mut prior_used, &mut issues)
@@ -130,7 +133,11 @@ pub fn check_agent_flow(
 }
 
 /// Checks the cluster vocabulary: text, keys, uniqueness, limits, and use.
-fn check_clusters(flow: &AgentFlow, issues: &mut Vec<FlowIssue>) -> Vec<ClusterIntent> {
+fn check_clusters(
+    flow: &AgentFlow,
+    functions: &BTreeSet<&str>,
+    issues: &mut Vec<FlowIssue>,
+) -> Vec<ClusterIntent> {
     let mut clusters = Vec::new();
     for (index, cluster) in flow.clusters.iter().enumerate() {
         let path = format!("/flow/clusters/{index}");
@@ -140,12 +147,18 @@ fn check_clusters(flow: &AgentFlow, issues: &mut Vec<FlowIssue>) -> Vec<ClusterI
             &format!("{path}/label"),
             CLUSTER_LABEL,
         );
-        let description = agent_text(
-            issues,
-            &cluster.description,
-            &format!("{path}/description"),
-            CLUSTER_DESCRIPTION,
-        );
+        let mut texts = |field: &str, values: &[String], rule: TextRule| -> Vec<String> {
+            values
+                .iter()
+                .enumerate()
+                .map(|(index, value)| {
+                    agent_text(issues, value, &format!("{path}/{field}/{index}"), rule)
+                })
+                .collect()
+        };
+        let input = texts("input", &cluster.input, CLUSTER_TYPE);
+        let output = texts("output", &cluster.output, CLUSTER_TYPE);
+        let rules = texts("rules", &cluster.rules, CLUSTER_RULE);
         let phase_note = cluster
             .phase_note
             .as_deref()
@@ -154,7 +167,9 @@ fn check_clusters(flow: &AgentFlow, issues: &mut Vec<FlowIssue>) -> Vec<ClusterI
             Ok(key) => clusters.push(ClusterIntent {
                 key,
                 label,
-                description,
+                input,
+                output,
+                rules,
                 phase: cluster.phase,
                 phase_note,
             }),
@@ -165,7 +180,7 @@ fn check_clusters(flow: &AgentFlow, issues: &mut Vec<FlowIssue>) -> Vec<ClusterI
             ),
         }
     }
-    issues.extend(cluster_rules(&clusters, "/flow/clusters"));
+    issues.extend(cluster_rules(&clusters, "/flow/clusters", Some(functions)));
     if !CLUSTER_COUNT.contains(&flow.clusters.len()) {
         issues.push(
             FlowIssue::error(
@@ -196,6 +211,7 @@ fn check_clusters(flow: &AgentFlow, issues: &mut Vec<FlowIssue>) -> Vec<ClusterI
 struct StepReferences<'a> {
     context: &'a PriorContext<'a>,
     graph_keys: &'a BTreeSet<&'a str>,
+    functions: &'a BTreeSet<&'a str>,
     known: &'a BTreeSet<&'a str>,
 }
 
@@ -209,13 +225,21 @@ fn check_step<'a>(
 ) -> Option<CheckedStep> {
     let path = format!("/flow/steps/{index}");
     let title = agent_text(issues, &step.title, &format!("{path}/title"), STEP_TITLE);
-    let annotation = agent_text(
-        issues,
-        &step.annotation,
-        &format!("{path}/annotation"),
-        STEP_ANNOTATION,
-    );
     let before = issues.iter().filter(|issue| issue.is_error()).count();
+    let ledger = step.ledger.map_items(|slot, index, value| {
+        agent_text(
+            issues,
+            value,
+            &format!("{path}/ledger/{slot}/{index}"),
+            LEDGER_ITEM,
+        )
+    });
+    ledger_rules(
+        issues,
+        &ledger,
+        &format!("{path}/ledger"),
+        Some(references.functions),
+    );
     let prior_step_id = step.prior_step_id.as_deref().and_then(|id| {
         let at = format!("{path}/priorStepId");
         if !is_step_id(id) {
@@ -290,7 +314,7 @@ fn check_step<'a>(
             node_key,
             cluster_key,
             title,
-            annotation,
+            ledger,
         }),
         _ => None,
     }

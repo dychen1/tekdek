@@ -18,7 +18,7 @@ const model = buildModel(graph, flow, new Map());
 test("membership marks each function with the cluster that holds it", () => {
   const graph = deckGraph(graphDocument());
   const marked = withMembership(graph, deckFlow(artifact, graph, DIGEST));
-  assert.equal(marked.functions.filter(fn => fn.cluster).length, 21);
+  assert.equal(marked.functions.filter(fn => fn.cluster).length, 18);
   assert.equal(must(marked.functions.find(fn => fn.id === "src/main.rs::callable:main")).cluster, "route-command");
   assert.equal(graph.functions.filter(fn => fn.cluster).length, 0, "the source graph stays unmarked");
 });

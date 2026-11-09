@@ -9,11 +9,11 @@ import { buildDiffModel, movedText, numberLines, slotsOf } from "../src/diff/mod
 function flow(steps: [string, string][]): FlowArtifact {
   const keys = [...new Set(steps.map(([, cluster]) => cluster))];
   return {
-    kind: "tekdek.flow", schemaVersion: 3, flowId: "demo", generation: { ordinal: 1 },
+    kind: "tekdek.flow", schemaVersion: 4, flowId: "demo", generation: { ordinal: 1 },
     facts: { binding: { graphDigest: "sha256:0" }, nodes: [] },
     intent: {
-      clusters: keys.map(key => ({ key, label: key.toUpperCase(), description: "" })),
-      steps: steps.map(([id, clusterKey]) => ({ id, nodeKey: `src/a.rs::callable:${id}`, clusterKey, title: `Step ${id}`, annotation: "" })),
+      clusters: keys.map(key => ({ key, label: key.toUpperCase(), phase: "transform", phaseNote: null, input: [], output: [], rules: ["A test rule."] })),
+      steps: steps.map(([id, clusterKey]) => ({ id, nodeKey: `src/a.rs::callable:${id}`, clusterKey, title: `Step ${id}`, ledger: { takes: null, requires: null, does: ["Work."], onFail: null, returns: null, writes: null } })),
     },
     assignment: { members: [] },
     view: { clusters: keys.map(clusterKey => ({ clusterKey, color: "cyan" })), steps: [] },

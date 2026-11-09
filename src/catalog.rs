@@ -404,7 +404,7 @@ mod tests {
             serde_json::json!({
                 "name": "demo-flow",
                 "file": generation.file,
-                "schemaVersion": 3,
+                "schemaVersion": 4,
                 "behavior": "How the demo command parses input and saves a result.",
                 "stepCount": 6,
                 "clusterCount": 2,

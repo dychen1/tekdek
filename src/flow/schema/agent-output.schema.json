@@ -22,7 +22,7 @@
       ],
       "properties": {
         "contractVersion": {
-          "const": 1
+          "const": 2
         },
         "outcome": {
           "const": "flow"
@@ -43,7 +43,7 @@
       ],
       "properties": {
         "contractVersion": {
-          "const": 1
+          "const": 2
         },
         "outcome": {
           "const": "no_flow"
@@ -188,7 +188,9 @@
       "required": [
         "key",
         "label",
-        "description",
+        "input",
+        "output",
+        "rules",
         "phase",
         "phaseNote"
       ],
@@ -211,16 +213,39 @@
           "maxLength": 60,
           "type": "string"
         },
-        "description": {
-          "description": "One or two plain sentences: what this group does for the flow, and the rule that it makes true. Do not list function names, types, or fields.",
-          "allOf": [
-            {
-              "$ref": "#/$defs/BlockText"
-            }
-          ],
-          "minLength": 20,
-          "maxLength": 400,
-          "type": "string"
+        "input": {
+          "description": "The data models that enter this group, in order. Empty when no data model enters it, for example at a command entry.",
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 4,
+          "items": {
+            "$ref": "#/$defs/TypeName"
+          }
+        },
+        "output": {
+          "description": "The data models that leave this group, in order. Empty when the group only writes or reports.",
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 4,
+          "items": {
+            "$ref": "#/$defs/TypeName"
+          }
+        },
+        "rules": {
+          "description": "One to three rules that this group makes true about its data, in Simplified Technical English. Keep each rule to about 70 characters: the bar shows one line for each rule. Name each identifier with a mark: a backtick span `kind:name`. Kinds: fn (a function of the graph, checked against the graph), type (a data model or class), value (an enum member or constant), file (a file or store path), field (a field or attribute). For example `fn:build_checks` raises `type:LlmError` with `value:invalid_llm_output`. Every backtick span must be a mark.",
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 3,
+          "items": {
+            "allOf": [
+              {
+                "$ref": "#/$defs/LineText"
+              }
+            ],
+            "minLength": 10,
+            "maxLength": 200,
+            "type": "string"
+          }
         },
         "phase": {
           "$ref": "#/$defs/FlowPhase"
@@ -277,7 +302,7 @@
         "nodeKey",
         "clusterKey",
         "title",
-        "annotation"
+        "ledger"
       ],
       "properties": {
         "priorStepId": {
@@ -315,18 +340,206 @@
           "maxLength": 96,
           "type": "string"
         },
-        "annotation": {
-          "description": "Short text in Simplified Technical English that continues the story of the data through the flow: say which model the step takes from the previous step and what it hands on, and do not paraphrase the docstring. Use one lead sentence, then, when the step has several cases or rules, a `- ` list, a `1. ` list, or a small `|` table on new lines, with a blank line between blocks. Frame what the function does at this visit as data flow: the data model that it takes, what it turns that model into or changes in it, and the field that drives a decision or a rejection. Name those models and fields in backticks. The viewer already shows the signature, so do not list every parameter or field. Mark returns to a caller. Do not claim runtime behavior that your evidence basis does not support.",
-          "allOf": [
-            {
-              "$ref": "#/$defs/BlockText"
-            }
-          ],
-          "minLength": 1,
-          "maxLength": 1500,
-          "type": "string"
+        "ledger": {
+          "$ref": "#/$defs/StepLedger"
         }
       }
+    },
+    "StepLedger": {
+      "description": "The step text as ledger rows. Use only the slots that this visit needs, and at least one. Each item is one short line in Simplified Technical English. The viewer shows the signature, so do not list every parameter. Do not paraphrase the docstring. Do not claim runtime behavior that your evidence basis does not support.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "takes",
+        "requires",
+        "does",
+        "onFail",
+        "returns",
+        "writes"
+      ],
+      "properties": {
+        "takes": {
+          "description": "The data model that this visit takes from the step before, and the fields that it reads. Null when the step has no such row.",
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 6,
+              "items": {
+                "$ref": "#/$defs/LedgerItem"
+              }
+            }
+          ]
+        },
+        "requires": {
+          "description": "The checks that this visit makes on the data: one rule for each item. Null when the step has no such row.",
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 6,
+              "items": {
+                "$ref": "#/$defs/LedgerItem"
+              }
+            }
+          ]
+        },
+        "does": {
+          "description": "The change that this visit makes to the data, or the work that it starts. Null when the step has no such row.",
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 6,
+              "items": {
+                "$ref": "#/$defs/LedgerItem"
+              }
+            }
+          ]
+        },
+        "onFail": {
+          "description": "What happens when a check fails or the work cannot continue: the error, and whether a retry follows. Null when the step has no such row.",
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 6,
+              "items": {
+                "$ref": "#/$defs/LedgerItem"
+              }
+            }
+          ]
+        },
+        "returns": {
+          "description": "What this visit hands on, and to whom. Mark a return to a caller with the value that comes back. Null when the step has no such row.",
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 6,
+              "items": {
+                "$ref": "#/$defs/LedgerItem"
+              }
+            }
+          ]
+        },
+        "writes": {
+          "description": "The file, store, or external state that this visit writes. Null when the step has no such row.",
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 6,
+              "items": {
+                "$ref": "#/$defs/LedgerItem"
+              }
+            }
+          ]
+        }
+      },
+      "anyOf": [
+        {
+          "properties": {
+            "takes": {
+              "type": "array"
+            }
+          },
+          "required": [
+            "takes"
+          ]
+        },
+        {
+          "properties": {
+            "requires": {
+              "type": "array"
+            }
+          },
+          "required": [
+            "requires"
+          ]
+        },
+        {
+          "properties": {
+            "does": {
+              "type": "array"
+            }
+          },
+          "required": [
+            "does"
+          ]
+        },
+        {
+          "properties": {
+            "onFail": {
+              "type": "array"
+            }
+          },
+          "required": [
+            "onFail"
+          ]
+        },
+        {
+          "properties": {
+            "returns": {
+              "type": "array"
+            }
+          },
+          "required": [
+            "returns"
+          ]
+        },
+        {
+          "properties": {
+            "writes": {
+              "type": "array"
+            }
+          },
+          "required": [
+            "writes"
+          ]
+        }
+      ]
+    },
+    "LedgerItem": {
+      "description": "One line of ledger text. Name each identifier with a mark: a backtick span `kind:name`. Kinds: fn (a function of the graph, checked against the graph), type (a data model or class), value (an enum member or constant), file (a file or store path), field (a field or attribute). For example `fn:build_checks` raises `type:LlmError` with `value:invalid_llm_output`. Every backtick span must be a mark.",
+      "allOf": [
+        {
+          "$ref": "#/$defs/LineText"
+        }
+      ],
+      "minLength": 2,
+      "maxLength": 200,
+      "type": "string"
+    },
+    "TypeName": {
+      "description": "The name of one data model, as the source spells it, for example 'Contract' or 'list[Finding]'. No marks.",
+      "allOf": [
+        {
+          "$ref": "#/$defs/LineText"
+        }
+      ],
+      "minLength": 1,
+      "maxLength": 80,
+      "type": "string",
+      "pattern": "^[^`]*$"
     },
     "NodeKey": {
       "type": "string",

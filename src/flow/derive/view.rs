@@ -247,7 +247,9 @@ mod tests {
         ClusterIntent {
             key: ClusterKey::try_from(name).expect("cluster key"),
             label: name.to_owned(),
-            description: "A cluster that the tests use.".to_owned(),
+            input: vec![],
+            output: vec![],
+            rules: vec!["A cluster that the tests use.".to_owned()],
             phase: FlowPhase::Transform,
             phase_note: None,
         }

@@ -9,7 +9,7 @@ use super::{
 };
 
 /// The flow artifact wire-schema version.
-pub const FLOW_ARTIFACT_SCHEMA_VERSION: u32 = 3;
+pub const FLOW_ARTIFACT_SCHEMA_VERSION: u32 = 4;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]

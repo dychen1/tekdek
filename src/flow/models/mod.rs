@@ -1,4 +1,4 @@
-//! Flow schema 3 models.
+//! Flow schema 4 models.
 //!
 //! This module owns the serde types of the frozen flow artifact and of the agent
 //! output contract. Code-owned layers derive from these types; the agent writes
@@ -23,7 +23,9 @@ mod intent;
 mod issues;
 mod view;
 
-pub use agent::{AgentCluster, AgentFlow, AgentFlowOutput, AgentStep, NoFlowReason};
+pub use agent::{
+    AGENT_CONTRACT_VERSION, AgentCluster, AgentFlow, AgentFlowOutput, AgentStep, NoFlowReason,
+};
 pub use artifact::{
     ArtifactKind, Author, Digests, FLOW_ARTIFACT_SCHEMA_VERSION, FlowArtifact, FrozenStatus,
     Generation, GenerationPurpose, Provenance,
@@ -43,7 +45,7 @@ pub use ids::{
     ClusterKey, ContentHash, FlowId, InvalidIdentifier, NodeKey, Sha256Digest, StepId,
     is_cluster_key, is_flow_id, is_node_key, is_step_id,
 };
-pub use intent::{ClusterIntent, EvidenceBasis, FlowPhase, FlowStep, IntentLayer};
+pub use intent::{ClusterIntent, EvidenceBasis, FlowPhase, FlowStep, IntentLayer, StepLedger};
 pub use issues::{FlowIssue, IssueCode, Severity};
 pub use view::{ClusterColor, ClusterView, Palette, StepView, Transition, ViewLayer, VisitRun};
 

@@ -31,12 +31,17 @@ pub enum EvidenceBasis {
 }
 
 /// `phase_note` is present if and only if `phase` is `Other`.
+///
+/// `input` and `output` name the data models that enter and leave the group. An
+/// empty list means that no data model enters or leaves it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ClusterIntent {
     pub key: ClusterKey,
     pub label: String,
-    pub description: String,
+    pub input: Vec<String>,
+    pub output: Vec<String>,
+    pub rules: Vec<String>,
     pub phase: FlowPhase,
     #[serde(deserialize_with = "nullable")]
     pub phase_note: Option<String>,
@@ -65,6 +70,65 @@ pub struct FlowStep {
     pub node_key: NodeKey,
     pub cluster_key: ClusterKey,
     pub title: String,
-    pub annotation: String,
+    pub ledger: StepLedger,
     pub attested_fact_digest: Sha256Digest,
+}
+
+/// The step text: one row for each slot that the step uses.
+///
+/// A null slot is not used. A used slot holds one or more one-line items, and at
+/// least one slot is used. Items name identifiers with marks such as
+/// `` `fn:read_graph` ``.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct StepLedger {
+    #[serde(deserialize_with = "nullable")]
+    pub takes: Option<Vec<String>>,
+    #[serde(deserialize_with = "nullable")]
+    pub requires: Option<Vec<String>>,
+    #[serde(deserialize_with = "nullable")]
+    pub does: Option<Vec<String>>,
+    #[serde(deserialize_with = "nullable")]
+    pub on_fail: Option<Vec<String>>,
+    #[serde(deserialize_with = "nullable")]
+    pub returns: Option<Vec<String>>,
+    #[serde(deserialize_with = "nullable")]
+    pub writes: Option<Vec<String>>,
+}
+
+impl StepLedger {
+    /// The slots in display order, with their wire names.
+    #[must_use]
+    pub fn slots(&self) -> [(&'static str, Option<&[String]>); 6] {
+        [
+            ("takes", self.takes.as_deref()),
+            ("requires", self.requires.as_deref()),
+            ("does", self.does.as_deref()),
+            ("onFail", self.on_fail.as_deref()),
+            ("returns", self.returns.as_deref()),
+            ("writes", self.writes.as_deref()),
+        ]
+    }
+
+    /// Returns a ledger with each item replaced by `item(slot, index, text)`.
+    #[must_use]
+    pub fn map_items(&self, mut item: impl FnMut(&str, usize, &str) -> String) -> Self {
+        let mut slot = |name: &str, items: &Option<Vec<String>>| {
+            items.as_ref().map(|items| {
+                items
+                    .iter()
+                    .enumerate()
+                    .map(|(index, text)| item(name, index, text))
+                    .collect()
+            })
+        };
+        Self {
+            takes: slot("takes", &self.takes),
+            requires: slot("requires", &self.requires),
+            does: slot("does", &self.does),
+            on_fail: slot("onFail", &self.on_fail),
+            returns: slot("returns", &self.returns),
+            writes: slot("writes", &self.writes),
+        }
+    }
 }

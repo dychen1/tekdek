@@ -66,9 +66,11 @@ test("a frozen flow gives its clusters in intent order with frozen colors and as
   const graph = deckGraph(graphDocument());
   const flow = deckFlow(artifact, graph, DIGEST);
   assert.equal(flow.name, "flow-generation");
-  assert.equal(flow.steps.length, 25);
+  assert.equal(flow.steps.length, 21);
   assert.deepEqual(flow.clusters.map(cluster => [cluster.id, cluster.color, cluster.members.length]),
-    [["route-command", "cyan", 6], ["check-output", "red", 4], ["derive-layers", "yellow", 6], ["write-generation", "magenta", 2], ["refresh-catalog", "lime", 3]]);
+    [["route-command", "cyan", 6], ["check-output", "red", 4], ["derive-layers", "yellow", 6], ["write-generation", "magenta", 2]]);
+  assert.deepEqual(must(flow.clusters[1], "second cluster").input, ["AgentFlowOutput"]);
+  assert.equal(must(flow.clusters[1], "second cluster").phase, "input validation");
   assert.equal(flow.stale, false);
   assert.ok(flow.steps.every(step => !step.missing));
 });
@@ -90,14 +92,14 @@ test("a flow stays fresh when the served graph adds cached edges to the graph fi
   assert.equal(bindingDigest({ digest: DIGEST }), DIGEST, "an older server sends the file digest only");
 });
 
-test("a file that is not a frozen schema 3 flow is rejected", () => {
+test("a file that is not a frozen schema 4 flow is rejected", () => {
   const graph = deckGraph(graphDocument());
-  assert.throws(() => deckFlow({ ...artifact, schemaVersion: 2 }, graph, DIGEST), /schema 3/);
+  assert.throws(() => deckFlow({ ...artifact, schemaVersion: 3 }, graph, DIGEST), /schema 4/);
 });
 
-test("only frozen schema 3 flows show, and the picker opens the requested flow, else the first one", () => {
-  const flows = frozenFlows([{ name: "legacy", file: "legacy.json" }, { name: "a", file: "a/generations/1-000000000000.json", schemaVersion: 3 },
-    { name: "b", file: "b/generations/1-000000000000.json", schemaVersion: 3 }]);
+test("only frozen schema 4 flows show, and the picker opens the requested flow, else the first one", () => {
+  const flows = frozenFlows([{ name: "legacy", file: "legacy.json" }, { name: "a", file: "a/generations/1-000000000000.json", schemaVersion: 4 },
+    { name: "b", file: "b/generations/1-000000000000.json", schemaVersion: 4 }]);
   assert.deepEqual(flows.map(flow => flow.name), ["a", "b"]);
   assert.equal(must(pickFlow(flows, "b")).name, "b");
   assert.equal(must(pickFlow(flows, "missing")).name, "a");
@@ -117,7 +119,7 @@ test("the page opens the requested codebase, else the index default, else the fi
 });
 
 test("a link to a missing codebase or flow opens the fallback at step 0, with a notice that names the missing name", () => {
-  const flows = [{ name: "a", file: "a/generations/1-000000000000.json", schemaVersion: 3 }, { name: "b", file: "b/generations/1-000000000000.json", schemaVersion: 3, stepCount: 9 }];
+  const flows = [{ name: "a", file: "a/generations/1-000000000000.json", schemaVersion: 4 }, { name: "b", file: "b/generations/1-000000000000.json", schemaVersion: 4, stepCount: 9 }];
   const index = { defaultArtifact: "x.json", artifacts: [{ label: "x", file: "x.json", digest: "sha256:x", flows }, { file: "y.json", digest: "sha256:y" }] };
   assert.deepEqual(resolveLink(index, { artifact: "x.json", flow: "b", step: 5 }), { file: "x.json", flow: "b", step: 5, notice: null });
   assert.deepEqual(resolveLink(index, { artifact: null, flow: null, step: 3 }), { file: "x.json", flow: null, step: 3, notice: null });
