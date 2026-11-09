@@ -7,7 +7,7 @@
 import type { DeckStep, DiffArtifact, DiffRow } from "../data/models.ts";
 import type { CodeView } from "../deck/context.ts";
 import { whereHtml } from "../deck/code.ts";
-import { md } from "../deck/markup.ts";
+import { ledgerHtml, md } from "../deck/markup.ts";
 import { highlight } from "../layout/highlight.ts";
 import { clamp, esc, plural } from "../layout/util.ts";
 import { buildDiffModel, KINDS, movedText, numberLines, slotsOf, type Counted, type OverviewRow, type Side, type SideStep, type Slot } from "./model.ts";
@@ -272,7 +272,7 @@ export function createDiffView(diff: DiffArtifact, go: (step: number) => void): 
   function showRemoved(step: SideStep, at: number) {
     const view = diffCode(step.row!);
     $("#cdHead").innerHTML = `<h2 class="cd-title"><span class="ctt">${esc(step.title)}</span><i class="cursor" aria-hidden="true"></i></h2>`;
-    $("#cdStep").innerHTML = `<p class="cd-ann">${view.tag}${md(step.annotation)}</p><p class="cd-note">Before step ${step.index} is not in the After flow. The map shows After step ${at}.</p>`;
+    $("#cdStep").innerHTML = `${ledgerHtml(step.ledger, view.tag)}<p class="cd-note">Before step ${step.index} is not in the After flow. The map shows After step ${at}.</p>`;
     $("#where").innerHTML = view.where;
     const code = $("#code");
     code.innerHTML = view.html;

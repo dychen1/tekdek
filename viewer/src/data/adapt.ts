@@ -1,5 +1,5 @@
 /* Deck adapters. This module turns a verified graph document and a frozen flow artifact into deck data.
-   Inputs: a schema 1 graph document and a schema 3 flow artifact. Outputs: DeckGraph and DeckFlow.
+   Inputs: a schema 1 graph document and a schema 4 flow artifact. Outputs: DeckGraph and DeckFlow.
    The adapters read data only; they never fetch.
    # Sections
    graph, flow, shared rules */
@@ -65,19 +65,20 @@ export function fileTree(paths: readonly string[]): DeckTree {
 
 const COLORS = new Set<ClusterColor>(["cyan", "red", "yellow", "magenta", "lime", "orange", "blue", "violet"]);
 
-/** Adapts a frozen schema 3 flow artifact.
+/** Adapts a frozen schema 4 flow artifact.
  *  Clusters keep intent order. Members come from assigned member decisions that the graph contains.
  *  A step with no cluster label joins no deck; release 1 artifacts always carry a label. */
 export function deckFlow(artifact: FlowArtifact, graph: DeckGraph, graphDigest: string, entry: FlowEntry | null = null): DeckFlow {
-  if (artifact?.kind !== "tekdek.flow" || artifact.schemaVersion !== 3 || !Array.isArray(artifact.intent?.steps)) {
-    throw new Error("The flow file is not a frozen schema 3 flow artifact.");
+  if (artifact?.kind !== "tekdek.flow" || artifact.schemaVersion !== 4 || !Array.isArray(artifact.intent?.steps)) {
+    throw new Error("The flow file is not a frozen schema 4 flow artifact.");
   }
   const present = new Set(graph.functions.map(fn => fn.id));
   const colors = new Map(artifact.view.clusters.map(view => [view.clusterKey, view.color]));
   const clusters: DeckCluster[] = artifact.intent.clusters.map(cluster => {
     const color = colors.get(cluster.key) as ClusterColor | undefined;
     return {
-      id: cluster.key, label: cluster.label, description: cluster.description,
+      id: cluster.key, label: cluster.label, phase: cluster.phaseNote ?? cluster.phase.replace(/_/g, " "),
+      input: cluster.input, output: cluster.output, rules: cluster.rules,
       color: color && COLORS.has(color) ? color : "accent",
       members: artifact.assignment.members
         .filter(member => member.outcome === "assigned" && member.clusterKey === cluster.key && present.has(member.nodeKey))
@@ -88,7 +89,7 @@ export function deckFlow(artifact: FlowArtifact, graph: DeckGraph, graphDigest: 
   const facts = new Map((artifact.facts.nodes ?? []).map(node => [node.key, node]));
   const steps: DeckStep[] = artifact.intent.steps.map((step, i) => ({
     index: i + 1, id: step.id, title: step.title, node: step.nodeKey, cluster: step.clusterKey ?? "",
-    annotation: step.annotation, missing: !present.has(step.nodeKey),
+    ledger: step.ledger, missing: !present.has(step.nodeKey),
     transition: transitions.get(step.id) ?? null,
     signature: facts.get(step.nodeKey)?.signature ?? null,
     documentation: facts.get(step.nodeKey)?.documentation ?? null,
@@ -102,8 +103,8 @@ export function deckFlow(artifact: FlowArtifact, graph: DeckGraph, graphDigest: 
 
 // ============ shared rules ============
 
-/** Returns the flows that the viewer shows: the frozen schema 3 entries of a codebase, in index order. */
-export const frozenFlows = (flows: readonly FlowEntry[] | undefined) => (flows ?? []).filter(flow => flow.schemaVersion === 3);
+/** Returns the flows that the viewer shows: the frozen schema 4 entries of a codebase, in index order. */
+export const frozenFlows = (flows: readonly FlowEntry[] | undefined) => (flows ?? []).filter(flow => flow.schemaVersion === 4);
 
 /** Picks the flow to open: the requested name, else the first flow. */
 export function pickFlow(flows: readonly FlowEntry[], requested: string | null): FlowEntry | null {

@@ -1,4 +1,4 @@
-//! Agent output contract, version 1.
+//! Agent output contract, version 2.
 //!
 //! This is the only data that a coding agent authors for one flow generation.
 //! Text and key fields stay plain strings here: code canonicalizes and checks
@@ -6,7 +6,10 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::{EvidenceBasis, FlowPhase, nullable};
+use super::{EvidenceBasis, FlowPhase, StepLedger, nullable};
+
+/// The agent output contract version that this build reads.
+pub const AGENT_CONTRACT_VERSION: u32 = 2;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(
@@ -54,7 +57,9 @@ pub struct AgentFlow {
 pub struct AgentCluster {
     pub key: String,
     pub label: String,
-    pub description: String,
+    pub input: Vec<String>,
+    pub output: Vec<String>,
+    pub rules: Vec<String>,
     pub phase: FlowPhase,
     #[serde(deserialize_with = "nullable")]
     pub phase_note: Option<String>,
@@ -69,5 +74,5 @@ pub struct AgentStep {
     pub node_key: String,
     pub cluster_key: String,
     pub title: String,
-    pub annotation: String,
+    pub ledger: StepLedger,
 }

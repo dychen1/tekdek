@@ -19,7 +19,7 @@ use crate::store::graph::{
 
 /// The generation digest of the fixture output frozen against the fixture graph.
 pub const GOLDEN_GENERATION: &str =
-    "sha256:91d34bf8f88faf1cab591cb2d41b1b3c4a911d443998b39a00d08a6ad92e5f64";
+    "sha256:6af315346d9d89e5b68c1ae7c9697b557fc66385d6a0e820503f8c00ac47d9a0";
 
 const MAIN: &str = "src/main.rs::callable:main";
 const PARSE: &str = "src/parse.rs::callable:parse_args";
@@ -96,14 +96,17 @@ pub fn store() -> tempfile::TempDir {
 
 /// Returns one valid agent output for a new flow.
 pub fn output() -> Value {
-    let step = |node: &str, cluster: &str, title: &str, annotation: &str| {
+    let step = |node: &str, cluster: &str, title: &str, does: &str| {
         json!({
-            "priorStepId": null, "nodeKey": node, "clusterKey": cluster,
-            "title": title, "annotation": annotation
+            "priorStepId": null, "nodeKey": node, "clusterKey": cluster, "title": title,
+            "ledger": {
+                "takes": null, "requires": null, "does": [does],
+                "onFail": null, "returns": null, "writes": null
+            }
         })
     };
     json!({
-        "contractVersion": 1,
+        "contractVersion": 2,
         "outcome": "flow",
         "flow": {
             "behavior": "How the demo command parses input and saves a result.",
@@ -113,17 +116,19 @@ pub fn output() -> Value {
             "clusters": [
                 {
                     "key": "parse-input", "label": "Parse the input",
-                    "description": "The command reads its arguments and the input file before any write.",
+                    "input": [], "output": ["Input"],
+                    "rules": ["The command reads its arguments and the input file before any write."],
                     "phase": "input_validation", "phaseNote": null
                 },
                 {
                     "key": "write-result", "label": "Write the result",
-                    "description": "The command stores the parsed result under the store lock.",
+                    "input": ["Input"], "output": [],
+                    "rules": ["The command stores the parsed result under the store lock."],
                     "phase": "persist", "phaseNote": null
                 }
             ],
             "steps": [
-                step(MAIN, "parse-input", "Start the command", "The entry point receives the arguments."),
+                step(MAIN, "parse-input", "Start the command", "The entry point passes the arguments to `fn:parse_args`."),
                 step(PARSE, "parse-input", "Parse the arguments", "Parse the flags into typed arguments."),
                 step(READ, "parse-input", "Read the input", "Read the input file that the arguments name."),
                 step(MAIN, "parse-input", "Return to main", "Control returns to main with the parsed input."),

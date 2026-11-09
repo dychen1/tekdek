@@ -8,9 +8,9 @@
 use std::collections::BTreeSet;
 
 use super::{
-    BEHAVIOR, BOUNDARIES, CLUSTER_COUNT, CLUSTER_DESCRIPTION, CLUSTER_LABEL, PHASE_NOTE,
-    REVISION_SUMMARY, STEP_ANNOTATION, STEP_COUNT, STEP_TITLE, check_author, cluster_rules,
-    stored_text, unused_clusters,
+    BEHAVIOR, BOUNDARIES, CLUSTER_COUNT, CLUSTER_LABEL, CLUSTER_RULE, CLUSTER_TYPE, LEDGER_ITEM,
+    PHASE_NOTE, REVISION_SUMMARY, STEP_COUNT, STEP_TITLE, check_author, cluster_rules,
+    ledger_rules, stored_text, unused_clusters,
 };
 use crate::flow::{
     assign, derive,
@@ -160,21 +160,9 @@ fn generation_rules(artifact: &FlowArtifact, parent: Option<&FlowArtifact>) -> V
     issues
 }
 
-/// Checks the stored text limits, the cluster rules, step IDs, and cluster use.
-fn intent_rules(intent: &IntentLayer) -> Vec<FlowIssue> {
+/// Checks the stored texts of each cluster and step: labels, types, rules, phase notes, titles, and ledger items.
+fn item_texts(intent: &IntentLayer) -> Vec<FlowIssue> {
     let mut issues = Vec::new();
-    stored_text(&mut issues, &intent.behavior, "/intent/behavior", BEHAVIOR);
-    if let Some(value) = &intent.boundaries {
-        stored_text(&mut issues, value, "/intent/boundaries", BOUNDARIES);
-    }
-    if let Some(value) = &intent.revision_summary {
-        stored_text(
-            &mut issues,
-            value,
-            "/intent/revisionSummary",
-            REVISION_SUMMARY,
-        );
-    }
     for (index, cluster) in intent.clusters.iter().enumerate() {
         stored_text(
             &mut issues,
@@ -182,12 +170,20 @@ fn intent_rules(intent: &IntentLayer) -> Vec<FlowIssue> {
             &format!("/intent/clusters/{index}/label"),
             CLUSTER_LABEL,
         );
-        stored_text(
-            &mut issues,
-            &cluster.description,
-            &format!("/intent/clusters/{index}/description"),
-            CLUSTER_DESCRIPTION,
-        );
+        for (field, values, rule) in [
+            ("input", &cluster.input, CLUSTER_TYPE),
+            ("output", &cluster.output, CLUSTER_TYPE),
+            ("rules", &cluster.rules, CLUSTER_RULE),
+        ] {
+            for (item, value) in values.iter().enumerate() {
+                stored_text(
+                    &mut issues,
+                    value,
+                    &format!("/intent/clusters/{index}/{field}/{item}"),
+                    rule,
+                );
+            }
+        }
         if let Some(note) = &cluster.phase_note {
             stored_text(
                 &mut issues,
@@ -204,14 +200,39 @@ fn intent_rules(intent: &IntentLayer) -> Vec<FlowIssue> {
             &format!("/intent/steps/{index}/title"),
             STEP_TITLE,
         );
+        let path = format!("/intent/steps/{index}/ledger");
+        for (slot, items) in step.ledger.slots() {
+            for (item, value) in items.unwrap_or_default().iter().enumerate() {
+                stored_text(
+                    &mut issues,
+                    value,
+                    &format!("{path}/{slot}/{item}"),
+                    LEDGER_ITEM,
+                );
+            }
+        }
+        ledger_rules(&mut issues, &step.ledger, &path, None);
+    }
+    issues
+}
+
+/// Checks the stored text limits, the cluster rules, step IDs, and cluster use.
+fn intent_rules(intent: &IntentLayer) -> Vec<FlowIssue> {
+    let mut issues = Vec::new();
+    stored_text(&mut issues, &intent.behavior, "/intent/behavior", BEHAVIOR);
+    if let Some(value) = &intent.boundaries {
+        stored_text(&mut issues, value, "/intent/boundaries", BOUNDARIES);
+    }
+    if let Some(value) = &intent.revision_summary {
         stored_text(
             &mut issues,
-            &step.annotation,
-            &format!("/intent/steps/{index}/annotation"),
-            STEP_ANNOTATION,
+            value,
+            "/intent/revisionSummary",
+            REVISION_SUMMARY,
         );
     }
-    issues.extend(cluster_rules(&intent.clusters, "/intent/clusters"));
+    issues.extend(item_texts(intent));
+    issues.extend(cluster_rules(&intent.clusters, "/intent/clusters", None));
     if !CLUSTER_COUNT.contains(&intent.clusters.len()) || !STEP_COUNT.contains(&intent.steps.len())
     {
         issues.push(

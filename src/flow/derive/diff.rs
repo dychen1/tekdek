@@ -108,8 +108,8 @@ fn step_diffs(base: &[FlowStep], current: &[FlowStep], summary: &mut DiffSummary
                 if before.title != step.title {
                     changed_fields.push(StepField::Title);
                 }
-                if before.annotation != step.annotation {
-                    changed_fields.push(StepField::Annotation);
+                if before.ledger != step.ledger {
+                    changed_fields.push(StepField::Ledger);
                 }
                 if !change.in_place {
                     changed_fields.push(StepField::Position);
@@ -154,8 +154,10 @@ fn cluster_diffs(
                 if before.label != cluster.label {
                     changed_fields.push(ClusterField::Label);
                 }
-                if before.description != cluster.description {
-                    changed_fields.push(ClusterField::Description);
+                if (&before.input, &before.output, &before.rules)
+                    != (&cluster.input, &cluster.output, &cluster.rules)
+                {
+                    changed_fields.push(ClusterField::Ledger);
                 }
                 if before.phase != cluster.phase || before.phase_note != cluster.phase_note {
                     changed_fields.push(ClusterField::Phase);
