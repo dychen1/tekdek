@@ -20,6 +20,7 @@ compile_error!("enable the python, rust, or typescript feature");
 
 pub mod analysis;
 pub mod catalog;
+pub mod diff;
 pub mod flow;
 pub mod query;
 pub mod semantic;

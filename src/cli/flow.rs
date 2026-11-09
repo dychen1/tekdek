@@ -91,10 +91,10 @@ struct ImportCommand {
     config: Option<PathBuf>,
 }
 
-struct AuthorOptions {
-    kind: Option<String>,
-    name: Option<String>,
-    model_id: Option<String>,
+pub(super) struct AuthorOptions {
+    pub(super) kind: Option<String>,
+    pub(super) name: Option<String>,
+    pub(super) model_id: Option<String>,
 }
 
 // -----------------------------------------------------------------------------
@@ -153,7 +153,7 @@ impl Command {
 
 impl AuthorOptions {
     /// Builds the provenance author. The default author is `system`.
-    fn resolve(self) -> Result<Author, String> {
+    pub(super) fn resolve(self) -> Result<Author, String> {
         let kind = self.kind.as_deref().unwrap_or(if self.name.is_some() {
             "agent"
         } else {

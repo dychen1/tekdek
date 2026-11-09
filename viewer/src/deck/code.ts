@@ -27,7 +27,7 @@ const title = (text: string, step = 0) =>
 const noteHtml = (text: string) => `<p class="cd-empty">${md(text)}</p>`;
 
 /** The code header path: the folder dimmed, then the declaration line in orange when the code shows. */
-function whereHtml(path: string, line: number | null): string {
+export function whereHtml(path: string, line: number | null): string {
   const cut = path.lastIndexOf("/") + 1;
   return `<span class="dir">${esc(path.slice(0, cut))}</span>${esc(path.slice(cut))}${line === null ? "" : `<span class="at">:${esc(line)}</span>`}`;
 }
@@ -171,7 +171,14 @@ export function createCode(ctx: DeckContext): CodeColumn {
     const from = fromFact(step);
     if (from) facts.push(from);
     const fn = model.fnAt(state.cur);
-    if (!fn) {
+    const custom = ctx.codeView?.(step) ?? null;
+    if (custom) {
+      whereEl.innerHTML = custom.where;
+      codeEl.innerHTML = custom.html;
+      if (fn) facts.push(...callFacts(step));
+      if (step.documentation) facts.push(["doc", esc(step.documentation)]);
+      if (step.signature) facts.push(["signature", `<code>${esc(oneLineSignature(step.signature))}</code>`]);
+    } else if (!fn) {
       // a step function that the graph no longer has: the note in place of code, and no facts beyond "from"
       whereEl.innerHTML = "";
       codeEl.innerHTML = noteHtml(sourceNote({ key: step.node, status: "missing" }) ?? "");
@@ -194,9 +201,15 @@ export function createCode(ctx: DeckContext): CodeColumn {
     // the summary names the closed rows, so a reader knows what opens
     const more = facts.length ? `<details class="cd-more"${factsOpen ? " open" : ""}><summary>${icon("chev")}<span class="cd-keys">${facts.map(([k]) => k).join(" · ")}</span></summary>` +
       `<dl class="cd-facts">${facts.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("")}</dl></details>` : "";
-    stepEl.innerHTML = `<p class="cd-ann">${md(step.annotation)}</p>${more}`;
+    stepEl.innerHTML = `<p class="cd-ann">${custom?.tag ?? ""}${md(step.annotation)}</p>${more}`;
     stepEl.scrollTop = 0;
     fitFold();
+    // the step text sets the code height, so a code view lands after it: two lines of context above the marked line
+    if (custom) {
+      const land = codeEl.querySelector<HTMLElement>("[data-land]");
+      codeEl.scrollLeft = 0;
+      codeEl.scrollTop = land ? Math.max(0, land.offsetTop - 2 * land.offsetHeight) : 0;
+    }
     swap(prev);
   }
 

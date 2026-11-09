@@ -3,7 +3,7 @@
    `deck.ts` builds one context; every other deck module reads and writes through it.
    # Sections
    DOM helpers, parts, context */
-import type { DeckFlow, DeckGraph, SourceView } from "../data/models.ts";
+import type { DeckFlow, DeckGraph, DeckStep, SourceView } from "../data/models.ts";
 import type { DeckModel, DeckState } from "../layout/model.ts";
 
 // ============ DOM helpers ============
@@ -77,6 +77,10 @@ export interface DeckParts {
 
 // ============ context ============
 
+/** A replacement for the code viewer of one step: the code header markup, the code markup, and a tag before the
+ *  annotation. The line marked `data-land` is where the viewer scrolls to. */
+export interface CodeView { where: string; html: string; tag: string }
+
 /** Options that the page gives a deck. */
 export interface DeckOptions {
   graph: DeckGraph;
@@ -84,6 +88,8 @@ export interface DeckOptions {
   /** The source of each step function, by function key. Empty when the flow has none. */
   sources: ReadonlyMap<string, SourceView>;
   onStep?: (step: number) => void;
+  /** The code view of a step, or null for the step source. The PR diff view uses it. */
+  codeView?: (step: DeckStep) => CodeView | null;
 }
 
 /** The shared context of one deck. */
@@ -93,6 +99,7 @@ export interface DeckContext {
   parts: DeckParts;
   /** Aborts every listener of the deck on teardown. */
   signal: AbortSignal;
+  codeView?: DeckOptions["codeView"];
   /** Goes to a step. */
   go(step: number): void;
   /** Places the file box and the deck, then draws the connectors. */

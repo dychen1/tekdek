@@ -1,14 +1,14 @@
 /* Artifact loading. This module owns every fetch of the viewer: the artifact index, one graph file with its
-   SHA-256 digest check, one frozen flow generation, and the function source of one flow. Each failure is a
+   SHA-256 digest check, one frozen flow generation, one frozen PR diff, and the function source of one flow. Each failure is a
    LoadError with its cause.
    # Sections
-   errors, fetch, index, graph, flow, source */
-import type { ArtifactEntry, ArtifactIndex, FlowArtifact, FlowEntry, GraphDocument, SourceDocument, SourceView } from "./models.ts";
+   errors, fetch, index, graph, flow, diff, source */
+import type { ArtifactEntry, ArtifactIndex, DiffArtifact, FlowArtifact, FlowEntry, GraphDocument, SourceDocument, SourceView } from "./models.ts";
 
 // ============ errors ============
 
 /** The cause of a load failure. Each cause has one recovery step in the page. */
-export type LoadReason = "fetch" | "server" | "digest" | "graph" | "flow" | "empty";
+export type LoadReason = "fetch" | "server" | "digest" | "graph" | "flow" | "diff" | "empty";
 
 /** A load failure with its cause. */
 export class LoadError extends Error {
@@ -76,6 +76,34 @@ export async function loadGraph(entry: ArtifactEntry): Promise<GraphDocument> {
 export async function loadFlow(entry: FlowEntry): Promise<FlowArtifact> {
   const path = `flows/${entry.file}`;
   return fetchJson<FlowArtifact>(artifactUrl(path), path, "flow");
+}
+
+// ============ diff ============
+
+/** Loads one frozen PR diff. The index entry names its file; without an entry the store default `diffs/<name>.json` applies.
+ *  A document that is not a schema 1 diff is a `diff` failure. */
+export async function loadDiff(index: ArtifactIndex, name: string): Promise<DiffArtifact> {
+  const path = index.diffs?.find(entry => entry.name === name)?.file ?? `diffs/${name}.json`;
+  const diff = await fetchJson<DiffArtifact>(artifactUrl(path), path, "diff");
+  if (diff?.kind !== "tekdek.diff" || diff.schemaVersion !== 1 || !Array.isArray(diff.rows) || !diff.head?.flow || !diff.base?.flow
+      || !diff.rows.every(validRow)) {
+    throw new LoadError("diff", `The diff file ${path} is not a frozen schema 1 diff.`);
+  }
+  return diff;
+}
+
+const KINDS = new Set(["new", "removed", "changed", "moved", "unchanged"]);
+const OPS = new Set(["context", "added", "removed"]);
+const count = (value: unknown) => Number.isSafeInteger(value) && (value as number) >= 0;
+const validSpan = (span: unknown) => span === null
+  || (typeof span === "object" && typeof (span as { path?: unknown }).path === "string"
+    && count((span as { start?: unknown }).start) && count((span as { end?: unknown }).end));
+
+/** True when a row has only the kinds, counts, spans, and line ops of the schema. The view puts these values in markup without escapes. */
+export function validRow(row: DiffArtifact["rows"][number]): boolean {
+  return KINDS.has(row?.kind) && count(row.added) && count(row.removed)
+    && validSpan(row.baseSpan) && validSpan(row.headSpan)
+    && Array.isArray(row.lines) && row.lines.every(line => OPS.has(line?.op) && typeof line.text === "string");
 }
 
 // ============ source ============

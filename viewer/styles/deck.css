@@ -4,7 +4,7 @@
    # Sections
    fonts, tokens, base, canvas frame, file box, deck, lifted boxes, connectors, sidebar,
    shared controls, map tools and pickers, top band, code column, bottom bar,
-   full screen code, load and motion rules
+   full screen code, PR diff view, load and motion rules
    ========================================================================== */
 
 /* ============ fonts: JetBrains Mono (SIL OFL 1.1, see ../fonts/OFL.txt), latin subset ============ */
@@ -469,6 +469,96 @@ button.ref:hover{text-decoration:underline;text-underline-offset:3px}
 .fsbtn{flex:0 0 26px;width:26px;height:26px}
 body.full .card{left:var(--frame-l);width:auto;top:var(--top-band);bottom:calc(var(--bar-bottom) + var(--bar-h) + 10px)}
 body.full .frame,body.full .cv,body.full .links{display:none}
+
+/* ============ PR diff view: the overview covers the canvas and the code column; the explorer and the bar stay ============ */
+/* Clusters only split a long call stack, so every cluster bar is neutral. Git colors mark steps and numbers only. */
+.dv{--k-new:var(--tn-green);--k-removed:var(--tn-red);--k-changed:var(--tn-yellow);--k-moved:var(--tn-magenta);--k-unchanged:var(--tn-comment);
+  position:fixed;z-index:10;left:var(--frame-l);right:0;top:0;bottom:0;display:flex;flex-direction:column;padding-right:var(--gap);background:var(--bg)}
+.dv[hidden]{display:none}
+body.dv-over .controls,body.dv-over .help{z-index:11}
+body.dv-over .links{visibility:hidden}
+.dv-band{flex:none;height:28px;margin-top:var(--gap);display:flex;align-items:center;gap:12px;min-width:0}
+.dv-body{flex:1 1 0;min-height:0;overflow:auto;padding:0 0 16px;margin-bottom:calc(var(--bar-bottom) + var(--bar-h) + 8px);scrollbar-width:thin;scrollbar-color:var(--line-soft) transparent}
+.dv .ov{margin:20px 22px 0;width:max-content}
+.dv .osum{margin:0;font:var(--fs-ui)/20px var(--font-code);color:var(--ink-2);text-decoration:underline dotted var(--line-soft);text-underline-offset:5px;cursor:help}
+.dv .osum b{color:var(--ink);font-weight:var(--fw-bold)}
+.dv .dwrap{position:relative;margin-top:16px}
+.dv .mp{display:block;overflow:visible;font-family:var(--font-code)}
+.dv .mp text{dominant-baseline:central;text-anchor:middle}
+.dv .sg{fill:color-mix(in srgb,var(--tn-fg) 2%,transparent);stroke:var(--line-faint)}
+.dv .column-label{font-size:12px;fill:var(--ink-2)}
+.dv .column-count{font-size:10px;fill:var(--dim)}
+.dv .fe{fill:none;stroke:var(--line)}
+.dv marker path{fill:var(--line)}
+.dv .nd{cursor:pointer;outline:none}
+.dv .nd .box{fill:var(--bg);stroke:var(--k-unchanged);pointer-events:all}
+.dv .nd:hover>.box{fill:color-mix(in srgb,var(--tn-fg) 7%,var(--bg))}
+.dv .nd .node-name{font-size:12px;fill:var(--ink-2)}
+.dv .nd .ring{fill:none;stroke:var(--focus);stroke-width:1.5;visibility:hidden}
+.dv .nd.cur .ring,.dv .nd:focus-visible .ring{visibility:visible}
+.dv .expand-control{cursor:pointer;outline:none}
+.dv .expand-control rect{fill:transparent}
+.dv .expand-control path{fill:none;stroke:var(--ink-2)}
+.dv .expand-control:hover path,.dv .expand-control:focus-visible path{stroke:var(--focus);stroke-width:2}
+/* the numbers column: quiet ink, git color only on the numbers */
+.dv .row-count{font-size:11px;fill:var(--dim);text-anchor:start !important}
+.dv .ln-add,.dv .n-new{fill:var(--k-new)}.dv .ln-del,.dv .n-removed{fill:var(--k-removed)}.dv .n-changed{fill:var(--k-changed)}.dv .n-moved{fill:var(--k-moved)}
+/* an open row: a neutral frame on each side, one node per step, and quiet empty slots */
+.dv .nd.frame>.frame-body{fill:color-mix(in srgb,var(--tn-fg) 2%,var(--bg));stroke:var(--k-unchanged);pointer-events:none}
+.dv .nd.frame>.box{fill:transparent;stroke:none}
+.dv .nd.frame:hover>.box{fill:color-mix(in srgb,var(--tn-fg) 4%,transparent)}
+.dv .title-rule{stroke:var(--line-soft)}
+.dv .frame-title{font-size:13px;text-anchor:start !important;fill:var(--ink)}
+.dv .frame-title.none{fill:var(--dim)}
+.dv .frame-count{font-size:11px;text-anchor:end !important;fill:var(--dim)}
+.dv .sn{cursor:pointer;outline:none}
+.dv .sn rect{fill:var(--bg);stroke:var(--k-unchanged)}
+.dv .sn.k-new rect{stroke:var(--k-new)}.dv .sn.k-changed rect{stroke:var(--k-changed)}.dv .sn.k-moved rect{stroke:var(--k-moved)}
+.dv .sn.k-removed rect{stroke:var(--k-removed);stroke-dasharray:4 3}
+.dv .sn:hover rect{fill:color-mix(in srgb,var(--tn-fg) 6%,var(--bg))}
+.dv .sn:focus-visible rect{stroke:var(--focus);stroke-width:1.5}
+.dv .sname{font-size:12.5px;text-anchor:start !important;fill:var(--ink)}
+.dv .sn.k-unchanged .sname{fill:var(--ink-2)}
+.dv .sn.k-removed .sname{fill:var(--dim)}
+.dv .sdelta{font-size:11px;text-anchor:end !important}
+.dv .smove{font-size:11px;text-anchor:start !important;fill:var(--k-moved)}
+.dv .slot{fill:none;stroke:color-mix(in srgb,var(--line-soft) 55%,transparent);stroke-dasharray:2 5}
+/* the note and the legend: flat popovers with no shadow */
+.dv .ntip,.dv .legend{border:1px solid var(--line-soft);border-radius:4px;background:var(--surface-panel);font:var(--fs-ui-s)/17px var(--font-code);color:var(--ink-2)}
+.dv .ntip{position:absolute;z-index:3;width:max-content;max-width:224px;padding:8px 11px;pointer-events:none;transition:opacity 120ms}
+.dv .ntip[hidden]{display:block;opacity:0;visibility:hidden}
+.dv .ntip::before,.dv .legend::before{content:"";position:absolute;left:-5px;width:8px;height:8px;background:var(--surface-panel);border-left:1px solid var(--line-soft);border-bottom:1px solid var(--line-soft);transform:rotate(45deg)}
+.dv .ntip::before{top:calc(50% - 4px)}
+.dv .note-word{color:var(--k-changed)}
+.dv .osum-wrap{position:relative;width:max-content;margin-left:-6px;padding:2px 6px;border-radius:var(--r-s);outline:none}
+.dv .osum-wrap:focus-visible{outline:1.5px solid var(--focus);outline-offset:2px}
+.dv .legend{position:absolute;z-index:4;top:-7px;left:calc(100% + 12px);display:grid;gap:8px;width:max-content;padding:9px 12px 10px;line-height:16px;
+  opacity:0;visibility:hidden;pointer-events:none;transition:opacity 120ms,visibility 0s 120ms}
+.dv .legend::before{top:15px}
+.dv .osum-wrap:hover .legend,.dv .osum-wrap:focus-visible .legend{opacity:1;visibility:visible;transition:opacity 120ms 150ms,visibility 0s 150ms}
+.dv .legend .kinds{display:flex;gap:18px}
+.dv .legend .kinds span{display:inline-flex;align-items:center;gap:6px}
+.dv .sample{display:inline-block;width:16px;height:10px;border:1px solid var(--sample)}
+.dv .sample.k-new{--sample:var(--k-new)}.dv .sample.k-changed{--sample:var(--k-changed)}.dv .sample.k-moved{--sample:var(--k-moved)}
+.dv .sample.k-removed{--sample:var(--k-removed);border-style:dashed}
+.dv .legend .hint{color:var(--dim)}
+/* the deck in diff mode: the overview button, the step kind tag, and the step diff in the code column */
+#clearBtn[hidden]{display:none}
+.fh-back{margin-left:6px;padding:2px 6px;border:1px solid var(--line-soft);border-radius:var(--r-s);background:none;font:inherit;color:var(--ink-2);cursor:pointer}
+.fh-back:hover{color:var(--ink);background:var(--surface-hover)}
+.fh-back kbd{margin-left:4px;padding:0 4px;border-radius:var(--r-xs);background:var(--key-bg);font:inherit;color:var(--ink)}
+.tag.k-new{border-color:var(--tn-green);color:var(--tn-green)}.tag.k-removed{border-color:var(--tn-red);color:var(--tn-red)}
+.tag.k-changed{border-color:var(--tn-yellow);color:var(--tn-yellow)}.tag.k-moved{border-color:var(--tn-magenta);color:var(--tn-magenta);height:auto;overflow-wrap:anywhere}
+.cd-note{margin:8px 0 0;font:var(--fs-ui-s)/1.6 var(--font-code);color:var(--dim)}
+.cw-path .dpath{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.cw-path:has(.dstat){display:flex;align-items:center;gap:12px;flex:1 1 auto}
+.dstat{margin-left:auto;flex:none;font-size:var(--fs-ui)}
+.dstat .ln-add{color:var(--tn-green)}.dstat .ln-del{color:var(--tn-red)}
+.diff .cl.ad,.diff .cl.ad .no,.diff .cl.ad .mk{background:color-mix(in srgb,var(--tn-green) 10%,var(--bg))}
+.diff .cl.rm,.diff .cl.rm .no,.diff .cl.rm .mk{background:color-mix(in srgb,var(--tn-red) 10%,var(--bg))}
+.diff .cl .mk{text-align:center;user-select:none}
+.diff .cl.ad .mk{color:var(--tn-green)}.diff .cl.rm .mk{color:var(--tn-red)}
+@media (prefers-reduced-motion:reduce){.dv .ntip,.dv .legend,.dv .osum-wrap:hover .legend,.dv .osum-wrap:focus-visible .legend{transition:none}}
 
 /* ============ load and motion rules ============ */
 /* Nothing on the canvas animates: every step sets the file box, the deck, and the boxes at their final place in one frame. */

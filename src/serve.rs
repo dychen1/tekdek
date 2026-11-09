@@ -633,6 +633,26 @@ mod tests {
     }
 
     #[test]
+    fn serves_diff_files_by_name_and_nothing_else_in_the_diff_folder() {
+        let (root, _) = fixture();
+        let store = root.path();
+        fs::create_dir_all(store.join("diffs")).expect("diffs");
+        fs::write(store.join("diffs/pr-1.json"), "{}").expect("diff");
+        fs::write(store.join("diffs/notes.txt"), "x").expect("other");
+        fs::write(store.join("diffs/Bad Name.json"), "{}").expect("bad name");
+        assert_eq!(
+            get(store, "/artifacts/diffs/pr-1.json").body,
+            b"{}".as_slice()
+        );
+        assert_error(&get(store, "/artifacts/diffs/notes.txt"), 404);
+        assert_error(&get(store, "/artifacts/diffs/Bad%20Name.json"), 404);
+        // A diff that does not parse is served by name but left out of the catalog.
+        let catalog: serde_json::Value =
+            serde_json::from_slice(&get(store, "/artifacts/index.json").body).expect("catalog");
+        assert!(catalog.get("diffs").is_none());
+    }
+
+    #[test]
     fn serves_a_graph_with_its_cached_edges_under_the_catalog_digest() {
         let (root, _) = fixture();
         let store = root.path();

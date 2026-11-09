@@ -10,6 +10,7 @@ use std::{
 };
 
 use tekdek::{
+    diff::read_diff,
     flow::{lineage::read_current, models::FlowId},
     serve::ViewerServer,
 };
@@ -18,10 +19,11 @@ use url::Url;
 use super::{index::refresh_project_graph, split_arguments, store_directory};
 
 pub(super) const USAGE: &str =
-    "usage: tekdek serve [--store <directory>] [--port <n>] [--flow <name>] [--open] [--no-index]
+    "usage: tekdek serve [--store <directory>] [--port <n>] [--flow <name> | --diff <name>] [--open] [--no-index]
 serve starts the Lift Deck on 127.0.0.1 and prints its URL. The default store
 is the nearest .tekdek folder. The default port is 8000; port 0 selects a free
-port. --flow prints the URL that opens one flow. --open opens the URL in a browser.
+port. --flow prints the URL that opens one flow, and --diff the URL that opens
+one PR diff. --open opens the URL in a browser.
 Before it serves a .tekdek store, serve reindexes the project graph if the source
 changed after the last index, as tekdek index does. --no-index skips that step.
 serve sends each graph with the semantic edges in its cache, and starts no
@@ -33,6 +35,7 @@ struct Arguments {
     store: Option<PathBuf>,
     port: u16,
     flow: Option<String>,
+    diff: Option<String>,
     open: bool,
     index: bool,
 }
@@ -53,9 +56,10 @@ pub(super) fn run(raw: impl Iterator<Item = String>) -> Result<(), String> {
             }
         }
     }
-    let url = match &arguments.flow {
-        Some(flow) => flow_url(&server.url(), &store, flow)?,
-        None => server.url(),
+    let url = match (&arguments.flow, &arguments.diff) {
+        (Some(flow), _) => flow_url(&server.url(), &store, flow)?,
+        (None, Some(name)) => diff_url(&server.url(), &store, name)?,
+        (None, None) => server.url(),
     };
     println!("{url}");
     eprintln!("Serving {}. Press Ctrl-C to stop.", store.display());
@@ -70,7 +74,7 @@ pub(super) fn run(raw: impl Iterator<Item = String>) -> Result<(), String> {
 
 /// Parses the arguments after `serve`.
 fn parse(raw: impl Iterator<Item = String>) -> Result<Arguments, String> {
-    let (operands, mut options) = split_arguments(raw, &["--store", "--port", "--flow"])?;
+    let (operands, mut options) = split_arguments(raw, &["--store", "--port", "--flow", "--diff"])?;
     if let Some(operand) = operands.first() {
         return Err(format!("unexpected argument: {operand}"));
     }
@@ -84,6 +88,10 @@ fn parse(raw: impl Iterator<Item = String>) -> Result<Arguments, String> {
         .transpose()?
         .unwrap_or(DEFAULT_PORT);
     let flow = options.remove("--flow");
+    let diff = options.remove("--diff");
+    if flow.is_some() && diff.is_some() {
+        return Err("use --flow or --diff, not both".to_owned());
+    }
     let open = options.remove("--open").is_some();
     let index = options.remove("--no-index").is_none();
     if let Some(option) = options.keys().next() {
@@ -93,6 +101,7 @@ fn parse(raw: impl Iterator<Item = String>) -> Result<Arguments, String> {
         store,
         port,
         flow,
+        diff,
         open,
         index,
     })
@@ -106,6 +115,18 @@ fn flow_url(base: &str, store: &Path, flow: &str) -> Result<String, String> {
         .map_err(|error| format!("cannot read the flow {flow}: {error}"))?
         .ok_or_else(unlisted)?;
     viewer_url(base, &current.artifact.facts.binding.graph_artifact, flow)
+}
+
+/// Returns the viewer URL that opens one PR diff under the graph of its After flow.
+fn diff_url(base: &str, store: &Path, name: &str) -> Result<String, String> {
+    let artifact =
+        read_diff(store, name).map_err(|error| format!("{error}: run `tekdek diff list`"))?;
+    let mut url =
+        Url::parse(base).map_err(|error| format!("invalid viewer URL {base}: {error}"))?;
+    url.query_pairs_mut()
+        .append_pair("artifact", &artifact.head.flow.facts.binding.graph_artifact)
+        .append_pair("diff", name);
+    Ok(url.into())
 }
 
 /// Returns the viewer URL of one flow under one graph file.
