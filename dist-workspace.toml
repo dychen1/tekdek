@@ -23,3 +23,7 @@ tag-namespace = "v"
 github-build-setup = "../build-setup.yml"
 # Extra files in each archive: the license of the embedded JetBrains Mono font
 include = ["viewer/fonts/OFL.txt"]
+
+# GitHub no longer runs macos-14 jobs, which dist picks for Apple silicon by default.
+[dist.github-custom-runners]
+aarch64-apple-darwin = "macos-15"
