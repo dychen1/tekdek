@@ -1,7 +1,7 @@
 /* Viewer data model. This module owns the wire types that the viewer reads (the artifact index, the graph
    document, the frozen flow artifact) and the deck types that the adapters produce.
    # Sections
-   artifact index, graph document, flow artifact, deck data, function source */
+   artifact index, graph document, flow artifact, diff artifact, deck data, function source */
 
 // ============ artifact index ============
 
@@ -12,8 +12,11 @@ export interface FlowEntry { name: string; file: string; stepCount?: number; clu
  *  `graphDigest` names the graph file that flows bind. An older server sends no `graphDigest`: the two are the same. */
 export interface ArtifactEntry { label?: string; file: string; digest: string; graphDigest?: string; flows?: FlowEntry[] }
 
+/** One frozen PR diff in the artifact index. `file` is relative to the store, for example `diffs/<name>.json`. */
+export interface DiffEntry { name: string; file: string; baseCommit: string; headCommit: string; behavior: string }
+
 /** The artifact index that the viewer server returns. */
-export interface ArtifactIndex { defaultArtifact?: string; artifacts: ArtifactEntry[] }
+export interface ArtifactIndex { defaultArtifact?: string; artifacts: ArtifactEntry[]; diffs?: DiffEntry[] }
 
 // ============ graph document ============
 
@@ -43,6 +46,33 @@ export interface FlowArtifact {
   };
   assignment: { members: { outcome: string; nodeKey: string; clusterKey?: string }[] };
   view: { clusters: { clusterKey: string; color: string }[]; steps: { stepId: string; transition: Transition }[] };
+}
+
+// ============ diff artifact ============
+
+/** The change of one step. `moved` means that the function is in another file. A cluster change is never a move. */
+export type ChangeKind = "new" | "removed" | "changed" | "moved" | "unchanged";
+
+/** Lines `start` to `end` of one file, counted from 1, both included. */
+export interface LineSpan { path: string; start: number; end: number }
+
+/** One line of a unified diff. */
+export interface DiffLine { op: "context" | "added" | "removed"; text: string }
+
+/** The derived facts of one After step, of one pair, or of one removed Before step. */
+export interface DiffRow {
+  kind: ChangeKind; beforeStep: string | null; afterStep: string | null;
+  baseSpan: LineSpan | null; headSpan: LineSpan | null; added: number; removed: number; lines: DiffLine[];
+}
+
+/** The note of one cluster on one side: what its code does differently. */
+export interface DiffNote { side: "before" | "after"; clusterKey: string; text: string }
+
+/** A frozen schema 1 PR diff. `rows` holds the After steps in flow order, then the removed Before steps. */
+export interface DiffArtifact {
+  kind: string; schemaVersion: number; name: string;
+  base: { commit: string; flow: FlowArtifact }; head: { commit: string; flow: FlowArtifact };
+  pairs: { before: string; after: string }[]; notes: DiffNote[]; rows: DiffRow[];
 }
 
 // ============ deck data ============

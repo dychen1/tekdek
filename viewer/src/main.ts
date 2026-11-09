@@ -1,11 +1,12 @@
 /* Viewer page. This module owns page boot, the codebase and flow pickers, the loading and error states,
-   the source load, and the URL state (`?artifact=&flow=&step=`). It creates one deck for the selected
-   codebase and flow, and replaces it on a change.
+   the source load, and the URL state (`?artifact=&flow=&step=`, or `?artifact=&diff=&step=` for a PR diff). It creates
+   one deck for the selected codebase and flow, or for the After flow of a PR diff, and replaces it on a change.
    # Sections
    status, loading, pickers and badges, cut text, URL state, boot */
 import type { ArtifactEntry, ArtifactIndex, DeckFlow, DeckGraph, FlowEntry, SourceView } from "./data/models.ts";
 import { bindingDigest, deckFlow, deckGraph, pickFlow, frozenFlows, resolveLink } from "./data/adapt.ts";
-import { loadFlow, loadGraph, loadIndex, loadSource, LoadError, type LoadReason } from "./data/load.ts";
+import { loadDiff, loadFlow, loadGraph, loadIndex, loadSource, LoadError, type LoadReason } from "./data/load.ts";
+import { createDiffView, type DiffView } from "./diff/view.ts";
 import { pageOrigin } from "./deck/context.ts";
 import { createDeck, type DeckInstance } from "./deck/deck.ts";
 import { codebasePicker, flowPicker, icon } from "./deck/markup.ts";
@@ -64,6 +65,7 @@ const RECOVERY: Record<LoadReason, string> = {
   digest: "Reload this page: the graph or its semantic cache changed while the page loaded.",
   graph: "Reindex the codebase with <code>tekdek index</code> to write a current graph.",
   flow: "Freeze the flow again with <code>tekdek flow import</code>, then reload this page.",
+  diff: "Freeze the diff again with <code>tekdek diff import</code>, then reload this page.",
   empty: "Index a codebase with <code>tekdek index</code>, then reload this page.",
 };
 
@@ -71,7 +73,7 @@ const RECOVERY: Record<LoadReason, string> = {
  *  A failure of a load that a newer load replaced is dropped: the newer load owns the page. */
 function fail(error: unknown, mine = ticket) {
   if (mine !== ticket) return;
-  deck?.destroy(); deck = null;
+  closeDeck();
   showLoading(null);
   const reason = error instanceof LoadError ? error.reason : "fetch";
   const message = error instanceof Error ? error.message : String(error);
@@ -85,7 +87,16 @@ let entry: ArtifactEntry | null = null;
 let graph: DeckGraph | null = null;
 let flowEntry: FlowEntry | null = null;
 let deck: DeckInstance | null = null;
+/** The PR diff that the page shows, or null in the flow view. */
+let diffName: string | null = null;
+let diffView: DiffView | null = null;
 let ticket = 0;
+
+/** Destroys the deck and the diff view. */
+function closeDeck() {
+  diffView?.destroy(); diffView = null;
+  deck?.destroy(); deck = null;
+}
 
 /** Loads one codebase, verifies its graph, and opens the requested flow. A failure shows unless a newer load started. */
 async function openArtifact(file: string, flowName: string | null, step: number, notice: string | null = null) {
@@ -93,7 +104,7 @@ async function openArtifact(file: string, flowName: string | null, step: number,
   try {
     const next = index!.artifacts.find(item => item.file === file) ?? null;
     if (!next) throw new LoadError("fetch", `The artifact index has no codebase named ${file}.`);
-    deck?.destroy(); deck = null;
+    closeDeck();
     entry = next; graph = null;
     renderRepoBadge();
     const name = entry.label ?? entry.file;
@@ -102,7 +113,8 @@ async function openArtifact(file: string, flowName: string | null, step: number,
     const document = await loadGraph(entry);
     if (mine !== ticket) return;
     graph = deckGraph(document);
-    await openFlow(pickFlow(frozenFlows(entry.flows), flowName), step, notice);
+    if (diffName) await openDiff(diffName, step);
+    else await openFlow(pickFlow(frozenFlows(entry.flows), flowName), step, notice);
   } catch (error) {
     fail(error, mine);
   }
@@ -127,7 +139,8 @@ async function openFlow(next: FlowEntry | null, step: number, notice: string | n
       }
     }
     flowEntry = next;
-    deck?.destroy();
+    diffName = null;
+    closeDeck();
     showLoading(null);
     setChrome(true);
     showReader(true);
@@ -139,6 +152,38 @@ async function openFlow(next: FlowEntry | null, step: number, notice: string | n
     if (step > 0) deck.go(step);
     // after the first step: a step clears the notice
     showNotice(notice);
+  } catch (error) {
+    fail(error, mine);
+  }
+}
+
+/** Loads one PR diff and plays its After flow under the current graph, with the overview at step 0.
+ *  The deck shows each step's diff in place of its source. */
+async function openDiff(name: string, step: number) {
+  const mine = ++ticket;
+  try {
+    showLoading(`loading diff ${name}`);
+    const diff = await loadDiff(index!, name);
+    if (mine !== ticket) return;
+    let flow: DeckFlow;
+    try { flow = deckFlow(diff.head.flow, graph!, bindingDigest(entry!)); }
+    catch (error) {
+      throw new LoadError("diff", `The After flow of the diff ${name} is not a flow that this viewer reads. ${error instanceof Error ? error.message : ""}`.trim());
+    }
+    flowEntry = null;
+    closeDeck();
+    showLoading(null);
+    setChrome(true);
+    showReader(true);
+    const view = diffView = createDiffView(diff, n => deck?.go(n));
+    deck = createDeck({
+      graph: graph!, flow, sources: new Map(), codeView: s => view.codeView(s),
+      onStep: n => { view.sync(n); writeUrl(n); nameTab(n); },
+    });
+    renderFlowBand(flow);
+    view.band();
+    (window as unknown as { __deck: unknown }).__deck = deck.inspect;
+    if (step > 0) deck.go(Math.min(step, flow.steps.length));
   } catch (error) {
     fail(error, mine);
   }
@@ -185,6 +230,7 @@ pickPop.addEventListener("click", e => {
     const next = frozenFlows(entry?.flows).find(flow => flow.name === item.dataset.flow) ?? null;
     if (next && next.name !== flowEntry?.name) void openFlow(next, 0);
   } else if (item.dataset.artifact && item.dataset.artifact !== entry?.file) {
+    diffName = null;
     void openArtifact(item.dataset.artifact, null, 0);
   }
 });
@@ -223,7 +269,7 @@ function renderRepoBadge() {
 
 /** Names the browser tab after the step, the flow, and the codebase. */
 function nameTab(step: number) {
-  document.title = [step ? `Step ${step}` : "", flowEntry?.name, entry?.label ?? entry?.file].filter(Boolean).join(" · ");
+  document.title = [step ? `Step ${step}` : "", diffName ? `diff ${diffName}` : flowEntry?.name, entry?.label ?? entry?.file].filter(Boolean).join(" · ");
 }
 
 /** The flow badge and its freshness in the top band, or an empty band without a flow, and the page heading.
@@ -232,7 +278,8 @@ function renderFlowBand(flow: DeckFlow | null) {
   const codebase = entry?.label ?? entry?.file;
   $("pageTitle").textContent = codebase ? `Code map of ${codebase}${flow ? `, flow ${flow.name}` : ""}` : "Code map";
   const name = esc(flow?.name ?? "");
-  const pick = !!flow && frozenFlows(entry?.flows).length > 1;
+  // a PR diff plays one fixed flow, so its badge is no picker
+  const pick = !!flow && !diffName && frozenFlows(entry?.flows).length > 1;
   $("flowPick").outerHTML = flow ? badgeHtml("flowPick", "pbadge", `<span>${name}</span>`, pick ? `Flow ${name}. Choose another flow` : null) : '<span id="flowPick"></span>';
   if (pick) { const button = $("flowPick"); button.addEventListener("click", () => openPicker(button, "flow")); }
   $("fhMeta").innerHTML = flow
@@ -257,13 +304,14 @@ document.addEventListener("pointerover", e => {
 function readUrl() {
   const params = new URLSearchParams(location.search);
   const step = Number(params.get("step"));
-  return { artifact: params.get("artifact"), flow: params.get("flow"), step: Number.isSafeInteger(step) && step > 0 ? step : 0 };
+  return { artifact: params.get("artifact"), flow: params.get("flow"), diff: params.get("diff"), step: Number.isSafeInteger(step) && step > 0 ? step : 0 };
 }
 
 function writeUrl(step: number) {
   const params = new URLSearchParams();
   if (entry) params.set("artifact", entry.file);
-  if (flowEntry) params.set("flow", flowEntry.name);
+  if (diffName) params.set("diff", diffName);
+  else if (flowEntry) params.set("flow", flowEntry.name);
   if (step > 0) params.set("step", String(step));
   history.replaceState(null, "", `${location.pathname}?${params}`);
 }
@@ -274,8 +322,12 @@ async function boot() {
   showShell("loading", "var(--accent)", "Reading the artifact index.", "");
   showLoading("loading the artifact index");
   index = await loadIndex();
-  const link = resolveLink(index, readUrl())!;
-  await openArtifact(link.file, link.flow, link.step, link.notice);
+  const want = readUrl();
+  // a PR diff link opens the head graph that it names; the diff picks the flow
+  diffName = want.diff;
+  const link = resolveLink(index, diffName ? { ...want, flow: null } : want)!;
+  if (diffName && link.notice) diffName = null;
+  await openArtifact(link.file, link.flow, diffName ? want.step : link.step, link.notice);
 }
 
 boot().catch(fail);

@@ -41,7 +41,7 @@ export function createDeck(options: DeckOptions): DeckInstance {
   const model = buildModel(options.graph, options.flow, options.sources);
   const state = initialState(model);
   const ctx: DeckContext = {
-    model, state, parts: {} as DeckParts, signal: abort.signal, go, place, placeSoon,
+    model, state, parts: {} as DeckParts, signal: abort.signal, codeView: options.codeView, go, place, placeSoon,
   };
   let alive = true;
   /** The cluster whose deck shows, or null. */

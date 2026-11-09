@@ -1,14 +1,14 @@
 /* Artifact loading. This module owns every fetch of the viewer: the artifact index, one graph file with its
-   SHA-256 digest check, one frozen flow generation, and the function source of one flow. Each failure is a
+   SHA-256 digest check, one frozen flow generation, one frozen PR diff, and the function source of one flow. Each failure is a
    LoadError with its cause.
    # Sections
-   errors, fetch, index, graph, flow, source */
-import type { ArtifactEntry, ArtifactIndex, FlowArtifact, FlowEntry, GraphDocument, SourceDocument, SourceView } from "./models.ts";
+   errors, fetch, index, graph, flow, diff, source */
+import type { ArtifactEntry, ArtifactIndex, DiffArtifact, FlowArtifact, FlowEntry, GraphDocument, SourceDocument, SourceView } from "./models.ts";
 
 // ============ errors ============
 
 /** The cause of a load failure. Each cause has one recovery step in the page. */
-export type LoadReason = "fetch" | "server" | "digest" | "graph" | "flow" | "empty";
+export type LoadReason = "fetch" | "server" | "digest" | "graph" | "flow" | "diff" | "empty";
 
 /** A load failure with its cause. */
 export class LoadError extends Error {
@@ -76,6 +76,19 @@ export async function loadGraph(entry: ArtifactEntry): Promise<GraphDocument> {
 export async function loadFlow(entry: FlowEntry): Promise<FlowArtifact> {
   const path = `flows/${entry.file}`;
   return fetchJson<FlowArtifact>(artifactUrl(path), path, "flow");
+}
+
+// ============ diff ============
+
+/** Loads one frozen PR diff. The index entry names its file; without an entry the store default `diffs/<name>.json` applies.
+ *  A document that is not a schema 1 diff is a `diff` failure. */
+export async function loadDiff(index: ArtifactIndex, name: string): Promise<DiffArtifact> {
+  const path = index.diffs?.find(entry => entry.name === name)?.file ?? `diffs/${name}.json`;
+  const diff = await fetchJson<DiffArtifact>(artifactUrl(path), path, "diff");
+  if (diff?.kind !== "tekdek.diff" || diff.schemaVersion !== 1 || !Array.isArray(diff.rows) || !diff.head?.flow || !diff.base?.flow) {
+    throw new LoadError("diff", `The diff file ${path} is not a frozen schema 1 diff.`);
+  }
+  return diff;
 }
 
 // ============ source ============
