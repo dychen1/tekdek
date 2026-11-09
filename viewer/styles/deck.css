@@ -68,6 +68,7 @@
   --badge-shadow:0 2px 5px color-mix(in srgb,var(--tn-black) 55%,transparent);
   --key-lift-shadow:0 5px 6px color-mix(in srgb,var(--tn-black) 85%,transparent);
   --front-mix:44%;
+  --hover-lift:brightness(1.12);  /* a filled badge on hover; a light ground darkens it to keep the text contrast */
   --icon-stroke:1.5;
   /* geometry of the deck and its boxes; the deck camera sets --deck-z from DECK_Z in layout/deck-geometry.ts */
   --deck-t:30px; --box-h:28px; --focus-dz:30px; --shadow-dy:28px; --bh:32px;
@@ -86,22 +87,23 @@
   --tn-fg:#c0caf5; --tn-fg-dark:#a9b1d6; --tn-dim:#8d95bc; --tn-comment:#565f89; --tn-comment-text:#8088af; --tn-black:#0c0e14;
   --tn-blue:#7aa2f7; --tn-cyan:#7dcfff; --tn-green:#9ece6a; --tn-yellow:#e0af68;
   --tn-orange:#ff9e64; --tn-red:#f7768e; --tn-magenta:#bb9af7; --tn-purple:#9d7cd8}
-/* Light inverts the depth cues: the shadows and the box faces use soft gray, not the dark palette mix. */
+/* Light inverts the depth cues: the shadows and the box faces use a thin ink mix, not the dark palette mix.
+   Its accents are GitHub Light's darker steps, so each holds 4.5:1 on its own tint and on the diff fills. */
 :root[data-variant="light"]{color-scheme:light;
   --tn-bg:#f6f8fa; --tn-pane:#ffffff; --tn-raised:#ffffff;
   --tn-sel:#ddf4ff; --tn-sel-2:#b6e3ff; --tn-border:#d1d9e0; --tn-border-2:#afb8c1;
   --tn-fg:#1f2328; --tn-fg-dark:#31363c; --tn-dim:#59636e; --tn-comment:#818b98; --tn-comment-text:#59636e; --tn-black:#6e7781;
-  --tn-blue:#0969da; --tn-cyan:#1b7c83; --tn-green:#1a7f37; --tn-yellow:#9a6700;
-  --tn-orange:#bc4c00; --tn-red:#cf222e; --tn-magenta:#8250df; --tn-purple:#a0469b;
-  --on-accent:#ffffff;
-  --card-face:linear-gradient(180deg,#ffffff 0%,#f3f5f7 100%);
-  --shade:color-mix(in srgb,#1f2328 16%,transparent);
-  --surface-recess:color-mix(in srgb,#1f2328 8%,transparent);
-  --face-light:inset 1px 1px 0 #ffffff,inset -1px -1px 0 color-mix(in srgb,#1f2328 12%,transparent);
-  --face-light-hot:inset 1px 1px 0 #ffffff,inset -1px -1px 0 color-mix(in srgb,#1f2328 20%,transparent);
-  --slot-recess:inset 1px 2px 4px color-mix(in srgb,#1f2328 14%,transparent);
-  --badge-shadow:0 2px 5px color-mix(in srgb,#1f2328 18%,transparent);
-  --key-lift-shadow:0 5px 6px color-mix(in srgb,#1f2328 22%,transparent)}
+  --tn-blue:#0550ae; --tn-cyan:#136168; --tn-green:#116329; --tn-yellow:#7d4e00;
+  --tn-orange:#953800; --tn-red:#a40e26; --tn-magenta:#6639ba; --tn-purple:#8a3d86;
+  --hover-lift:brightness(.92);
+  --card-face:linear-gradient(180deg,var(--tn-pane) 0%,color-mix(in srgb,var(--tn-pane) 95%,var(--tn-fg)) 100%);
+  --shade:color-mix(in srgb,var(--tn-fg) 16%,transparent);
+  --surface-recess:color-mix(in srgb,var(--tn-fg) 8%,transparent);
+  --face-light:inset 1px 1px 0 var(--tn-pane),inset -1px -1px 0 color-mix(in srgb,var(--tn-fg) 12%,transparent);
+  --face-light-hot:inset 1px 1px 0 var(--tn-pane),inset -1px -1px 0 color-mix(in srgb,var(--tn-fg) 20%,transparent);
+  --slot-recess:inset 1px 2px 4px color-mix(in srgb,var(--tn-fg) 14%,transparent);
+  --badge-shadow:0 2px 5px color-mix(in srgb,var(--tn-fg) 18%,transparent);
+  --key-lift-shadow:0 5px 6px color-mix(in srgb,var(--tn-fg) 22%,transparent)}
 /* a small window gives the map 40 px of the code column, so the widest decks start at 75% */
 @media (max-width:1300px){:root{--sb:228px; --rc:max(400px,calc(36vw - 40px))}}
 
@@ -243,7 +245,7 @@ code{font:inherit;color:var(--keyword)}
   font:var(--fw-bold) var(--fs-code) var(--font-code);color:var(--on-accent);text-shadow:none}
 /* A badge that opens a list is a button. A plain badge has no pointer and no hover. */
 button.sb-title{cursor:pointer;transition:filter var(--dur-hover)}
-button.sb-title:hover{filter:brightness(1.12)}
+button.sb-title:hover{filter:var(--hover-lift)}
 .sb-title .ic{width:12px;height:12px}
 .sb-tree{position:relative;overflow:hidden auto;pointer-events:auto;max-height:calc(100vh - 60px);padding:2px 4px 4px 0;scrollbar-width:thin;scrollbar-color:var(--line-soft) transparent}
 .sl{position:relative;display:flex;align-items:center;width:100%;height:18px;padding:0 4px 0 12px;border:0;border-radius:var(--r-xs);background:transparent;
@@ -299,7 +301,7 @@ body.flow .sl.inc{color:var(--ink)}
   font:var(--fw-bold) var(--fs-code) var(--font-code);color:var(--on-accent);white-space:nowrap;overflow:hidden}
 .pbadge span{min-width:0;overflow:hidden;text-overflow:ellipsis}
 button.pbadge{cursor:pointer;transition:filter var(--dur-hover)}
-button.pbadge:hover{filter:brightness(1.12)}
+button.pbadge:hover{filter:var(--hover-lift)}
 .pbadge .ic{width:12px;height:12px}
 .pane{position:relative;border:1px solid var(--line-strong);border-radius:var(--r-l);background:var(--surface-panel)}
 
