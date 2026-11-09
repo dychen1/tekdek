@@ -13,6 +13,7 @@
 //! `Routing` selects the command.
 //! `Arguments` holds the option parser and the store rule that the commands share.
 
+mod diff;
 mod doctor;
 mod flow;
 mod graph;
@@ -38,6 +39,7 @@ const SUMMARY: &str = "usage: tekdek <command>
   index    Index a codebase into its .tekdek store.
   graph    Search the nodes of a graph and show one node.
   flow     Import, check, verify, show, and list frozen flows.
+  diff     Prepare, import, verify, show, and list PR diffs.
   serve    Serve the Lift Deck for a store.
   doctor   Check the language servers.
   help     Print the usage of every command.
@@ -64,6 +66,8 @@ pub fn run(arguments: Vec<String>, input: &mut impl Read) -> ExitCode {
         Some("graph") => report(graph::run(arguments, json, &tekdek::semantic::ensure)),
         // Run one flow command; its output is one document on standard output.
         Some("flow") => report(flow::run(arguments, json, input, &tekdek::semantic::ensure)),
+        // Run one diff command; its output is one document on standard output.
+        Some("diff") => report(diff::run(arguments, json, input)),
         // Serve the viewer until the process ends.
         Some("serve") => finish(serve::run(arguments.into_iter())),
         // Check the language servers; the report is one document on standard output.
@@ -71,10 +75,11 @@ pub fn run(arguments: Vec<String>, input: &mut impl Read) -> ExitCode {
         // Print every usage.
         Some("help" | "--help" | "-h") => {
             println!(
-                "{SUMMARY}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}",
+                "{SUMMARY}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}",
                 index::USAGE,
                 graph::USAGE,
                 flow::USAGE,
+                diff::USAGE,
                 serve::USAGE,
                 doctor::USAGE
             );

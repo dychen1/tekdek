@@ -2,7 +2,8 @@
 //!
 //! This module builds the catalog that the viewer reads as `index.json`. It
 //! lists every graph file of one store with its digests, and the current
-//! generation of every flow lineage under the graph that the flow binds. The
+//! generation of every flow lineage under the graph that the flow binds, and
+//! every frozen PR diff. The
 //! store directory is the input. One catalog document in memory is the output.
 //! No command stores the catalog: the graph files and the flow lineages are the
 //! only source, so two branches that add flows never conflict on it.
@@ -24,6 +25,7 @@ use std::{
 use serde::Serialize;
 
 use crate::{
+    diff::{DiffListing, list_diffs},
     flow::{
         lineage::{lineage_ids, read_current},
         models::FLOW_ARTIFACT_SCHEMA_VERSION,
@@ -47,6 +49,9 @@ pub struct ArtifactIndex {
     schema_version: u32,
     default_artifact: String,
     artifacts: Vec<ArtifactIndexEntry>,
+    /// The frozen PR diffs. Each one holds its two flows.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    diffs: Vec<DiffListing>,
 }
 
 /// One graph file. `digest` names the merged graph document that `serve`
@@ -78,7 +83,7 @@ pub fn build_catalog(directory: &Path) -> io::Result<ArtifactIndex> {
     artifact_index(directory, &files, default_artifact)
 }
 
-/// Returns the store paths that the viewer can read: the graph files and the current generations.
+/// Returns the store paths that the viewer can read: the graph files, the current generations, and the diffs.
 ///
 /// A generation path starts with `flows/`. This listing reads no graph bytes.
 ///
@@ -90,6 +95,7 @@ pub fn readable_files(directory: &Path) -> io::Result<Vec<String>> {
     for lineage in lineage_listings(directory)? {
         files.push(format!("flows/{}", lineage.file));
     }
+    files.extend(list_diffs(directory)?.into_iter().map(|diff| diff.file));
     Ok(files)
 }
 
@@ -222,6 +228,7 @@ fn artifact_index(
         schema_version: INDEX_SCHEMA_VERSION,
         default_artifact,
         artifacts,
+        diffs: list_diffs(directory)?,
     })
 }
 
