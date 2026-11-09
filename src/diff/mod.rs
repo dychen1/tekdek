@@ -594,34 +594,45 @@ pub struct DiffListing {
     pub behavior: String,
 }
 
+/// Returns the store paths of the diff files, `diffs/<name>.json`, in name order. It parses no file.
+///
+/// # Errors
+/// Returns an error when the folder cannot be read.
+pub fn diff_files(store: &Path) -> io::Result<Vec<String>> {
+    let entries = match fs::read_dir(store.join(DIFFS)) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(error),
+    };
+    let mut files = Vec::new();
+    for entry in entries {
+        let entry = entry?;
+        let name = entry.file_name();
+        let Some(name) = name.to_str().and_then(|file| file.strip_suffix(".json")) else {
+            continue;
+        };
+        if entry.file_type()?.is_file() && FlowId::try_from(name).is_ok() {
+            files.push(format!("{DIFFS}/{name}.json"));
+        }
+    }
+    files.sort();
+    Ok(files)
+}
+
 /// Lists the frozen diffs of a store in name order. An unreadable diff is left out.
 ///
 /// # Errors
 /// Returns an error when the folder cannot be read.
 pub fn list_diffs(store: &Path) -> io::Result<Vec<DiffListing>> {
-    let folder = store.join(DIFFS);
-    let entries = match fs::read_dir(&folder) {
-        Ok(entries) => entries,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(error) => return Err(error),
-    };
     let mut listings = Vec::new();
-    for entry in entries {
-        let entry = entry?;
-        let Some(name) = entry
-            .file_name()
-            .to_str()
-            .and_then(|file| file.strip_suffix(".json"))
-            .map(str::to_owned)
-        else {
-            continue;
-        };
-        if !entry.file_type()?.is_file() {
-            continue;
-        }
+    for file in diff_files(store)? {
+        let name = file
+            .trim_start_matches("diffs/")
+            .trim_end_matches(".json")
+            .to_owned();
         if let Ok(artifact) = read_diff(store, &name) {
             listings.push(DiffListing {
-                file: format!("{DIFFS}/{name}.json"),
+                file,
                 name,
                 base_commit: artifact.base.commit,
                 head_commit: artifact.head.commit,
@@ -629,7 +640,6 @@ pub fn list_diffs(store: &Path) -> io::Result<Vec<DiffListing>> {
             });
         }
     }
-    listings.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(listings)
 }
 

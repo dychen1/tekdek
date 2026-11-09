@@ -25,7 +25,7 @@ use std::{
 use serde::Serialize;
 
 use crate::{
-    diff::{DiffListing, list_diffs},
+    diff::{DiffListing, diff_files, list_diffs},
     flow::{
         lineage::{lineage_ids, read_current},
         models::FLOW_ARTIFACT_SCHEMA_VERSION,
@@ -95,7 +95,7 @@ pub fn readable_files(directory: &Path) -> io::Result<Vec<String>> {
     for lineage in lineage_listings(directory)? {
         files.push(format!("flows/{}", lineage.file));
     }
-    files.extend(list_diffs(directory)?.into_iter().map(|diff| diff.file));
+    files.extend(diff_files(directory)?);
     Ok(files)
 }
 
