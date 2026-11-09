@@ -7,7 +7,7 @@ import { deckFlow, deckGraph } from "../src/data/adapt.ts";
 import type { DeckFlow } from "../src/data/models.ts";
 import { isShown } from "../src/layout/explorer.ts";
 import { MIN_DECK_W } from "../src/layout/deck-geometry.ts";
-import { buildModel, initialState, nextStep, shownFile, withMembership } from "../src/layout/model.ts";
+import { buildModel, dataPath, initialState, nextStep, shownFile, withMembership } from "../src/layout/model.ts";
 
 import { artifact, DIGEST, graphDocument, must } from "./fixtures.ts";
 
@@ -18,7 +18,7 @@ const model = buildModel(graph, flow, new Map());
 test("membership marks each function with the cluster that holds it", () => {
   const graph = deckGraph(graphDocument());
   const marked = withMembership(graph, deckFlow(artifact, graph, DIGEST));
-  assert.equal(marked.functions.filter(fn => fn.cluster).length, 21);
+  assert.equal(marked.functions.filter(fn => fn.cluster).length, 18);
   assert.equal(must(marked.functions.find(fn => fn.id === "src/main.rs::callable:main")).cluster, "route-command");
   assert.equal(graph.functions.filter(fn => fn.cluster).length, 0, "the source graph stays unmarked");
 });
@@ -94,3 +94,28 @@ test("forward goes to the next step, and from the rest state continues at the st
   assert.equal(nextStep({ cur: 12, resume: 4 }), 13);
 });
 
+
+test("the data path orders each model after the models that turn into it", () => {
+  // The clusters of a real eval run, in lift order: the entry returns the last model, and a store passes models through.
+  const path = dataPath([
+    { input: [], output: ["EvalReport"] },
+    { input: ["RawTrace"], output: ["Trace"] },
+    { input: ["Contract", "CheckPlan", "EvalReport"], output: ["Contract", "CheckPlan"] },
+    { input: ["Trace"], output: ["Contract"] },
+    { input: ["Contract"], output: ["CheckPlan"] },
+    { input: ["CheckPlan", "SourceTexts"], output: ["list[CheckResult]"] },
+    { input: ["list[CheckResult]"], output: ["EvalReport"] },
+  ]);
+  assert.deepEqual(path, ["RawTrace", "Trace", "Contract", "CheckPlan", "SourceTexts", "list[CheckResult]", "EvalReport"]);
+  assert.deepEqual(dataPath([]), []);
+});
+
+test("a cycle in the data path gives way at a model on the cycle, not at a model that waits for it", () => {
+  // B turns into C, so C must follow B although C shows first.
+  assert.deepEqual(dataPath([{ input: ["C"], output: ["D"] }, { input: ["A"], output: ["B"] }, { input: ["B"], output: ["A"] }, { input: ["B"], output: ["C"] }]),
+    ["A", "B", "C", "D"]);
+  // The entry returns X first, but X waits for B.
+  const path = dataPath([{ input: [], output: ["X"] }, { input: ["B"], output: ["X"] }, { input: ["A"], output: ["B"] }, { input: ["B"], output: ["A"] }]);
+  assert.ok(path.indexOf("B") < path.indexOf("X"), path.join(" "));
+  assert.equal(new Set(path).size, 3, "each model shows once");
+});

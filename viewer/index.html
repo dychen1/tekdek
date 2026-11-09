@@ -14,10 +14,10 @@
 <script>
 // Apply the saved theme variant, shortcut switch, and line wrap before first paint.
 try {
-  const v = localStorage.getItem('tekdek.deck.variant'); if (v === 'light' || v === 'github') document.documentElement.dataset.variant = v;
+  const v = localStorage.getItem('tekdek.deck.variant'); if (v === 'light' || v === 'night') document.documentElement.dataset.variant = v;
   if (localStorage.getItem('tekdek.deck.shortcuts') === 'off') document.documentElement.dataset.shortcuts = 'off';
   if (localStorage.getItem('tekdek.deck.wrap') === 'off') document.documentElement.dataset.wrap = 'off';
-} catch (err) { /* storage is blocked: keep Night and the shortcuts */ }
+} catch (err) { /* storage is blocked: keep GitHub Dark and the shortcuts */ }
 </script>
 <link rel="stylesheet" href="./dist/app.css">
 <script type="module" src="./dist/app.js"></script>
@@ -77,9 +77,9 @@ try {
     <div class="kp-theme" role="group" aria-labelledby="kpThemeLbl">
       <span id="kpThemeLbl">theme</span>
       <div class="seg">
-        <button class="seg-b" type="button" data-variant="night" aria-pressed="true">night</button>
+        <button class="seg-b" type="button" data-variant="github" aria-pressed="true">github</button>
         <button class="seg-b" type="button" data-variant="light" aria-pressed="false">light</button>
-        <button class="seg-b" type="button" data-variant="github" aria-pressed="false">github</button>
+        <button class="seg-b" type="button" data-variant="night" aria-pressed="false">night</button>
       </div>
     </div>
   </div>
@@ -106,7 +106,7 @@ try {
     <div class="cexpl" id="cExpl"><div class="chip none" id="chip"><span id="chipText">No flow</span></div><span class="cmeta" id="cMeta"></span></div>
     <button class="cbtn quiet" id="clearBtn" type="button" aria-label="Clear the flow"><svg class="ic" aria-hidden="true"><use href="#i-x"/></svg></button>
   </div>
-  <p class="c-desc" id="cDesc"></p>
+  <div class="c-desc" id="cDesc"></div>
   <div class="ticks" id="ticks" role="group" aria-label="Steps"></div>
 </section>
 <!-- The .ck parts name the one-character keys; they hide while the key popover turns those keys off. -->

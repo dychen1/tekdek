@@ -61,7 +61,7 @@ pub enum StepField {
     Node,
     Cluster,
     Title,
-    Annotation,
+    Ledger,
     Position,
 }
 
@@ -78,7 +78,8 @@ pub struct StepDiff {
 #[serde(rename_all = "snake_case")]
 pub enum ClusterField {
     Label,
-    Description,
+    /// The input, output, or rules.
+    Ledger,
     Phase,
     Members,
     Position,

@@ -30,6 +30,8 @@ export interface DeckModel {
   clustersByFile: Map<string, string[]>;
   /** Member keys of each cluster, in first-visit order. */
   members: Map<string, string[]>;
+  /** The data models of the flow in data order, for the data path in the bar. */
+  dataPath: string[];
   deckSize: { width: number; maxHeight: number };
   /** The widest file box right edge over every flow file, compact on, for the zoom range. */
   fileRight: number;
@@ -70,13 +72,48 @@ export function buildModel(sourceGraph: DeckGraph, flow: DeckFlow | null, source
   const explorer = buildExplorer(graph.tree);
   const steps = flow?.steps ?? [];
   const stepAt = (index: number) => steps[index - 1] ?? null;
+  const stepCluster = (index: number) => (flow ? effectiveCluster(flow, CL, index) : null);
+  const visitOrder = [...new Set(steps.map(step => stepCluster(step.index)).filter((id): id is string => !!id))].map(id => CL.get(id)!);
   return {
     flow, graph, clusters, CL, FN, steps, N: steps.length, plan, explorer,
-    rowByPath: new Map(explorer.map(row => [row.path, row])), fnsByFile, clustersByFile, members, deckSize, fileRight, fileMin, sources,
+    rowByPath: new Map(explorer.map(row => [row.path, row])), fnsByFile, clustersByFile, members, dataPath: dataPath(visitOrder),
+    deckSize, fileRight, fileMin, sources,
     stepAt,
     fnAt: index => { const step = stepAt(index); return step && !step.missing ? FN.get(step.node) ?? null : null; },
-    stepCluster: index => (flow ? effectiveCluster(flow, CL, index) : null),
+    stepCluster,
   };
+}
+
+/** Orders the data models of the clusters so that each model comes after the models that a cluster turns into it.
+ *  A model in both the input and the output of one cluster passes through and adds no order. Ties keep the order in
+ *  which the clusters first lift. When only cycles are left, the first model that is on a cycle goes next. */
+export function dataPath(clusters: readonly { input: readonly string[]; output: readonly string[] }[]): string[] {
+  const seen = [...new Set(clusters.flatMap(c => [...c.input, ...c.output]))];
+  const next = new Map(seen.map(name => [name, new Set<string>()]));
+  for (const c of clusters) for (const from of c.input) for (const to of c.output) {
+    if (!c.output.includes(from) && !c.input.includes(to)) next.get(from)!.add(to);
+  }
+  const before = new Map(seen.map(name => [name, 0]));
+  for (const tos of next.values()) for (const to of tos) before.set(to, before.get(to)! + 1);
+  const left = [...seen], path: string[] = [];
+  /** True when a model reaches itself through models that are still left. */
+  const onCycle = (start: string) => {
+    const stack = [...next.get(start)!], met = new Set<string>();
+    while (stack.length) {
+      const name = stack.pop()!;
+      if (name === start) return true;
+      if (met.has(name) || !left.includes(name)) continue;
+      met.add(name); stack.push(...next.get(name)!);
+    }
+    return false;
+  };
+  while (left.length) {
+    const ready = left.findIndex(n => before.get(n) === 0);
+    const [name] = left.splice(ready >= 0 ? ready : Math.max(0, left.findIndex(onCycle)), 1);
+    path.push(name);
+    for (const to of next.get(name)!) before.set(to, before.get(to)! - 1);
+  }
+  return path;
 }
 
 /** Returns a copy of the graph where each function carries the flow cluster that holds it. */

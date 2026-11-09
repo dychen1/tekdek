@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://tekdek.local/schemas/flow-artifact/3.json",
   "title": "FlowArtifact",
-  "description": "One frozen generation of a flow, schema version 3. Layers: facts (indexer), intent (agent), assignment (deterministic code), view (derived hints), and diff (derived overlay against the parent generation). Code writes every field except the agent-authored intent text, cluster vocabulary, step labels, and node references. Runtime validation also checks references, digests, derived layers, and the cross-field rules that JSON Schema cannot express.",
+  "description": "One frozen generation of a flow, schema version 4. Layers: facts (indexer), intent (agent), assignment (deterministic code), view (derived hints), and diff (derived overlay against the parent generation). Code writes every field except the agent-authored intent text, cluster vocabulary, step labels, and node references. Runtime validation also checks references, digests, derived layers, and the cross-field rules that JSON Schema cannot express.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -24,7 +24,7 @@
       "const": "tekdek.flow"
     },
     "schemaVersion": {
-      "const": 3
+      "const": 4
     },
     "flowId": {
       "$ref": "#/$defs/FlowId"
@@ -515,7 +515,9 @@
       "required": [
         "key",
         "label",
-        "description",
+        "input",
+        "output",
+        "rules",
         "phase",
         "phaseNote"
       ],
@@ -533,15 +535,39 @@
           "maxLength": 60,
           "type": "string"
         },
-        "description": {
-          "allOf": [
-            {
-              "$ref": "#/$defs/BlockText"
-            }
-          ],
-          "minLength": 20,
-          "maxLength": 400,
-          "type": "string"
+        "input": {
+          "description": "The data models that enter the group. Empty for none.",
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 4,
+          "items": {
+            "$ref": "#/$defs/TypeName"
+          }
+        },
+        "output": {
+          "description": "The data models that leave the group. Empty for none.",
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 4,
+          "items": {
+            "$ref": "#/$defs/TypeName"
+          }
+        },
+        "rules": {
+          "description": "The rules that the group makes true.",
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 3,
+          "items": {
+            "allOf": [
+              {
+                "$ref": "#/$defs/LineText"
+              }
+            ],
+            "minLength": 10,
+            "maxLength": 200,
+            "type": "string"
+          }
         },
         "phase": {
           "$ref": "#/$defs/FlowPhase"
@@ -598,7 +624,7 @@
         "nodeKey",
         "clusterKey",
         "title",
-        "annotation",
+        "ledger",
         "attestedFactDigest"
       ],
       "properties": {
@@ -622,21 +648,210 @@
           "maxLength": 96,
           "type": "string"
         },
-        "annotation": {
-          "allOf": [
-            {
-              "$ref": "#/$defs/BlockText"
-            }
-          ],
-          "minLength": 1,
-          "maxLength": 1500,
-          "type": "string"
+        "ledger": {
+          "$ref": "#/$defs/StepLedger"
         },
         "attestedFactDigest": {
           "description": "Code-written. The node fact digest when the agent last wrote this step.",
           "$ref": "#/$defs/Sha256Digest"
         }
       }
+    },
+    "StepLedger": {
+      "description": "Agent text: one row for each used slot, at least one.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "takes",
+        "requires",
+        "does",
+        "onFail",
+        "returns",
+        "writes"
+      ],
+      "properties": {
+        "takes": {
+          "description": "The data model that this visit takes from the step before, and the fields that it reads. Null when the step has no such row.",
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 6,
+              "items": {
+                "$ref": "#/$defs/LedgerItem"
+              }
+            }
+          ]
+        },
+        "requires": {
+          "description": "The checks that this visit makes on the data: one rule for each item. Null when the step has no such row.",
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 6,
+              "items": {
+                "$ref": "#/$defs/LedgerItem"
+              }
+            }
+          ]
+        },
+        "does": {
+          "description": "The change that this visit makes to the data, or the work that it starts. Null when the step has no such row.",
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 6,
+              "items": {
+                "$ref": "#/$defs/LedgerItem"
+              }
+            }
+          ]
+        },
+        "onFail": {
+          "description": "What happens when a check fails or the work cannot continue: the error, and whether a retry follows. Null when the step has no such row.",
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 6,
+              "items": {
+                "$ref": "#/$defs/LedgerItem"
+              }
+            }
+          ]
+        },
+        "returns": {
+          "description": "What this visit hands on, and to whom. Mark a return to a caller with the value that comes back. Null when the step has no such row.",
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 6,
+              "items": {
+                "$ref": "#/$defs/LedgerItem"
+              }
+            }
+          ]
+        },
+        "writes": {
+          "description": "The file, store, or external state that this visit writes. Null when the step has no such row.",
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 6,
+              "items": {
+                "$ref": "#/$defs/LedgerItem"
+              }
+            }
+          ]
+        }
+      },
+      "anyOf": [
+        {
+          "properties": {
+            "takes": {
+              "type": "array"
+            }
+          },
+          "required": [
+            "takes"
+          ]
+        },
+        {
+          "properties": {
+            "requires": {
+              "type": "array"
+            }
+          },
+          "required": [
+            "requires"
+          ]
+        },
+        {
+          "properties": {
+            "does": {
+              "type": "array"
+            }
+          },
+          "required": [
+            "does"
+          ]
+        },
+        {
+          "properties": {
+            "onFail": {
+              "type": "array"
+            }
+          },
+          "required": [
+            "onFail"
+          ]
+        },
+        {
+          "properties": {
+            "returns": {
+              "type": "array"
+            }
+          },
+          "required": [
+            "returns"
+          ]
+        },
+        {
+          "properties": {
+            "writes": {
+              "type": "array"
+            }
+          },
+          "required": [
+            "writes"
+          ]
+        }
+      ]
+    },
+    "LedgerItem": {
+      "description": "One line of ledger text. Name each identifier with a mark: a backtick span `kind:name`. Kinds: fn (a function of the graph, checked against the graph), type (a data model or class), value (an enum member or constant), file (a file or store path), field (a field or attribute). For example `fn:build_checks` raises `type:LlmError` with `value:invalid_llm_output`. Every backtick span must be a mark.",
+      "allOf": [
+        {
+          "$ref": "#/$defs/LineText"
+        }
+      ],
+      "minLength": 2,
+      "maxLength": 200,
+      "type": "string"
+    },
+    "TypeName": {
+      "description": "The name of one data model, as the source spells it, for example 'Contract' or 'list[Finding]'. No marks.",
+      "allOf": [
+        {
+          "$ref": "#/$defs/LineText"
+        }
+      ],
+      "minLength": 1,
+      "maxLength": 80,
+      "type": "string",
+      "pattern": "^[^`]*$"
     },
     "AssignmentLayer": {
       "description": "Deterministic cluster decisions. Code resolves one cluster for each step, then derives function membership with a fixed rule. Agents cannot write this layer. Equal assignment digests mean the same clustering.",
@@ -986,7 +1201,7 @@
         "node",
         "cluster",
         "title",
-        "annotation",
+        "ledger",
         "position"
       ]
     },
@@ -1037,7 +1252,7 @@
       "type": "string",
       "enum": [
         "label",
-        "description",
+        "ledger",
         "phase",
         "members",
         "position"

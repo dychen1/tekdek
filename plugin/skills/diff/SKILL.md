@@ -57,4 +57,6 @@ tekdek serve --diff <name> --port 0 --open
 
 Run `tekdek diff verify <name>`. It must report `valid`. `unverifiable` means that git no longer has a commit of the diff.
 
-Report the diff name, the base and head commits, the step counts of both sides, the counts per kind (new, removed, changed, moved, unchanged), and the added and removed lines. Open the diff with `tekdek serve --diff <name> --port 0 --open` as a background process, and give the user the URL.
+Report the diff name, the base and head commits, the step counts of both sides, the counts per kind (new, removed, changed, moved, unchanged), and the added and removed lines. Open the diff with `tekdek serve --diff <name> --port 0 --open` as a background process. The first output line is the URL of the diff.
+
+Always end the report with the browser URL as a link. Do not finish without the URL. If the server does not start, say so and give the `tekdek serve` command.

@@ -1,6 +1,6 @@
 {
   "kind": "tekdek.flow",
-  "schemaVersion": 3,
+  "schemaVersion": 4,
   "flowId": "flow-generation",
   "status": "frozen",
   "generation": {
@@ -12,52 +12,19 @@
     "projection": "node-fact/1",
     "binding": {
       "graphArtifact": "tekdek.json",
-      "graphDigest": "sha256:20fc64edecc82d063406bd407e4bbda8cbb4808c5d16dd003c1381638379c7de"
+      "graphDigest": "sha256:e3a0f2030a857a9094655bfdc66d2a31ef5c07ab6c2c213f0e638441b1d8bd08"
     },
     "nodes": [
-      {
-        "key": "src/catalog.rs::callable:artifact_index",
-        "name": "artifact_index",
-        "kind": "callable",
-        "language": "rust",
-        "path": "src/catalog.rs",
-        "contentHash": "e5e9a82661861d01",
-        "signature": "fn artifact_index(\n    directory: &Path,\n    files: &[String],\n    default_artifact: &str,\n) -> io::Result<ArtifactIndex>",
-        "documentation": "Builds the index document. A flow is stale when its graph digest differs from the file.",
-        "factDigest": "sha256:559b303d0797c8bc68812d12926a3ab4257925aa48871770df97ae31c575004e"
-      },
-      {
-        "key": "src/catalog.rs::callable:refresh_artifact_index",
-        "name": "refresh_artifact_index",
-        "kind": "callable",
-        "language": "rust",
-        "path": "src/catalog.rs",
-        "contentHash": "5d7b115184084bb3",
-        "signature": "pub fn refresh_artifact_index(directory: &Path) -> io::Result<()>",
-        "documentation": "Rebuilds the index and keeps the current default artifact.\n\nA missing or unreadable index falls back to the first artifact file.\n\n# Errors\n\nReturns an error if the store has no artifact or writing fails.",
-        "factDigest": "sha256:e6525d3701bd00a9bb05e723bfa5f36993d33ffa833c77b4c988899a44249d34"
-      },
-      {
-        "key": "src/catalog.rs::callable:write_locked",
-        "name": "write_locked",
-        "kind": "callable",
-        "language": "rust",
-        "path": "src/catalog.rs",
-        "contentHash": "e817b74b51557451",
-        "signature": "fn write_locked(directory: &Path, default_artifact: &str) -> io::Result<()>",
-        "documentation": null,
-        "factDigest": "sha256:6b9055fbd88e32c6e8e1fa8de7dd1b5ffda80851cc4de6ff65c824467a5d2b00"
-      },
       {
         "key": "src/cli/flow.rs::callable:execute",
         "name": "execute",
         "kind": "callable",
         "language": "rust",
         "path": "src/cli/flow.rs",
-        "contentHash": "e37e6d55f1645778",
-        "signature": "fn execute(command: Command, input: &mut impl Read) -> Result<(u8, String), Box<dyn Error>>",
+        "contentHash": "54bd8a0b4759e671",
+        "signature": "fn execute(\n    command: Command,\n    input: &mut impl Read,\n    ensure: &Ensure<'_>,\n) -> Result<(u8, String), Box<dyn Error>>",
         "documentation": "Executes one validated command through the flow backend.",
-        "factDigest": "sha256:103fd5fe59121643fb1c950f6be44b8fef752082458c1d9fe3b1dbdd9309494d"
+        "factDigest": "sha256:77d60b885d0da64c0c7e753704e3f88a0285d9dba3016a29b19eba3c9f963be2"
       },
       {
         "key": "src/cli/flow.rs::callable:import",
@@ -65,10 +32,10 @@
         "kind": "callable",
         "language": "rust",
         "path": "src/cli/flow.rs",
-        "contentHash": "62eccf6066390653",
-        "signature": "fn import(\n    directory: &Path,\n    json: bool,\n    name: &str,\n    graph: &str,\n    path: &Path,\n    author: AuthorOptions,\n    input: &mut impl Read,\n) -> Result<(u8, String), Box<dyn Error>>",
-        "documentation": "Freezes one agent output. A rejection prints every issue and exits with 2.",
-        "factDigest": "sha256:3b8af6b5655ec13c0e139828572306a4683f7ff5db6c5787059e2ee0a4c14e63"
+        "contentHash": "2d101adf4d77b4ac",
+        "signature": "fn import(\n    directory: &Path,\n    json: bool,\n    command: ImportCommand,\n    input: &mut impl Read,\n    ensure: &Ensure<'_>,\n) -> Result<(u8, String), Box<dyn Error>>",
+        "documentation": "Freezes or checks one agent output. A rejection prints every issue and exits with 2.",
+        "factDigest": "sha256:4bee6806f2079d9e6e6301480a3870c32fa580e443e7cc68407e618c99dce50c"
       },
       {
         "key": "src/cli/flow.rs::callable:run",
@@ -76,10 +43,10 @@
         "kind": "callable",
         "language": "rust",
         "path": "src/cli/flow.rs",
-        "contentHash": "17eace19ce499547",
-        "signature": "pub(super) fn run(arguments: Vec<String>, input: &mut impl Read) -> (u8, String)",
+        "contentHash": "4ac286a45a9ae717",
+        "signature": "pub(super) fn run(\n    arguments: Vec<String>,\n    json: bool,\n    input: &mut impl Read,\n    ensure: &Ensure<'_>,\n) -> (u8, String)",
         "documentation": "Returns the exit code and one output document for a flow command.",
-        "factDigest": "sha256:cd26558b705616306ce14bc969dabc57077d497aeae916818112b02499fc3fc5"
+        "factDigest": "sha256:57ce69683900665596789e7f296a58cc8c87c8c2d0a5639e8dea4a23dedb26d8"
       },
       {
         "key": "src/cli/mod.rs::callable:run",
@@ -87,10 +54,10 @@
         "kind": "callable",
         "language": "rust",
         "path": "src/cli/mod.rs",
-        "contentHash": "c5e38b4d714fb477",
+        "contentHash": "b5405cc11ae0268d",
         "signature": "pub fn run(arguments: Vec<String>, input: &mut impl Read) -> ExitCode",
         "documentation": "Runs one command line and returns its exit code.",
-        "factDigest": "sha256:5fe5dc11346ecc2c2b63e1d85a2b57d8d173537d8a67a39676b8b80ef6c904f0"
+        "factDigest": "sha256:353b87bcda750de5a68b1e4601dc478c536e7a35328f05526f5f60455cb2ac54"
       },
       {
         "key": "src/flow/assign.rs::callable:assign",
@@ -120,10 +87,10 @@
         "kind": "callable",
         "language": "rust",
         "path": "src/flow/derive/facts.rs",
-        "contentHash": "148d37d64486f93b",
+        "contentHash": "67236c86be181e97",
         "signature": "pub fn fact_layer(\n    graph: &ArtifactGraph,\n    binding: FactBinding,\n    keys: &BTreeSet<&str>,\n) -> Result<FactLayer, DeriveError>",
         "documentation": "Projects the graph nodes with the given keys and the edges between them.\n\nNodes sort by key. Edges sort by source, target, and relation name, without duplicates.\n\n# Errors\nReturns an error for a graph value that the fact schema cannot hold.",
-        "factDigest": "sha256:002fc89568f6c3edc0b2d79752130c15f2c070b0b262aefbf30a1b4606a72a98"
+        "factDigest": "sha256:4077c4a0659b8b5096e69e6d4569675733e23ec5a9f39f4621e035fd7d940ac3"
       },
       {
         "key": "src/flow/derive/view.rs::callable:view",
@@ -142,10 +109,10 @@
         "kind": "callable",
         "language": "rust",
         "path": "src/flow/import.rs",
-        "contentHash": "49aea62bdf9774c2",
+        "contentHash": "3ac198b307cfd36a",
         "signature": "fn build_intent(\n    flow_id: &FlowId,\n    checked: CheckedFlow,\n    graph: &ArtifactGraph,\n    binding: FactBinding,\n    prior_ids: &[String],\n) -> Result<(FactLayer, IntentLayer), FlowError>",
         "documentation": "Builds the fact layer and the intent layer, with step IDs and attestations.",
-        "factDigest": "sha256:7303f1f681b458f17b7a94bf897c7a68033601265b5ff8832fbcbcf10d96bb1f"
+        "factDigest": "sha256:352653206f7042c3e3e47d34e60f042e8c5549d5b20554038750506fdf7f39d3"
       },
       {
         "key": "src/flow/import.rs::callable:freeze",
@@ -164,10 +131,10 @@
         "kind": "callable",
         "language": "rust",
         "path": "src/flow/import.rs",
-        "contentHash": "f2a73919ae33f22a",
+        "contentHash": "608d235566dbaf2b",
         "signature": "pub fn import_flow(\n    directory: &Path,\n    request: ImportRequest<'_>,\n) -> Result<ImportOutcome, FlowError>",
-        "documentation": "Freezes one agent output as the next generation of one flow.\n\n# Errors\nReturns `Rejected` with every issue when the output is invalid; nothing is\nwritten then. Returns other errors for store or graph failures.",
-        "factDigest": "sha256:c582bded285375a34b5857f67b826ad1a4f7e26a886b3523a5959b70489e5a5c"
+        "documentation": "Freezes one agent output as the next generation of one flow.\n\nA dry run takes no store lock and returns the generation that a freeze\nwould write.\n\n# Errors\nReturns `Rejected` with every issue when the output is invalid; nothing is\nwritten then. Returns other errors for store or graph failures.",
+        "factDigest": "sha256:67dc26820309371c23d0cf5ec8f513e440d390e7c47e8502dc0ccb37372068ce"
       },
       {
         "key": "src/flow/import.rs::callable:parse_output",
@@ -175,10 +142,10 @@
         "kind": "callable",
         "language": "rust",
         "path": "src/flow/import.rs",
-        "contentHash": "87a8e82bac02b3e9",
+        "contentHash": "f708c335798005e0",
         "signature": "fn parse_output(input: &[u8]) -> Result<Result<AgentFlow, ImportOutcome>, FlowError>",
         "documentation": "Parses the agent output. A `no_flow` answer comes back as a finished outcome.",
-        "factDigest": "sha256:287eaf20a62079b3fc837ba5aefb9f3baf6a6b048fc27d70f25ce69ba536c78f"
+        "factDigest": "sha256:f2908d3f74b00695a428d3ad3ea78b9cb3fb6e9342a6039b26d19c8a8b3532a7"
       },
       {
         "key": "src/flow/lineage.rs::callable:read_current",
@@ -186,10 +153,10 @@
         "kind": "callable",
         "language": "rust",
         "path": "src/flow/lineage.rs",
-        "contentHash": "8be78b94906ae6d6",
+        "contentHash": "814a2990ac14fc65",
         "signature": "pub fn read_current(\n    directory: &Path,\n    flow_id: &FlowId,\n) -> Result<Option<StoredGeneration>, LineageError>",
-        "documentation": "Reads the current generation of one flow, or `None` when the flow has no lineage.\n\n# Errors\nReturns an error for a link, an unreadable file, an invalid document, or a\npointer that names another generation.",
-        "factDigest": "sha256:0e71aa582a06afcfe134b067ecb70bb240d469e118bc5bbb370c52e633291dcc"
+        "documentation": "Reads the current generation of one flow, or `None` when the flow has no lineage.\n\nA pointer that is not a regular file counts as no lineage.\n\n# Errors\nReturns an error for a link, an unreadable file, an invalid document, a\ngeneration of another flow, or a pointer that names another generation.",
+        "factDigest": "sha256:b64e49ada841267ea149165d82e30fa8684d5676ccc12270095ce77920f9c67a"
       },
       {
         "key": "src/flow/lineage.rs::callable:write_current",
@@ -197,10 +164,10 @@
         "kind": "callable",
         "language": "rust",
         "path": "src/flow/lineage.rs",
-        "contentHash": "074c1532e867b555",
+        "contentHash": "4b8ddbdeb6966123",
         "signature": "pub fn write_current(directory: &Path, artifact: &FlowArtifact) -> Result<String, LineageError>",
-        "documentation": "Writes one generation and moves the current pointer to it.\n\nThe generation file is written first, so a reader never sees a pointer to a\nmissing file. An identical existing generation file is kept.\n\n# Errors\nReturns an error for a link, a file failure, or a different file at the same path.",
-        "factDigest": "sha256:db8fe28f07f9271dee031c70b1e1a7cf10eb51d756f79d1fca97e2e65343a020"
+        "documentation": "Writes one generation and moves the current pointer to it.\n\nThe generation file is written first, so a reader never sees a pointer to a\nmissing file. An identical existing generation file is kept. An entry that\nis not a regular file counts as missing.\n\n# Errors\nReturns an error for a link, a file failure, or a different file at the same path.",
+        "factDigest": "sha256:b9006981f29ddeb660e7a6ad6b17f99335ef3340cf5bc1a0191e0bc76a452893"
       },
       {
         "key": "src/flow/validate/agent.rs::callable:check_agent_flow",
@@ -208,10 +175,10 @@
         "kind": "callable",
         "language": "rust",
         "path": "src/flow/validate/agent.rs",
-        "contentHash": "6d2e89ab861065e4",
+        "contentHash": "5655db6e20699396",
         "signature": "pub fn check_agent_flow(\n    flow: &AgentFlow,\n    context: &PriorContext<'_>,\n    graph_keys: &BTreeSet<&str>,\n) -> (Option<CheckedFlow>, Vec<FlowIssue>)",
         "documentation": "Canonicalizes and checks one agent flow against the graph and the prior version.\n\nReturns the checked flow only when no error issue exists. Warnings (for\nexample `text_trimmed`) come back in both cases.",
-        "factDigest": "sha256:b10354b1ad2263b9d777898dd646058a17d5faa7525d738618749ab4042ec64a"
+        "factDigest": "sha256:3d6336fe533e8016af13e0574b8994db33c7cb4b4e6a714a997a98b80f5c760b"
       },
       {
         "key": "src/main.rs::callable:main",
@@ -230,10 +197,10 @@
         "kind": "callable",
         "language": "rust",
         "path": "src/store/graph.rs",
-        "contentHash": "e669ff4d5379623b",
+        "contentHash": "cda3458e4ddd95f7",
         "signature": "pub fn read_graph(directory: &Path, file: &str) -> io::Result<(ArtifactGraph, String)>",
         "documentation": "Reads one graph artifact of the store and returns its graph and byte digest.\n\n# Errors\nReturns an error for an invalid name, a link, an unreadable file, or an invalid artifact.",
-        "factDigest": "sha256:a1ae1f48a47f2ff97cc4a0f91df78b3ed47024d7280b84aec3dae31acef1f4ca"
+        "factDigest": "sha256:d8a9789b2123986add2df443bea6b2285d1938c1adb239376f767f189cf28afe"
       },
       {
         "key": "src/store/mod.rs::callable:write_bytes",
@@ -241,31 +208,16 @@
         "kind": "callable",
         "language": "rust",
         "path": "src/store/mod.rs",
-        "contentHash": "799f52a764bb9d69",
+        "contentHash": "8b27bba6ea2766ac",
         "signature": "pub(crate) fn write_bytes(path: &Path, document: &[u8]) -> io::Result<()>",
-        "documentation": "Replaces one file atomically through a synced temporary file in the same directory.",
-        "factDigest": "sha256:aeaa5ef129128f52d58262e87f9d4c64e7bf6b6267cd8ed318639c54824b18e4"
+        "documentation": "Replaces one store file atomically. The file and its folder must not be symbolic links.",
+        "factDigest": "sha256:64128f73beab8eadb376ecabf9f7ef0b160e56f117d632f0e9baff834ae51db4"
       }
     ],
     "edges": [
       {
-        "source": "src/catalog.rs::callable:refresh_artifact_index",
-        "target": "src/catalog.rs::callable:write_locked",
-        "kind": "calls"
-      },
-      {
-        "source": "src/catalog.rs::callable:write_locked",
-        "target": "src/catalog.rs::callable:artifact_index",
-        "kind": "calls"
-      },
-      {
         "source": "src/cli/flow.rs::callable:execute",
         "target": "src/cli/flow.rs::callable:import",
-        "kind": "calls"
-      },
-      {
-        "source": "src/cli/flow.rs::callable:import",
-        "target": "src/catalog.rs::callable:refresh_artifact_index",
         "kind": "calls"
       },
       {
@@ -334,11 +286,6 @@
         "kind": "calls"
       },
       {
-        "source": "src/flow/import.rs::callable:import_flow",
-        "target": "src/store/graph.rs::callable:read_graph",
-        "kind": "calls"
-      },
-      {
         "source": "src/flow/lineage.rs::callable:write_current",
         "target": "src/store/mod.rs::callable:write_bytes",
         "kind": "calls"
@@ -351,43 +298,67 @@
     ]
   },
   "intent": {
-    "behavior": "How Tekdek turns a coding agent's flow output into a frozen, clustered flow: the `tekdek flow import` command parses the output and checks it against the graph, assigns clusters and derives the facts, view, and digests, writes the generation and the current pointer, and refreshes the catalog that the viewer reads.",
-    "boundaries": "Starts at the binary entry for `tekdek flow import` with a new flow name and follows the success path of an initial generation to the catalog write. The returns to import_flow between its calls are not shown. Annotations name the no_flow answer, rejected outputs, the unchanged (`kept`) result, and the revision rules; the diff overlay runs only for a revision and is left out.",
+    "behavior": "How Tekdek turns a coding agent's flow output into a frozen, clustered flow: the `tekdek flow import` command parses the output and checks it against the graph, assigns clusters and derives the facts, view, and digests, and writes the generation and the current pointer.",
+    "boundaries": "Starts at the binary entry for `tekdek flow import` with a new flow name and follows the success path of an initial generation to the pointer write. The returns to import_flow between its calls are not shown. The step ledgers name the no_flow answer, rejected outputs, the unchanged (`kept`) result, and the revision rules; the diff overlay runs only for a revision and is left out.",
     "evidenceBasis": "source_walkthrough",
     "revisionSummary": null,
     "clusters": [
       {
         "key": "route-command",
         "label": "Route the import command",
-        "description": "Turns the command line into one import request and hands it to the freeze orchestrator. It also starts the catalog refresh after a new generation.",
+        "input": [],
+        "output": [
+          "ImportRequest"
+        ],
+        "rules": [
+          "Turns the command line into one `type:ImportRequest` for the freeze.",
+          "Reports the frozen generation and exits with code 0."
+        ],
         "phase": "entry",
         "phaseNote": null
       },
       {
         "key": "check-output",
         "label": "Check the output against the graph",
-        "description": "Parses the agent output, binds it to the exact graph bytes and the flow lineage, and canonicalizes and checks every text and reference. Any error rejects the whole output before a write.",
+        "input": [
+          "AgentFlowOutput"
+        ],
+        "output": [
+          "CheckedFlow"
+        ],
+        "rules": [
+          "Binds the output to the exact graph bytes and to the flow lineage.",
+          "Any error rejects the whole output before a write."
+        ],
         "phase": "input_validation",
         "phaseNote": null
       },
       {
         "key": "derive-layers",
         "label": "Assign clusters and derive layers",
-        "description": "Builds the code-owned parts of the generation: the fact projection, step IDs, cluster membership, the view layer, and the digests. A self-check recomputes them before any write.",
+        "input": [
+          "CheckedFlow"
+        ],
+        "output": [
+          "FlowArtifact"
+        ],
+        "rules": [
+          "Code writes every step ID, membership, color, and digest.",
+          "A self-check recomputes every derived layer before a write."
+        ],
         "phase": "transform",
         "phaseNote": null
       },
       {
         "key": "write-generation",
         "label": "Write the generation and pointer",
-        "description": "Stores the frozen generation atomically and then moves the current pointer to it, so a reader never sees a pointer to a missing file.",
-        "phase": "persist",
-        "phaseNote": null
-      },
-      {
-        "key": "refresh-catalog",
-        "label": "Refresh the viewer catalog",
-        "description": "Rebuilds index.json so that the viewer lists the new flow under the graph that it binds, with a stale flag that compares graph digests.",
+        "input": [
+          "FlowArtifact"
+        ],
+        "output": [],
+        "rules": [
+          "Writes the generation before the pointer, so a reader never sees a pointer to a missing file."
+        ],
         "phase": "persist",
         "phaseNote": null
       }
@@ -398,7 +369,20 @@
         "nodeKey": "src/main.rs::callable:main",
         "clusterKey": "route-command",
         "title": "Start the tekdek binary",
-        "annotation": "The binary collects the arguments after the program name, locks standard input, and passes both to cli::run. The returned code becomes the process exit code. In this demo the command is `tekdek flow import flow-generation --graph tekdek.json --input <path> --author agent --author-name claude-code --model-id claude-opus-5-5 --store demo`.",
+        "ledger": {
+          "takes": [
+            "The process arguments after the program name, and the locked standard input."
+          ],
+          "requires": null,
+          "does": [
+            "Passes both to `fn:run`."
+          ],
+          "onFail": null,
+          "returns": [
+            "The exit code from `fn:run` becomes the process exit code."
+          ],
+          "writes": null
+        },
         "attestedFactDigest": "sha256:c6ccececf2da352f29f65a4bafc8e5d29cf864b83f55f4ddb376a04088717e78"
       },
       {
@@ -406,103 +390,288 @@
         "nodeKey": "src/cli/mod.rs::callable:run",
         "clusterKey": "route-command",
         "title": "Route the flow command",
-        "annotation": "The first argument is `flow`, so run drops it, calls the flow command runner, and prints the one output document that comes back. `help` prints the usage. Every other command line indexes a codebase instead.",
-        "attestedFactDigest": "sha256:5fe5dc11346ecc2c2b63e1d85a2b57d8d173537d8a67a39676b8b80ef6c904f0"
+        "ledger": {
+          "takes": [
+            "The arguments from `fn:main`. The first argument is `value:flow`."
+          ],
+          "requires": null,
+          "does": [
+            "Drops `value:flow` and calls the flow command runner.",
+            "`value:help` prints the usage. Any other command line indexes a codebase."
+          ],
+          "onFail": null,
+          "returns": [
+            "Prints the one output document that comes back."
+          ],
+          "writes": null
+        },
+        "attestedFactDigest": "sha256:353b87bcda750de5a68b1e4601dc478c536e7a35328f05526f5f60455cb2ac54"
       },
       {
         "id": "st-0491787073516bda",
         "nodeKey": "src/cli/flow.rs::callable:run",
         "clusterKey": "route-command",
         "title": "Parse the import arguments",
-        "annotation": "run detects `--json` before it parses, so an invalid command can also answer in JSON. Command::parse builds Action::Import from the name, `--graph`, `--input`, the author options, and `--store` (default `artifacts`). A missing or unknown option fails with exit code 2 and the usage.",
-        "attestedFactDigest": "sha256:cd26558b705616306ce14bc969dabc57077d497aeae916818112b02499fc3fc5"
+        "ledger": {
+          "takes": [
+            "The flow arguments."
+          ],
+          "requires": null,
+          "does": [
+            "Detects `value:--json` before the parse, so an invalid command can also answer in JSON.",
+            "`fn:parse` builds an import action from the name, the graph, the input, the author options, and the store."
+          ],
+          "onFail": [
+            "A missing or unknown option exits with code 2 and prints the usage."
+          ],
+          "returns": null,
+          "writes": null
+        },
+        "attestedFactDigest": "sha256:57ce69683900665596789e7f296a58cc8c87c8c2d0a5639e8dea4a23dedb26d8"
       },
       {
         "id": "st-eccef8c5911dba42",
         "nodeKey": "src/cli/flow.rs::callable:execute",
         "clusterKey": "route-command",
         "title": "Dispatch to the import command",
-        "annotation": "execute matches the parsed action. Action::Import calls import with the store directory, the JSON flag, the flow name, the graph file name, the input path, the author options, and standard input.",
-        "attestedFactDigest": "sha256:103fd5fe59121643fb1c950f6be44b8fef752082458c1d9fe3b1dbdd9309494d"
+        "ledger": {
+          "takes": [
+            "The parsed import action."
+          ],
+          "requires": null,
+          "does": [
+            "Calls `fn:import` with the store, the JSON flag, the flow name, the graph file, the input path, the author options, and standard input."
+          ],
+          "onFail": null,
+          "returns": null,
+          "writes": null
+        },
+        "attestedFactDigest": "sha256:77d60b885d0da64c0c7e753704e3f88a0285d9dba3016a29b19eba3c9f963be2"
       },
       {
         "id": "st-0e1815faf8d67a4a",
         "nodeKey": "src/cli/flow.rs::callable:import",
         "clusterKey": "route-command",
         "title": "Resolve the author and read input",
-        "annotation": "AuthorOptions::resolve turns the author flags into Author::Agent with the name `claude-code` and the model ID `claude-opus-5-5`; without author flags the author is `system`. import reads the output bytes from the `--input` file, or from standard input for `-`, and passes an ImportRequest to import_flow. The author comes from the invocation, never from the agent output.",
-        "attestedFactDigest": "sha256:3b8af6b5655ec13c0e139828572306a4683f7ff5db6c5787059e2ee0a4c14e63"
+        "ledger": {
+          "takes": [
+            "The import arguments from `fn:execute`."
+          ],
+          "requires": null,
+          "does": [
+            "Turns the author flags into an agent `type:Author` with a name and a model ID. Without author flags the author is `value:system`.",
+            "`fn:ensure_flow_keys` resolves the semantic edges of the step keys before the import takes the store lock.",
+            "Reads the output bytes from the `value:--input` file, or from standard input for `value:-`."
+          ],
+          "onFail": null,
+          "returns": [
+            "Passes an `type:ImportRequest` to `fn:import_flow`. The author comes from the command line, never from the agent output."
+          ],
+          "writes": null
+        },
+        "attestedFactDigest": "sha256:4bee6806f2079d9e6e6301480a3870c32fa580e443e7cc68407e618c99dce50c"
       },
       {
         "id": "st-ade7a98f9c80e44a",
         "nodeKey": "src/flow/import.rs::callable:import_flow",
         "clusterKey": "route-command",
         "title": "Orchestrate the freeze",
-        "annotation": "import_flow checks the flow name (a lowercase slug), the graph file name, and the author before it reads the store. Then it calls, in order: parse_output, lock_store, read_graph, read_current, prior_rules, check_agent_flow, build_intent, freeze, and write_current. The next steps follow these calls as siblings; the flow does not show each return to import_flow. The store lock stays held until import_flow returns.",
-        "attestedFactDigest": "sha256:c582bded285375a34b5857f67b826ad1a4f7e26a886b3523a5959b70489e5a5c"
+        "ledger": {
+          "takes": [
+            "The `type:ImportRequest`."
+          ],
+          "requires": [
+            "A flow name that is a lowercase slug.",
+            "A valid graph file name and a valid author."
+          ],
+          "does": [
+            "Calls, in order: `fn:parse_output`, `fn:lock_store`, `fn:read_merged_graph`, `fn:read_current`, `fn:prior_rules`, `fn:check_agent_flow`, `fn:build_intent`, `fn:freeze`, `fn:write_current`.",
+            "Holds the store lock until it returns. The next steps follow these calls as siblings."
+          ],
+          "onFail": null,
+          "returns": null,
+          "writes": null
+        },
+        "attestedFactDigest": "sha256:67dc26820309371c23d0cf5ec8f513e440d390e7c47e8502dc0ccb37372068ce"
       },
       {
         "id": "st-28817a4b09cb954b",
         "nodeKey": "src/flow/import.rs::callable:parse_output",
         "clusterKey": "check-output",
         "title": "Parse the agent output document",
-        "annotation": "serde_json reads the bytes as AgentFlowOutput, tagged by `outcome`, with unknown fields denied. A syntax or shape error becomes one invalid_output issue, and `contractVersion` must be 1. A `no_flow` answer returns a finished outcome that exits with code 1 and writes nothing. A `flow` answer goes back to import_flow, which then takes the exclusive `<store>/.store.lock` lock with lock_store.",
-        "attestedFactDigest": "sha256:287eaf20a62079b3fc837ba5aefb9f3baf6a6b048fc27d70f25ce69ba536c78f"
+        "ledger": {
+          "takes": [
+            "The output bytes of the `type:ImportRequest`."
+          ],
+          "requires": [
+            "The bytes parse as `type:AgentFlowOutput`, tagged by `field:outcome`, with no unknown fields.",
+            "`field:contractVersion` is 2."
+          ],
+          "does": null,
+          "onFail": [
+            "A syntax or shape error becomes one `value:invalid_output` issue.",
+            "A `value:no_flow` answer ends the import with exit code 1 and writes nothing."
+          ],
+          "returns": [
+            "A `value:flow` answer goes back to `fn:import_flow`, which then takes the store lock with `fn:lock_store`."
+          ],
+          "writes": null
+        },
+        "attestedFactDigest": "sha256:f2908d3f74b00695a428d3ad3ea78b9cb3fb6e9342a6039b26d19c8a8b3532a7"
       },
       {
         "id": "st-0a6049d4ef35a976",
         "nodeKey": "src/store/graph.rs::callable:read_graph",
         "clusterKey": "check-output",
         "title": "Read and digest the graph",
-        "annotation": "read_graph rejects an invalid name and symbolic links, reads `<store>/tekdek.json`, requires graph schema 1, and validates node identities and edge endpoints. It returns the graph and the `sha256:` digest of the exact file bytes. import_flow binds the flow to this file name and digest; the binding later decides whether the flow is fresh or stale.",
-        "attestedFactDigest": "sha256:a1ae1f48a47f2ff97cc4a0f91df78b3ed47024d7280b84aec3dae31acef1f4ca"
+        "ledger": {
+          "takes": [
+            "The graph file name, `file:tekdek.json`, from `fn:read_merged_graph`."
+          ],
+          "requires": [
+            "A valid name and no symbolic link.",
+            "Graph schema 1, valid node identities, and valid edge endpoints."
+          ],
+          "does": null,
+          "onFail": null,
+          "returns": [
+            "The graph and the digest of the exact file bytes. `fn:read_merged_graph` adds the cached semantic edges, and `fn:import_flow` binds the flow to this name and digest."
+          ],
+          "writes": null
+        },
+        "attestedFactDigest": "sha256:d8a9789b2123986add2df443bea6b2285d1938c1adb239376f767f189cf28afe"
       },
       {
         "id": "st-f341eb13f9405113",
         "nodeKey": "src/flow/lineage.rs::callable:read_current",
         "clusterKey": "check-output",
         "title": "Look for a current generation",
-        "annotation": "read_current reads `flows/flow-generation/current.json`. The pointer is missing for a new name, so it returns None, and prior_rules then gives the `initial` purpose with no prior step IDs. With a parent the purpose is `revision`, and a changed graph file or graph digest is a stale_graph error.",
-        "attestedFactDigest": "sha256:0e71aa582a06afcfe134b067ecb70bb240d469e118bc5bbb370c52e633291dcc"
+        "ledger": {
+          "takes": [
+            "The flow name."
+          ],
+          "requires": null,
+          "does": [
+            "Reads `file:flows/flow-generation/current.json`. The pointer is missing for a new name."
+          ],
+          "onFail": [
+            "With a parent, a changed graph file or digest is a `value:stale_graph` error."
+          ],
+          "returns": [
+            "No current generation, so `fn:prior_rules` gives the `value:initial` purpose with no prior step IDs."
+          ],
+          "writes": null
+        },
+        "attestedFactDigest": "sha256:b64e49ada841267ea149165d82e30fa8684d5676ccc12270095ce77920f9c67a"
       },
       {
         "id": "st-4ad9729a94dd06b2",
         "nodeKey": "src/flow/validate/agent.rs::callable:check_agent_flow",
         "clusterKey": "check-output",
         "title": "Canonicalize and check every reference",
-        "annotation": "check_agent_flow collects every issue. agent_text normalizes each text to Unicode NFC without outer whitespace (a change is a text_trimmed warning) and checks its length. check_clusters requires 1 to 8 unique clusters that steps use. check_step requires each nodeKey in the graph (else unknown_node) and each clusterKey in this output. label_conflicts rejects a function whose steps carry different clusters. With any error, import_flow returns Rejected: the CLI prints every issue, exits with code 2, and writes nothing.",
-        "attestedFactDigest": "sha256:b10354b1ad2263b9d777898dd646058a17d5faa7525d738618749ab4042ec64a"
+        "ledger": {
+          "takes": [
+            "The `type:AgentFlow`, the `type:PriorContext`, and the graph keys."
+          ],
+          "requires": [
+            "Each text in Unicode NFC, without outer whitespace, and within its length limit.",
+            "One to eight unique clusters that steps use, each with its input and output models and one to three rules.",
+            "A step ledger with at least one slot. Each mark has a known kind, and a function mark names a graph function.",
+            "Each `field:nodeKey` in the graph, and each `field:clusterKey` in this output.",
+            "The same cluster on all steps of one function."
+          ],
+          "does": null,
+          "onFail": [
+            "With any error, `fn:import_flow` returns a rejection. The CLI prints every issue, exits with code 2, and writes nothing."
+          ],
+          "returns": [
+            "A `type:CheckedFlow` with canonical text."
+          ],
+          "writes": null
+        },
+        "attestedFactDigest": "sha256:3d6336fe533e8016af13e0574b8994db33c7cb4b4e6a714a997a98b80f5c760b"
       },
       {
         "id": "st-63eb46c534a6a970",
         "nodeKey": "src/flow/import.rs::callable:build_intent",
         "clusterKey": "derive-layers",
         "title": "Collect the referenced functions",
-        "annotation": "The checked flow has no error, so import_flow calls build_intent with the checked flow, the graph, the binding, and the prior step IDs. build_intent collects the distinct node keys of the steps and asks fact_layer for their facts.",
-        "attestedFactDigest": "sha256:7303f1f681b458f17b7a94bf897c7a68033601265b5ff8832fbcbcf10d96bb1f"
+        "ledger": {
+          "takes": [
+            "The `type:CheckedFlow`, the graph, the binding, and the prior step IDs."
+          ],
+          "requires": null,
+          "does": [
+            "Collects the distinct node keys of the steps and asks `fn:fact_layer` for their facts."
+          ],
+          "onFail": null,
+          "returns": null,
+          "writes": null
+        },
+        "attestedFactDigest": "sha256:352653206f7042c3e3e47d34e60f042e8c5549d5b20554038750506fdf7f39d3"
       },
       {
         "id": "st-50044604b22c455f",
         "nodeKey": "src/flow/derive/facts.rs::callable:fact_layer",
         "clusterKey": "derive-layers",
         "title": "Project the fact layer",
-        "annotation": "fact_layer projects only the referenced graph nodes: key, name, kind, language, path, content hash, signature, and documentation. It hashes each `node-fact/1` projection into a fact digest and keeps only the edges between referenced nodes, sorted and without duplicates. The flow carries these facts, not the whole graph.",
-        "attestedFactDigest": "sha256:002fc89568f6c3edc0b2d79752130c15f2c070b0b262aefbf30a1b4606a72a98"
+        "ledger": {
+          "takes": [
+            "The referenced node keys and the graph."
+          ],
+          "requires": null,
+          "does": [
+            "Projects only the referenced nodes: key, name, kind, language, path, content hash, signature, and documentation.",
+            "Hashes each projection into a fact digest, and keeps only the edges between referenced nodes, sorted and without duplicates."
+          ],
+          "onFail": null,
+          "returns": [
+            "The `type:FactLayer` goes back to `fn:build_intent`."
+          ],
+          "writes": null
+        },
+        "attestedFactDigest": "sha256:4077c4a0659b8b5096e69e6d4569675733e23ec5a9f39f4621e035fd7d940ac3"
       },
       {
         "id": "st-ca583f4d55db391d",
         "nodeKey": "src/flow/import.rs::callable:build_intent",
         "clusterKey": "derive-layers",
         "title": "Derive step IDs and attestations",
-        "annotation": "Control returns to build_intent with the fact layer; this is the same call, not repeated work. step_id gives each new step `st-` plus 16 hex characters of a canonical digest of the flow ID, the node key, and the smallest unused counter, so a revisited function gets a new ID. Each step records the fact digest of its node. Back in import_flow, a parent with equal intent and facts digests would return `kept` without a write; a new name has no parent.",
-        "attestedFactDigest": "sha256:7303f1f681b458f17b7a94bf897c7a68033601265b5ff8832fbcbcf10d96bb1f"
+        "ledger": {
+          "takes": [
+            "The `type:FactLayer` from step 12. This is the same call, not new work."
+          ],
+          "requires": null,
+          "does": [
+            "`fn:step_id` gives each new step `value:st-` plus 16 hex characters of a digest of the flow ID, the node key, and a counter.",
+            "Each step records the fact digest of its node."
+          ],
+          "onFail": null,
+          "returns": [
+            "The `type:IntentLayer`. A parent with equal intent and facts would return `value:kept` without a write. A new name has no parent."
+          ],
+          "writes": null
+        },
+        "attestedFactDigest": "sha256:352653206f7042c3e3e47d34e60f042e8c5549d5b20554038750506fdf7f39d3"
       },
       {
         "id": "st-2736e1052e93bd3c",
         "nodeKey": "src/flow/import.rs::callable:freeze",
         "clusterKey": "derive-layers",
         "title": "Start the frozen artifact",
-        "annotation": "freeze derives the code-owned layers in a fixed order: assignment, view, diff (for a revision only), generation, digests, and then a self-check. It starts with assign.",
+        "ledger": {
+          "takes": [
+            "The `type:IntentLayer` and the `type:FactLayer`."
+          ],
+          "requires": null,
+          "does": [
+            "Derives the code-owned layers in a fixed order: assignment, view, diff for a revision only, generation, digests, and then a self-check.",
+            "Starts with `fn:assign`."
+          ],
+          "onFail": null,
+          "returns": null,
+          "writes": null
+        },
         "attestedFactDigest": "sha256:b5faf1723a264501e5fd472cd1643befef24065ded61d68a407e7f30edfcb822"
       },
       {
@@ -510,7 +679,21 @@
         "nodeKey": "src/flow/assign.rs::callable:assign",
         "clusterKey": "derive-layers",
         "title": "Resolve clusters and membership",
-        "annotation": "assign runs the `step-labels` 1.0.0 rules assigner with the agent_labels policy and the unanimous membership rule. Each step label becomes a step decision, and each function becomes one member of its cluster with its visit count. input_digest hashes exactly the labels that the assigner reads.",
+        "ledger": {
+          "takes": [
+            "The step labels of the `type:IntentLayer`."
+          ],
+          "requires": null,
+          "does": [
+            "Runs the `value:step-labels` rules assigner with the `value:agent_labels` policy and the unanimous membership rule.",
+            "Each step label becomes a step decision. Each function becomes one member of its cluster, with its visit count."
+          ],
+          "onFail": null,
+          "returns": [
+            "The `type:AssignmentLayer`. Its input digest hashes exactly the labels that the assigner reads."
+          ],
+          "writes": null
+        },
         "attestedFactDigest": "sha256:5846a77d1484c448865eb836f14bf0327751818d9d7c6a71a6e16226fb2d1f86"
       },
       {
@@ -518,7 +701,21 @@
         "nodeKey": "src/flow/derive/view.rs::callable:view",
         "clusterKey": "derive-layers",
         "title": "Derive colors, runs, and transitions",
-        "annotation": "view classifies each step against the previous step with the `calls` edges of the fact layer, in this check order: flow_start, same_function, calls, returns_to_caller, sibling_call, calls_indirectly, returns_to_ancestor, no_static_edge. A transition is a static relation, not a runtime observation. cluster_colors gives each cluster a `flow-bright/1` palette color, and visit_runs records the step ranges of each cluster.",
+        "ledger": {
+          "takes": [
+            "The steps and the call edges of the `type:FactLayer`."
+          ],
+          "requires": null,
+          "does": [
+            "Classifies each step against the step before: flow start, same function, call, return to caller, sibling call, indirect call, return to ancestor, or no static edge.",
+            "Gives each cluster a `value:flow-bright/1` color and records the step runs of each cluster."
+          ],
+          "onFail": null,
+          "returns": [
+            "The `type:ViewLayer`. A transition is a static relation, not a runtime observation."
+          ],
+          "writes": null
+        },
         "attestedFactDigest": "sha256:006e1726352ec8274399191da3fe82808c3e10cb0f409ea6adb13d2e726038bc"
       },
       {
@@ -526,7 +723,20 @@
         "nodeKey": "src/flow/derive/digests.rs::callable:digests",
         "clusterKey": "derive-layers",
         "title": "Hash every layer",
-        "annotation": "Before this call, freeze sets ordinal 1, the purpose, and the parent digest, and records provenance: the UTC freeze time, the CLI version, and the author. digests hashes the RFC 8785 canonical JSON of the facts (without the graph binding), intent, assignment, and view layers. The generation digest excludes the digests and the provenance, so the same output on the same graph always gives the same digests.",
+        "ledger": {
+          "takes": [
+            "The layers, after `fn:freeze` sets the ordinal, the purpose, the parent digest, and the provenance."
+          ],
+          "requires": null,
+          "does": [
+            "Hashes the RFC 8785 canonical JSON of the facts, intent, assignment, and view layers."
+          ],
+          "onFail": null,
+          "returns": [
+            "The `type:Digests`. The generation digest excludes the provenance, so the same output on the same graph always gives the same digest."
+          ],
+          "writes": null
+        },
         "attestedFactDigest": "sha256:df777989a17c64b3c1626379b315520c1f9e09826607b8bdcccd40ce5f7adfe3"
       },
       {
@@ -534,7 +744,22 @@
         "nodeKey": "src/flow/import.rs::callable:freeze",
         "clusterKey": "derive-layers",
         "title": "Self-check the new generation",
-        "annotation": "Control returns to freeze with the digests. verify_artifact recomputes every derived layer and digest, the same check that `flow verify` runs later. Any error fails the import before a write. freeze returns the artifact to import_flow, which calls write_current.",
+        "ledger": {
+          "takes": [
+            "The `type:Digests` from step 17."
+          ],
+          "requires": [
+            "`fn:verify_artifact` recomputes every derived layer and digest. `value:flow verify` runs the same check later."
+          ],
+          "does": null,
+          "onFail": [
+            "Any error fails the import before a write."
+          ],
+          "returns": [
+            "The `type:FlowArtifact` goes to `fn:import_flow`, which calls `fn:write_current`."
+          ],
+          "writes": null
+        },
         "attestedFactDigest": "sha256:b5faf1723a264501e5fd472cd1643befef24065ded61d68a407e7f30edfcb822"
       },
       {
@@ -542,56 +767,63 @@
         "nodeKey": "src/flow/lineage.rs::callable:write_current",
         "clusterKey": "write-generation",
         "title": "Write generation, then move pointer",
-        "annotation": "write_current names the file `flow-generation/generations/<ordinal>-<first 12 hex of the generation digest>.json` under `flows/`. It writes the generation first: an identical existing file is kept, and a different one is a conflict. Then it writes `current.json` with the generation digest and the ordinal, so a reader never sees a pointer to a missing file.",
-        "attestedFactDigest": "sha256:db8fe28f07f9271dee031c70b1e1a7cf10eb51d756f79d1fca97e2e65343a020"
+        "ledger": {
+          "takes": [
+            "The `type:FlowArtifact`."
+          ],
+          "requires": null,
+          "does": [
+            "Names the file `file:flows/flow-generation/generations/<ordinal>-<digest>.json`. An identical file stays. A different file is a conflict."
+          ],
+          "onFail": null,
+          "returns": null,
+          "writes": [
+            "The generation file first, then `file:current.json` with the generation digest and the ordinal."
+          ]
+        },
+        "attestedFactDigest": "sha256:b9006981f29ddeb660e7a6ad6b17f99335ef3340cf5bc1a0191e0bc76a452893"
       },
       {
         "id": "st-b399d0a420d1faa6",
         "nodeKey": "src/store/mod.rs::callable:write_bytes",
         "clusterKey": "write-generation",
         "title": "Replace each file atomically",
-        "annotation": "write_bytes rejects symbolic links, writes a new temporary file in the same folder, syncs it, and renames it over the target. A failure removes the temporary file. write_current uses it for the generation file and again for the pointer.",
-        "attestedFactDigest": "sha256:aeaa5ef129128f52d58262e87f9d4c64e7bf6b6267cd8ed318639c54824b18e4"
+        "ledger": {
+          "takes": [
+            "The target path and the bytes."
+          ],
+          "requires": [
+            "No symbolic link at the target."
+          ],
+          "does": [
+            "Writes a temporary file in the same folder, syncs it, and renames it over the target. A failure removes the temporary file."
+          ],
+          "onFail": null,
+          "returns": null,
+          "writes": [
+            "The generation file, and then the pointer, each atomically."
+          ]
+        },
+        "attestedFactDigest": "sha256:64128f73beab8eadb376ecabf9f7ef0b160e56f117d632f0e9baff834ae51db4"
       },
       {
         "id": "st-91dce300efff24ac",
         "nodeKey": "src/cli/flow.rs::callable:import",
         "clusterKey": "route-command",
-        "title": "Trigger the catalog refresh",
-        "annotation": "import_flow returns Frozen with `unchanged: false` and releases the store lock, so control returns to the import command. A changed generation calls catalog::refresh_artifact_index; a `kept` result skips it. After the refresh, import prints `flow flow-generation: froze generation 1 (initial)` with the digest and the file, and exits with code 0.",
-        "attestedFactDigest": "sha256:3b8af6b5655ec13c0e139828572306a4683f7ff5db6c5787059e2ee0a4c14e63"
-      },
-      {
-        "id": "st-9afa6c7f6ef4c6cb",
-        "nodeKey": "src/catalog.rs::callable:refresh_artifact_index",
-        "clusterKey": "refresh-catalog",
-        "title": "Keep the default catalog graph",
-        "annotation": "refresh_artifact_index takes the store lock again, in a scope separate from the import. It lists every `*.json` graph file of the store except `index.json`, keeps the existing `defaultArtifact` when that file still exists, and otherwise uses the first graph file.",
-        "attestedFactDigest": "sha256:e6525d3701bd00a9bb05e723bfa5f36993d33ffa833c77b4c988899a44249d34"
-      },
-      {
-        "id": "st-e63dfec7f4e85cd0",
-        "nodeKey": "src/catalog.rs::callable:write_locked",
-        "clusterKey": "refresh-catalog",
-        "title": "Scan graphs and flow pointers",
-        "annotation": "write_locked records the graph file list and the bytes of every `current.json` pointer, then builds the index document with artifact_index.",
-        "attestedFactDigest": "sha256:6b9055fbd88e32c6e8e1fa8de7dd1b5ffda80851cc4de6ff65c824467a5d2b00"
-      },
-      {
-        "id": "st-48e9fdc003234ec2",
-        "nodeKey": "src/catalog.rs::callable:artifact_index",
-        "clusterKey": "refresh-catalog",
-        "title": "List the flow under its graph",
-        "annotation": "artifact_index reads the current generation of each lineage and groups the listings by bound graph file. For each graph it digests the file bytes and marks a flow stale when its bound digest differs. The flow-generation listing appears under `tekdek.json` with its file, behavior, step count, and cluster count.",
-        "attestedFactDigest": "sha256:559b303d0797c8bc68812d12926a3ab4257925aa48871770df97ae31c575004e"
-      },
-      {
-        "id": "st-baa0a97dfcc5b974",
-        "nodeKey": "src/catalog.rs::callable:write_locked",
-        "clusterKey": "refresh-catalog",
-        "title": "Write the viewer catalog",
-        "annotation": "Control returns to write_locked with the index document (schema version 3). It requires that the default graph is listed, writes `index.json` atomically as compact JSON, and scans again; if a graph file or a flow pointer changed meanwhile, it writes the index again. The viewer reads this `index.json` to offer the codebase and its flows.",
-        "attestedFactDigest": "sha256:6b9055fbd88e32c6e8e1fa8de7dd1b5ffda80851cc4de6ff65c824467a5d2b00"
+        "title": "Report the frozen generation",
+        "ledger": {
+          "takes": [
+            "The frozen outcome from `fn:import_flow`, which released the store lock."
+          ],
+          "requires": null,
+          "does": null,
+          "onFail": null,
+          "returns": [
+            "Prints the frozen generation, its purpose, its digest, and its file, and exits with code 0. The server builds the catalog when the viewer asks."
+          ],
+          "writes": null
+        },
+        "attestedFactDigest": "sha256:4bee6806f2079d9e6e6301480a3870c32fa580e443e7cc68407e618c99dce50c"
       }
     ]
   },
@@ -606,7 +838,7 @@
       "version": "1.0.0",
       "inputScope": "labels_only"
     },
-    "inputDigest": "sha256:468a0a332ed414a8da60af5814bad7dc5a37baed224c0312ef304ca7029d77a8",
+    "inputDigest": "sha256:2197f165ea3e6b4970bf80165731eb2b97ae078b58448e14002f36d241501683",
     "steps": [
       {
         "outcome": "assigned",
@@ -775,77 +1007,9 @@
         "basis": {
           "kind": "agent_label"
         }
-      },
-      {
-        "outcome": "assigned",
-        "stepId": "st-9afa6c7f6ef4c6cb",
-        "clusterKey": "refresh-catalog",
-        "basis": {
-          "kind": "agent_label"
-        }
-      },
-      {
-        "outcome": "assigned",
-        "stepId": "st-e63dfec7f4e85cd0",
-        "clusterKey": "refresh-catalog",
-        "basis": {
-          "kind": "agent_label"
-        }
-      },
-      {
-        "outcome": "assigned",
-        "stepId": "st-48e9fdc003234ec2",
-        "clusterKey": "refresh-catalog",
-        "basis": {
-          "kind": "agent_label"
-        }
-      },
-      {
-        "outcome": "assigned",
-        "stepId": "st-baa0a97dfcc5b974",
-        "clusterKey": "refresh-catalog",
-        "basis": {
-          "kind": "agent_label"
-        }
       }
     ],
     "members": [
-      {
-        "outcome": "assigned",
-        "nodeKey": "src/catalog.rs::callable:artifact_index",
-        "clusterKey": "refresh-catalog",
-        "basis": "unanimous",
-        "visits": [
-          {
-            "clusterKey": "refresh-catalog",
-            "steps": 1
-          }
-        ]
-      },
-      {
-        "outcome": "assigned",
-        "nodeKey": "src/catalog.rs::callable:refresh_artifact_index",
-        "clusterKey": "refresh-catalog",
-        "basis": "unanimous",
-        "visits": [
-          {
-            "clusterKey": "refresh-catalog",
-            "steps": 1
-          }
-        ]
-      },
-      {
-        "outcome": "assigned",
-        "nodeKey": "src/catalog.rs::callable:write_locked",
-        "clusterKey": "refresh-catalog",
-        "basis": "unanimous",
-        "visits": [
-          {
-            "clusterKey": "refresh-catalog",
-            "steps": 2
-          }
-        ]
-      },
       {
         "outcome": "assigned",
         "nodeKey": "src/cli/flow.rs::callable:execute",
@@ -1114,17 +1278,6 @@
             "lastStep": 20
           }
         ]
-      },
-      {
-        "clusterKey": "refresh-catalog",
-        "color": "lime",
-        "memberCount": 3,
-        "visits": [
-          {
-            "firstStep": 22,
-            "lastStep": 25
-          }
-        ]
       }
     ],
     "steps": [
@@ -1166,12 +1319,12 @@
       {
         "stepId": "st-0a6049d4ef35a976",
         "clusterKey": "check-output",
-        "transition": "sibling_call"
+        "transition": "no_static_edge"
       },
       {
         "stepId": "st-f341eb13f9405113",
         "clusterKey": "check-output",
-        "transition": "sibling_call"
+        "transition": "no_static_edge"
       },
       {
         "stepId": "st-4ad9729a94dd06b2",
@@ -1232,41 +1385,21 @@
         "stepId": "st-91dce300efff24ac",
         "clusterKey": "route-command",
         "transition": "returns_to_ancestor"
-      },
-      {
-        "stepId": "st-9afa6c7f6ef4c6cb",
-        "clusterKey": "refresh-catalog",
-        "transition": "calls"
-      },
-      {
-        "stepId": "st-e63dfec7f4e85cd0",
-        "clusterKey": "refresh-catalog",
-        "transition": "calls"
-      },
-      {
-        "stepId": "st-48e9fdc003234ec2",
-        "clusterKey": "refresh-catalog",
-        "transition": "calls"
-      },
-      {
-        "stepId": "st-baa0a97dfcc5b974",
-        "clusterKey": "refresh-catalog",
-        "transition": "returns_to_caller"
       }
     ]
   },
   "diff": null,
   "digests": {
-    "facts": "sha256:40a3740d4095c5a9f81da2a5106a35c7e1caf2b4419bb5c72c35529898dfb298",
-    "intent": "sha256:8cdf22b03ca35226d191f35ef299d8cf4bcc25ce05b6550794187ca26c222e15",
-    "assignment": "sha256:b64654a48f5918f0d3246220e2ca22b4147ad967771db79dc1cfa851f40ec0d0",
-    "view": "sha256:3b0b9735ad5ab9d076c2e564c36cf17e296cb090934efdfff87456e332a26600",
+    "facts": "sha256:170b2fda0dda865741d5293c3c1f55f0e86348c566bb0c039747ff0077307217",
+    "intent": "sha256:1a24eab8bce88583bb20c10f9d1fcb10e23bb719889591dc5b09a177df35edc6",
+    "assignment": "sha256:06c089d05b6e6f329da7c397b75814654144d914dc3a3afc99527c9c8244e1de",
+    "view": "sha256:c32f8ab12181b592a708ae72850264b4bcbc51eeb83148cfc96b30fbc0145d6c",
     "diff": null,
-    "generation": "sha256:c66482ff1747d0374757053224adcdd0107527d397cce723080c6bf644af7ae4"
+    "generation": "sha256:bf0bc47a8b95174f3b9801e60280ab9d756c9735e93ed52f9449521535634282"
   },
   "provenance": {
-    "frozenAt": "2026-09-25T00:53:31Z",
-    "cliVersion": "0.1.0",
+    "frozenAt": "2026-11-09T14:01:26Z",
+    "cliVersion": "0.2.0",
     "author": {
       "kind": "agent",
       "name": "claude-code",

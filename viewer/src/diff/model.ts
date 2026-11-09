@@ -5,7 +5,7 @@
    change is a step fact.
    # Sections
    model, runs and rows, slots, lines */
-import type { ChangeKind, DiffArtifact, DiffLine, DiffRow, FlowArtifact } from "../data/models.ts";
+import type { ChangeKind, DiffArtifact, DiffLine, DiffRow, FlowArtifact, StepLedger } from "../data/models.ts";
 
 // ============ model ============
 
@@ -16,7 +16,7 @@ export const KINDS = ["new", "removed", "changed", "moved"] as const;
 export type Counted = typeof KINDS[number];
 
 /** One step of one side. `index` counts from 1 in that side's flow order. `row` is null for an unchanged step that the diff has no row for. */
-export interface SideStep { side: Side; id: string; index: number; title: string; annotation: string; cluster: string | null; kind: ChangeKind; row: DiffRow | null }
+export interface SideStep { side: Side; id: string; index: number; title: string; ledger: StepLedger; cluster: string | null; kind: ChangeKind; row: DiffRow | null }
 
 /** Consecutive steps of one side with the same cluster. */
 export interface Run { cluster: string | null; label: string; steps: SideStep[] }
@@ -78,7 +78,7 @@ export function buildDiffModel(diff: DiffArtifact): DiffModel {
 function sideSteps(flow: FlowArtifact, side: Side, rows: ReadonlyMap<string, DiffRow>): SideStep[] {
   return flow.intent.steps.map((step, i) => {
     const row = rows.get(step.id) ?? null;
-    return { side, id: step.id, index: i + 1, title: step.title, annotation: step.annotation, cluster: step.clusterKey, kind: row?.kind ?? "unchanged", row };
+    return { side, id: step.id, index: i + 1, title: step.title, ledger: step.ledger, cluster: step.clusterKey, kind: row?.kind ?? "unchanged", row };
   });
 }
 

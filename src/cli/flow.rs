@@ -290,13 +290,17 @@ fn describe(artifact: &FlowArtifact, file: &str) -> String {
     }
     for (index, step) in intent.steps.iter().enumerate() {
         lines.push(format!(
-            "step {} [{}] {}\n  node: {}\n  {}",
+            "step {} [{}] {}\n  node: {}",
             index + 1,
             step.cluster_key,
             step.title,
-            step.node_key,
-            step.annotation
+            step.node_key
         ));
+        for (slot, items) in step.ledger.slots() {
+            for item in items.unwrap_or_default() {
+                lines.push(format!("  {slot}: {item}"));
+            }
+        }
     }
     lines.join("\n")
 }
@@ -535,18 +539,23 @@ mod tests {
 
     fn output() -> Value {
         serde_json::json!({
-            "contractVersion": 1, "outcome": "flow",
+            "contractVersion": 2, "outcome": "flow",
             "flow": {
                 "behavior": "How the entry function starts the program.",
                 "boundaries": null, "evidenceBasis": "indexed_facts_only", "revisionSummary": null,
                 "clusters": [{
                     "key": "start-up", "label": "Start the program",
-                    "description": "The entry point receives control and starts the program.",
+                    "input": [], "output": [],
+                    "rules": ["The entry point receives control and starts the program."],
                     "phase": "entry", "phaseNote": null
                 }],
                 "steps": [{
                     "priorStepId": null, "nodeKey": "src/main.rs::callable:entry", "clusterKey": "start-up",
-                    "title": "Enter the program", "annotation": "Control starts here."
+                    "title": "Enter the program",
+                    "ledger": {
+                        "takes": null, "requires": null, "does": ["Control starts here."],
+                        "onFail": null, "returns": null, "writes": null
+                    }
                 }]
             }
         })
@@ -602,7 +611,7 @@ mod tests {
         let shown = execute(path, &["show", "entry-flow"], "", 0);
         assert_eq!(shown["intent"]["steps"][0]["title"], "Enter the program");
         let listed = execute(path, &["list"], "", 0);
-        assert_eq!(listed[0]["schemaVersion"], 3);
+        assert_eq!(listed[0]["schemaVersion"], 4);
         assert_eq!(listed[0]["clusterCount"], 1);
         assert_eq!(listed[0]["stale"], false);
         assert_eq!(

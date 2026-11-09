@@ -188,7 +188,7 @@ mod tests {
         models::{AgentFlowOutput, ClusterColor, FlowArtifact, wire_name},
     };
 
-    /// The frozen artifact schema, version 3.
+    /// The frozen artifact schema, version 4.
     const FLOW_ARTIFACT_SCHEMA: &str = include_str!("schema/flow-artifact.schema.json");
 
     fn schemas() -> (Value, Value) {
@@ -421,13 +421,11 @@ mod tests {
     #[test]
     fn validation_limits_match_the_schema_limits() {
         use super::validate::{
-            BEHAVIOR, BOUNDARIES, CLUSTER_COUNT, CLUSTER_DESCRIPTION, CLUSTER_LABEL,
-            NO_FLOW_EXPLANATION, PHASE_NOTE, REVISION_SUMMARY, STEP_ANNOTATION, STEP_COUNT,
-            STEP_TITLE,
+            BEHAVIOR, BOUNDARIES, CLUSTER_LABEL, CLUSTER_RULE, CLUSTER_TYPE, LEDGER_ITEM,
+            NO_FLOW_EXPLANATION, PHASE_NOTE, REVISION_SUMMARY, STEP_TITLE,
         };
         let (artifact_schema, agent_schema) = schemas();
         let text = ["minLength", "maxLength"];
-        let count = ["minItems", "maxItems"];
         // Each row: the rule, then its node in the agent schema and in the artifact schema.
         let texts = [
             (
@@ -450,10 +448,11 @@ mod tests {
                 "/$defs/AgentCluster/properties/label",
                 "/$defs/ClusterIntent/properties/label",
             ),
+            (CLUSTER_TYPE, "/$defs/TypeName", "/$defs/TypeName"),
             (
-                CLUSTER_DESCRIPTION,
-                "/$defs/AgentCluster/properties/description",
-                "/$defs/ClusterIntent/properties/description",
+                CLUSTER_RULE,
+                "/$defs/AgentCluster/properties/rules/items",
+                "/$defs/ClusterIntent/properties/rules/items",
             ),
             (
                 PHASE_NOTE,
@@ -465,11 +464,7 @@ mod tests {
                 "/$defs/AgentStep/properties/title",
                 "/$defs/FlowStep/properties/title",
             ),
-            (
-                STEP_ANNOTATION,
-                "/$defs/AgentStep/properties/annotation",
-                "/$defs/FlowStep/properties/annotation",
-            ),
+            (LEDGER_ITEM, "/$defs/LedgerItem", "/$defs/LedgerItem"),
         ];
         for (rule, agent, artifact) in texts {
             let expected = (rule.min, rule.max);
@@ -490,6 +485,16 @@ mod tests {
             (NO_FLOW_EXPLANATION.min, NO_FLOW_EXPLANATION.max),
             "{explanation}"
         );
+    }
+
+    #[test]
+    fn validation_counts_match_the_schema_counts() {
+        use super::validate::{
+            CLUSTER_COUNT, CLUSTER_RULES, CLUSTER_TYPES, LEDGER_ITEMS, STEP_COUNT,
+        };
+        let (artifact_schema, agent_schema) = schemas();
+        let count = ["minItems", "maxItems"];
+        // Each row: the range, then its node in the agent schema and in the artifact schema.
         for (range, agent, artifact) in [
             (
                 CLUSTER_COUNT,
@@ -500,6 +505,26 @@ mod tests {
                 STEP_COUNT,
                 "/$defs/AgentFlow/properties/steps",
                 "/$defs/IntentLayer/properties/steps",
+            ),
+            (
+                CLUSTER_TYPES,
+                "/$defs/AgentCluster/properties/input",
+                "/$defs/ClusterIntent/properties/input",
+            ),
+            (
+                CLUSTER_TYPES,
+                "/$defs/AgentCluster/properties/output",
+                "/$defs/ClusterIntent/properties/output",
+            ),
+            (
+                CLUSTER_RULES,
+                "/$defs/AgentCluster/properties/rules",
+                "/$defs/ClusterIntent/properties/rules",
+            ),
+            (
+                LEDGER_ITEMS,
+                "/$defs/StepLedger/properties/takes/oneOf/1",
+                "/$defs/StepLedger/properties/takes/oneOf/1",
             ),
         ] {
             let expected = (*range.start(), *range.end());

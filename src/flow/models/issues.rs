@@ -13,6 +13,8 @@ pub enum IssueCode {
     UnsupportedContract,
     InvalidKey,
     InvalidText,
+    InvalidLedger,
+    InvalidMark,
     ClusterLimit,
     StepLimit,
     PhaseNoteRequired,

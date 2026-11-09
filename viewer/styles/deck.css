@@ -1,6 +1,6 @@
 /* ==========================================================================
    Deck and code column. The explorer, the current file's box, the pinned cluster deck at a straight pitch,
-   the code column, and the bottom bar. One monospace family. Night (Tokyo Night) is the default palette; light and github swap it.
+   the code column, and the bottom bar. One monospace family. GitHub Dark is the default palette; night (Tokyo Night) and light swap it.
    # Sections
    fonts, tokens, base, canvas frame, file box, deck, lifted boxes, connectors, sidebar,
    shared controls, map tools and pickers, top band, code column, bottom bar,
@@ -12,14 +12,14 @@
 @font-face{font-family:"JetBrains Mono";font-style:normal;font-weight:700;font-display:block;src:url(../fonts/jetbrains-mono-latin-700.woff2) format("woff2")}
 
 /* ============ tokens ============ */
-/* The --tn-* palette holds the raw Tokyo Night colors. Every other token derives from it,
-   so a variant swaps the palette only. */
+/* The --tn-* palette holds the raw colors: GitHub Dark by default. Every other token derives from it,
+   so a variant swaps the palette. */
 :root{
-  --tn-bg:#1a1b26; --tn-pane:#16161e; --tn-raised:#1f2335;
-  --tn-sel:#283457; --tn-sel-2:#2e3c64; --tn-border:#29354f; --tn-border-2:#3b4261;
-  --tn-fg:#c0caf5; --tn-fg-dark:#a9b1d6; --tn-dim:#8d95bc; --tn-comment:#565f89; --tn-comment-text:#8088af; --tn-black:#0c0e14;
-  --tn-blue:#7aa2f7; --tn-cyan:#7dcfff; --tn-green:#9ece6a; --tn-yellow:#e0af68;
-  --tn-orange:#ff9e64; --tn-red:#f7768e; --tn-magenta:#bb9af7; --tn-purple:#9d7cd8;
+  --tn-bg:#0d1117; --tn-pane:#010409; --tn-raised:#161b22;
+  --tn-sel:#1c2d45; --tn-sel-2:#264166; --tn-border:#21262d; --tn-border-2:#30363d;
+  --tn-fg:#e6edf3; --tn-fg-dark:#c9d1d9; --tn-dim:#9198a1; --tn-comment:#6e7681; --tn-comment-text:#8b949e; --tn-black:#010409;
+  --tn-blue:#58a6ff; --tn-cyan:#39c5cf; --tn-green:#3fb950; --tn-yellow:#d29922;
+  --tn-orange:#f0883e; --tn-red:#f85149; --tn-magenta:#d2a8ff; --tn-purple:#a371f7;
 
   --bg:var(--tn-bg);
   --ink:var(--tn-fg); --ink-2:var(--tn-fg-dark); --dim:var(--tn-dim);
@@ -68,6 +68,7 @@
   --badge-shadow:0 2px 5px color-mix(in srgb,var(--tn-black) 55%,transparent);
   --key-lift-shadow:0 5px 6px color-mix(in srgb,var(--tn-black) 85%,transparent);
   --front-mix:44%;
+  --hover-lift:brightness(1.12);  /* a filled badge on hover; a light ground darkens it to keep the text contrast */
   --icon-stroke:1.5;
   /* geometry of the deck and its boxes; the deck camera sets --deck-z from DECK_Z in layout/deck-geometry.ts */
   --deck-t:30px; --box-h:28px; --focus-dz:30px; --shadow-dy:28px; --bh:32px;
@@ -76,32 +77,33 @@
   --blink:1060ms;
   /* layout: explorer at left, the code column at right, the canvas frame and the bottom bar between them */
   --sb:262px; --rc:clamp(440px,36vw,580px); --gap:12px; --lab:66px;
-  --bar-h:126px; --bar-bottom:34px; --top-band:52px;  /* layoutTop() measures it; 52px is its value for the 28px map tools */
+  --bar-h:150px; --bar-bottom:34px; --top-band:52px;  /* layoutTop() measures it; 52px is its value for the 28px map tools */
   --frame-l:calc(var(--sb) + 16px);
   --frame-r:calc(var(--rc) + var(--gap) + 16px);
 }
 :root{color-scheme:dark}
-:root[data-variant="github"]{--tn-bg:#0d1117; --tn-pane:#010409; --tn-raised:#161b22;
-  --tn-sel:#1c2d45; --tn-sel-2:#264166; --tn-border:#21262d; --tn-border-2:#30363d;
-  --tn-fg:#e6edf3; --tn-fg-dark:#c9d1d9; --tn-dim:#9198a1; --tn-comment:#6e7681; --tn-comment-text:#8b949e; --tn-black:#010409;
-  --tn-blue:#58a6ff; --tn-cyan:#39c5cf; --tn-green:#3fb950; --tn-yellow:#d29922;
-  --tn-orange:#f0883e; --tn-red:#f85149; --tn-magenta:#d2a8ff; --tn-purple:#a371f7}
-/* Light inverts the depth cues: the shadows and the box faces use soft gray, not the dark palette mix. */
+:root[data-variant="night"]{--tn-bg:#1a1b26; --tn-pane:#16161e; --tn-raised:#1f2335;
+  --tn-sel:#283457; --tn-sel-2:#2e3c64; --tn-border:#29354f; --tn-border-2:#3b4261;
+  --tn-fg:#c0caf5; --tn-fg-dark:#a9b1d6; --tn-dim:#8d95bc; --tn-comment:#565f89; --tn-comment-text:#8088af; --tn-black:#0c0e14;
+  --tn-blue:#7aa2f7; --tn-cyan:#7dcfff; --tn-green:#9ece6a; --tn-yellow:#e0af68;
+  --tn-orange:#ff9e64; --tn-red:#f7768e; --tn-magenta:#bb9af7; --tn-purple:#9d7cd8}
+/* Light inverts the depth cues: the shadows and the box faces use a thin ink mix, not the dark palette mix.
+   Its accents are GitHub Light's darker steps, so each holds 4.5:1 on its own tint and on the diff fills. */
 :root[data-variant="light"]{color-scheme:light;
   --tn-bg:#f6f8fa; --tn-pane:#ffffff; --tn-raised:#ffffff;
   --tn-sel:#ddf4ff; --tn-sel-2:#b6e3ff; --tn-border:#d1d9e0; --tn-border-2:#afb8c1;
   --tn-fg:#1f2328; --tn-fg-dark:#31363c; --tn-dim:#59636e; --tn-comment:#818b98; --tn-comment-text:#59636e; --tn-black:#6e7781;
-  --tn-blue:#0969da; --tn-cyan:#1b7c83; --tn-green:#1a7f37; --tn-yellow:#9a6700;
-  --tn-orange:#bc4c00; --tn-red:#cf222e; --tn-magenta:#8250df; --tn-purple:#a0469b;
-  --on-accent:#ffffff;
-  --card-face:linear-gradient(180deg,#ffffff 0%,#f3f5f7 100%);
-  --shade:color-mix(in srgb,#1f2328 16%,transparent);
-  --surface-recess:color-mix(in srgb,#1f2328 8%,transparent);
-  --face-light:inset 1px 1px 0 #ffffff,inset -1px -1px 0 color-mix(in srgb,#1f2328 12%,transparent);
-  --face-light-hot:inset 1px 1px 0 #ffffff,inset -1px -1px 0 color-mix(in srgb,#1f2328 20%,transparent);
-  --slot-recess:inset 1px 2px 4px color-mix(in srgb,#1f2328 14%,transparent);
-  --badge-shadow:0 2px 5px color-mix(in srgb,#1f2328 18%,transparent);
-  --key-lift-shadow:0 5px 6px color-mix(in srgb,#1f2328 22%,transparent)}
+  --tn-blue:#0550ae; --tn-cyan:#136168; --tn-green:#116329; --tn-yellow:#7d4e00;
+  --tn-orange:#953800; --tn-red:#a40e26; --tn-magenta:#6639ba; --tn-purple:#8a3d86;
+  --hover-lift:brightness(.92);
+  --card-face:linear-gradient(180deg,var(--tn-pane) 0%,color-mix(in srgb,var(--tn-pane) 95%,var(--tn-fg)) 100%);
+  --shade:color-mix(in srgb,var(--tn-fg) 16%,transparent);
+  --surface-recess:color-mix(in srgb,var(--tn-fg) 8%,transparent);
+  --face-light:inset 1px 1px 0 var(--tn-pane),inset -1px -1px 0 color-mix(in srgb,var(--tn-fg) 12%,transparent);
+  --face-light-hot:inset 1px 1px 0 var(--tn-pane),inset -1px -1px 0 color-mix(in srgb,var(--tn-fg) 20%,transparent);
+  --slot-recess:inset 1px 2px 4px color-mix(in srgb,var(--tn-fg) 14%,transparent);
+  --badge-shadow:0 2px 5px color-mix(in srgb,var(--tn-fg) 18%,transparent);
+  --key-lift-shadow:0 5px 6px color-mix(in srgb,var(--tn-fg) 22%,transparent)}
 /* a small window gives the map 40 px of the code column, so the widest decks start at 75% */
 @media (max-width:1300px){:root{--sb:228px; --rc:max(400px,calc(36vw - 40px))}}
 
@@ -243,7 +245,7 @@ code{font:inherit;color:var(--keyword)}
   font:var(--fw-bold) var(--fs-code) var(--font-code);color:var(--on-accent);text-shadow:none}
 /* A badge that opens a list is a button. A plain badge has no pointer and no hover. */
 button.sb-title{cursor:pointer;transition:filter var(--dur-hover)}
-button.sb-title:hover{filter:brightness(1.12)}
+button.sb-title:hover{filter:var(--hover-lift)}
 .sb-title .ic{width:12px;height:12px}
 .sb-tree{position:relative;overflow:hidden auto;pointer-events:auto;max-height:calc(100vh - 60px);padding:2px 4px 4px 0;scrollbar-width:thin;scrollbar-color:var(--line-soft) transparent}
 .sl{position:relative;display:flex;align-items:center;width:100%;height:18px;padding:0 4px 0 12px;border:0;border-radius:var(--r-xs);background:transparent;
@@ -299,7 +301,7 @@ body.flow .sl.inc{color:var(--ink)}
   font:var(--fw-bold) var(--fs-code) var(--font-code);color:var(--on-accent);white-space:nowrap;overflow:hidden}
 .pbadge span{min-width:0;overflow:hidden;text-overflow:ellipsis}
 button.pbadge{cursor:pointer;transition:filter var(--dur-hover)}
-button.pbadge:hover{filter:brightness(1.12)}
+button.pbadge:hover{filter:var(--hover-lift)}
 .pbadge .ic{width:12px;height:12px}
 .pane{position:relative;border:1px solid var(--line-strong);border-radius:var(--r-l);background:var(--surface-panel)}
 
@@ -394,6 +396,19 @@ kbd{display:inline-flex;align-items:center;gap:1px;height:16px;padding:0 4px;bor
 .cd-step{flex:0 1 auto;min-height:0;overflow:auto;padding:8px 16px 12px;scrollbar-width:thin;scrollbar-color:var(--line-soft) transparent}
 .cd-step.swap,.code.swap{animation:swap var(--dur-state) var(--ease-out)}
 .cd-ann{margin:0;font:var(--fs-ui)/1.6 var(--font-code);color:var(--ink)}
+/* Ledger rows: one label column (--lab) runs through the step rows, the facts, and the bar.
+   Slots are separate groups; the lines inside one slot stay tight. */
+.lg{margin:0;display:grid;grid-template-columns:var(--lab) minmax(0,1fr);row-gap:8px;font:var(--fs-ui)/20px var(--font-code);color:var(--ink)}
+.lg dt,.cd-facts dt{color:var(--dim);font-size:13px;font-variant-caps:all-small-caps;letter-spacing:.06em;overflow-wrap:anywhere}
+.lg dd{margin:0;min-width:0;overflow-wrap:anywhere}
+.lg ul{margin:0;padding-left:16px;list-style:disc}
+.lg li::marker{color:var(--dim)}
+/* Identifier chips: the border and the kind mark carry the kind color; the name stays ink. A chip never breaks. */
+.id{padding:1px 5px 1px 4px;border:1px solid color-mix(in srgb,var(--k) 48%,transparent);border-radius:var(--r-s);background:color-mix(in srgb,var(--k) 6%,transparent);
+  color:var(--ink);font-size:var(--fs-ui-s);font-variant-ligatures:none;white-space:nowrap}
+.id i{margin-right:4px;font-style:normal;font-weight:var(--fw-bold);font-size:10px;color:var(--k)}
+.id i svg{display:inline-block;vertical-align:-1px;fill:none;stroke:currentColor;stroke-width:1.2}
+.k-fn{--k:var(--tn-blue)} .k-type{--k:var(--tn-cyan)} .k-value{--k:var(--tn-orange)} .k-file{--k:var(--tn-green)} .k-field{--k:var(--tn-comment)}
 /* the fact rows fold under one summary line, closed at load (code.ts) */
 .cd-more{margin:8px 0 0}
 .cd-more summary{display:flex;align-items:center;gap:5px;width:fit-content;max-width:100%;padding:2px 6px 2px 2px;margin-left:-2px;border-radius:var(--r-s);
@@ -404,7 +419,7 @@ kbd{display:inline-flex;align-items:center;gap:1px;height:16px;padding:0 4px;bor
 .cd-more[open] summary .ic{transform:none}
 .cd-keys{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .cd-facts{margin:4px 0 0;display:grid;grid-template-columns:var(--lab) minmax(0,1fr);gap:2px 0;font:var(--fs-ui-s)/1.6 var(--font-code);font-variant-ligatures:none}
-.cd-facts dt{color:var(--dim)}
+.cd-facts dt{font-size:12px}
 .cd-facts dd{margin:0;min-width:0;color:var(--ink-2);overflow-wrap:anywhere}
 .ref{color:var(--ink-2)}
 .ref i{font-style:normal;color:var(--dim)}
@@ -461,7 +476,7 @@ button.ref:hover{text-decoration:underline;text-underline-offset:3px}
 
 /* ============ bottom bar: nav, the cluster explainer, and the strip (fixed size) ============ */
 .controls{position:fixed;z-index:7;left:var(--frame-l);right:var(--frame-r);bottom:var(--bar-bottom);height:var(--bar-h);padding:9px 14px 8px;
-  border:1px solid var(--line-strong);border-radius:var(--r-l);background:var(--surface-panel);display:grid;grid-template-rows:28px 54px 12px;row-gap:6px}
+  border:1px solid var(--line-strong);border-radius:var(--r-l);background:var(--surface-panel);display:grid;grid-template-rows:28px 80px 12px;row-gap:6px}
 .c1{display:flex;align-items:center;gap:5px;min-width:0}
 .counter{flex:0 0 auto;margin:0 6px 0 8px;font:var(--fs-ui) var(--font-code);color:var(--ink-2);white-space:nowrap}
 .cexpl{flex:1 1 auto;min-width:0;display:flex;align-items:center;gap:10px}
@@ -469,8 +484,20 @@ button.ref:hover{text-decoration:underline;text-underline-offset:3px}
 .chip{flex:0 1 auto;min-width:0;display:flex;align-items:center;white-space:nowrap;font:var(--fw-bold) var(--fs-ui-s) var(--font-code)}
 .chip span{min-width:0;max-width:100%;height:19px;padding:0 7px;display:block;overflow:hidden;text-overflow:ellipsis;line-height:19px;border-radius:var(--r-s);background:var(--c);color:var(--on-accent)}
 .chip.none span{padding:0 6px;background:transparent;border:1px dashed var(--line-strong);line-height:17px;color:var(--dim);font-weight:400}
-.cmeta{flex:0 0 auto;font:var(--fs-ui-s) var(--font-code);color:var(--dim);white-space:nowrap}
-.c-desc{margin:0;min-width:0;font:var(--fs-ui)/18px var(--font-code);color:var(--ink-2);display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+/* the meta line gives way before the cluster name */
+.cmeta{flex:0 1000 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;font:var(--fs-ui-s) var(--font-code);color:var(--dim);white-space:nowrap}
+/* The cluster ledger scrolls inside its fixed row when its rules are long. */
+.c-desc{margin:0;min-width:0;overflow:auto;font:var(--fs-ui)/18px var(--font-code);color:var(--ink-2);scrollbar-width:thin;scrollbar-color:var(--line-soft) transparent}
+.c-desc .lg{grid-template-columns:fit-content(112px) minmax(0,1fr);column-gap:14px;row-gap:2px;font-size:var(--fs-ui-s);line-height:18px;color:var(--ink-2)}
+.c-desc .lg dt{font-size:12px}
+.c-desc .arr{color:var(--dim)}
+/* The data path: every model of the flow in data order, on one full-width line that wraps only when it must. The models
+   that enter and leave the cluster wear its color, and a model that leaves also takes a fill. The rest stay quiet. */
+.c-desc .path{margin:0 0 4px;font-size:var(--fs-ui-s);line-height:18px}
+.c-desc .path .pw{display:flex;flex-wrap:wrap;align-items:center;gap:3px}
+.c-desc .path .pn{color:var(--dim);white-space:nowrap}
+.c-desc .path .pn.in,.c-desc .path .pn.out{padding:0 3px;border:1px solid var(--c);border-radius:var(--r-s);color:var(--ink);line-height:16px}
+.c-desc .path .pn.out{background:color-mix(in srgb,var(--c) 18%,transparent)}
 .ticks{display:flex;gap:2px;height:12px;align-items:center}
 .tick{flex:1 1 0;min-width:0;height:12px;padding:0;border:0;background:transparent;cursor:pointer;position:relative}
 .tick::before{content:"";position:absolute;left:0;right:0;top:2px;height:8px;border-radius:1px;background:color-mix(in srgb,var(--c) 26%,transparent);
