@@ -16,7 +16,7 @@ Freeze what one pull request changed in one behavior: a Before flow on the base 
 
 ## Setup
 
-- This skill needs tekdek 0.2.0 or later. Run `tekdek version`. If the command is not found, follow [install.md](../flow/install.md): run the plugin launcher by its full path, or give the user the install command and stop. If the version is older, stop and tell the user to run the installer again to upgrade.
+- This skill needs tekdek 0.3.0 or later. Run `tekdek version`. If the command is not found, follow [install.md](../flow/install.md): run the plugin launcher by its full path, or give the user the install command and stop. If the version is older, stop and tell the user to run the installer again to upgrade.
 - Follow [the flow skill](../flow/SKILL.md) for the store, the language servers, the flow format, and the flow rules. This skill adds only the diff steps.
 - Commit the head first: import reads the head from `HEAD`, and it rejects a function whose file has uncommitted changes.
 
