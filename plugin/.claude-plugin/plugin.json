@@ -1,6 +1,6 @@
 {
   "name": "tekdek",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Write frozen tekdek flows with clusters, and open them in the Lift Deck.",
   "author": {
     "name": "dychen1"

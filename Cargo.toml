@@ -1,6 +1,6 @@
 [package]
 name = "tekdek"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 description = "Index a codebase, freeze agent-authored flows with clusters, and walk them in the Lift Deck."
 license = "Apache-2.0"
